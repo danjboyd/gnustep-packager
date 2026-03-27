@@ -1,0 +1,14 @@
+dist/
+out/
+tmp/
+logs/
+.DS_Store
+Thumbs.db
+tools/wix/
+*.wixobj
+*.wixpdb
+*.msi
+*.zip
+*.AppImage
+*.log
+*.pfx

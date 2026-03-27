@@ -1,0 +1,38 @@
+{
+  "backends": {
+    "msi": {
+      "enabled": false,
+      "installScope": "perMachine",
+      "productName": "",
+      "shortcutName": "",
+      "installDirectoryName": "",
+      "launcherFileName": "",
+      "artifactNamePattern": "{name}-{version}-win64.msi",
+      "portableArtifactNamePattern": "{name}-{version}-win64-portable.zip",
+      "fallbackRuntimeRoot": "C:\\clang64",
+      "runtimeSearchRoots": [
+        "C:\\msys64\\clang64\\bin",
+        "C:\\msys64\\clang64\\lib",
+        "C:\\msys64\\clang64\\lib\\GNUstep\\Libraries\\gnustep-base",
+        "C:\\msys64\\clang64\\lib\\GNUstep\\Libraries\\gnustep-gui",
+        "C:\\clang64\\bin",
+        "C:\\clang64\\lib",
+        "C:\\clang64\\lib\\GNUstep\\Libraries\\gnustep-base",
+        "C:\\clang64\\lib\\GNUstep\\Libraries\\gnustep-gui"
+      ],
+      "wix": {
+        "version": "3.11.2",
+        "downloadUrl": "https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix311-binaries.zip",
+        "toolRoot": "tools/wix"
+      },
+      "signing": {
+        "enabled": false,
+        "toolPath": "",
+        "timestampUrl": "",
+        "certificateSha1": "",
+        "description": "",
+        "additionalArguments": []
+      }
+    }
+  }
+}

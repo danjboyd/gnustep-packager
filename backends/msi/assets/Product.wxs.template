@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="__PRODUCT_NAME__"
+           Manufacturer="__MANUFACTURER__"
+           Version="__PRODUCT_VERSION__"
+           Language="1033"
+           UpgradeCode="__UPGRADE_CODE__">
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="__INSTALL_SCOPE__"
+             InstallPrivileges="__INSTALL_PRIVILEGES__"
+             Platform="x64" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of __PRODUCT_NAME__ is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="__ROOT_DIRECTORY_ID__">
+        <Directory Id="INSTALLDIR" Name="__INSTALL_DIRECTORY_NAME__" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="__PROGRAM_MENU_FOLDER_NAME__" />
+      </Directory>
+    </Directory>
+
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="AppShortcut" Guid="__SHORTCUT_COMPONENT_GUID__">
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="__SHORTCUT_NAME__"
+                  WorkingDirectory="INSTALLDIR"
+                  Target="[INSTALLDIR]__LAUNCHER_FILE_NAME__" />
+        <RemoveFolder Id="ApplicationProgramsFolderRemove" On="uninstall" />
+        <RegistryValue Root="__REGISTRY_ROOT__"
+                       Key="Software\__REGISTRY_MANUFACTURER__\__REGISTRY_PRODUCT_NAME__"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="MainFeature" Title="__PRODUCT_NAME__" Level="1">
+      <ComponentGroupRef Id="InstalledFiles" />
+      <ComponentRef Id="AppShortcut" />
+    </Feature>
+  </Product>
+</Wix>

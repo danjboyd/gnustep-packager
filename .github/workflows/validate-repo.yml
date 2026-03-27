@@ -1,0 +1,38 @@
+name: validate-repo
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  repo-validation:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Example Manifest
+        run: |
+          ./scripts/gnustep-packager.ps1 -Command manifest-check -Manifest examples/sample-gui/package.manifest.json
+
+      - name: Resolve Example Manifest
+        run: |
+          ./scripts/gnustep-packager.ps1 -Command resolve-manifest -Manifest examples/sample-gui/package.manifest.json
+
+      - name: Describe Example Manifest
+        run: |
+          ./scripts/gnustep-packager.ps1 -Command describe -Manifest examples/sample-gui/package.manifest.json
+
+      - name: Run Pester Regression Tests
+        run: |
+          ./scripts/test-repo.ps1 -CI
+
+      - name: Run Shared Packaging Pipeline
+        run: |
+          ./scripts/run-packaging-pipeline.ps1 -Manifest examples/sample-gui/package.manifest.json -Backend msi -RunSmoke

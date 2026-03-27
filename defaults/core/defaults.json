@@ -1,0 +1,43 @@
+{
+  "pipeline": {
+    "shell": {
+      "kind": "pwsh",
+      "bootstrapCommands": [],
+      "environment": {}
+    }
+  },
+  "payload": {
+    "metadataRoot": "metadata",
+    "resourceRoots": [],
+    "runtimeSeedPaths": []
+  },
+  "launch": {
+    "arguments": [],
+    "pathPrepend": [],
+    "resourceRoots": [],
+    "env": {}
+  },
+  "outputs": {
+    "root": "dist",
+    "packageRoot": "dist/packages",
+    "logRoot": "dist/logs",
+    "tempRoot": "dist/tmp",
+    "validationRoot": "dist/validation"
+  },
+  "validation": {
+    "smoke": {
+      "enabled": true,
+      "kind": "staged-layout",
+      "requiredPaths": [],
+      "timeoutSeconds": 30
+    },
+    "logs": {
+      "retainOnSuccess": true
+    }
+  },
+  "integrations": {
+    "categories": [],
+    "fileAssociations": []
+  }
+}
+

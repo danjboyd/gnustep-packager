@@ -1,0 +1,11 @@
+{
+  "backends": {
+    "appimage": {
+      "enabled": false,
+      "appDirName": "{name}.AppDir",
+      "desktopEntryName": "{name}.desktop",
+      "artifactNamePattern": "{name}-{version}-x86_64.AppImage"
+    }
+  }
+}
+

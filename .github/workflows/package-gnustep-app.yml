@@ -1,0 +1,194 @@
+name: package-gnustep-app
+
+on:
+  workflow_call:
+    inputs:
+      manifest-path:
+        required: true
+        type: string
+      backend:
+        required: false
+        type: string
+        default: msi
+      package-version:
+        required: false
+        type: string
+        default: ""
+      run-validation:
+        required: false
+        type: boolean
+        default: true
+      run-smoke:
+        required: false
+        type: boolean
+        default: false
+      upload-artifacts:
+        required: false
+        type: boolean
+        default: true
+      artifact-name:
+        required: false
+        type: string
+        default: gnustep-package
+      artifact-retention-days:
+        required: false
+        type: number
+        default: 7
+      sign-artifacts:
+        required: false
+        type: boolean
+        default: false
+      sign-timestamp-url:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      sign_pfx_base64:
+        required: false
+      sign_pfx_password:
+        required: false
+      sign_cert_sha1:
+        required: false
+    outputs:
+      resolved-version:
+        description: Resolved package version after defaults and optional override.
+        value: ${{ jobs.package.outputs.resolved-version }}
+      package-root:
+        description: Resolved package output root.
+        value: ${{ jobs.package.outputs.package-root }}
+      log-root:
+        description: Resolved log output root.
+        value: ${{ jobs.package.outputs.log-root }}
+      validation-root:
+        description: Resolved validation output root.
+        value: ${{ jobs.package.outputs.validation-root }}
+
+jobs:
+  package:
+    runs-on: windows-latest
+    outputs:
+      resolved-version: ${{ steps.manifest.outputs.resolved_version }}
+      package-root: ${{ steps.manifest.outputs.package_root }}
+      log-root: ${{ steps.manifest.outputs.log_root }}
+      validation-root: ${{ steps.manifest.outputs.validation_root }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout Consumer Repo
+        uses: actions/checkout@v4
+
+      - name: Resolve Packager Checkout
+        id: packager
+        run: |
+          $workflowRef = '${{ github.workflow_ref }}'
+          if ($workflowRef -notmatch '^([^/]+/[^/]+)/\.github/workflows/[^@]+@(.+)$') {
+            throw "Unable to parse github.workflow_ref: $workflowRef"
+          }
+          "repository=$($Matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "ref=$($Matches[2])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Checkout Packager Repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.packager.outputs.repository }}
+          ref: ${{ steps.packager.outputs.ref }}
+          path: .gnustep-packager-toolkit
+
+      - name: Resolve Manifest Outputs
+        id: manifest
+        run: |
+          $toolRoot = Join-Path $env:GITHUB_WORKSPACE ".gnustep-packager-toolkit"
+          $manifestPath = [System.IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '${{ inputs.manifest-path }}'))
+          $args = @(
+            '-Command', 'resolve-manifest',
+            '-Manifest', $manifestPath
+          )
+          if (-not [string]::IsNullOrWhiteSpace('${{ inputs.package-version }}')) {
+            $args += @('-PackageVersion', '${{ inputs.package-version }}')
+          }
+          $manifestJson = & (Join-Path $toolRoot 'scripts\gnustep-packager.ps1') @args
+          $manifest = $manifestJson | ConvertFrom-Json -AsHashtable
+          $manifestRoot = Split-Path -Parent $manifestPath
+
+          function Resolve-OutputPath([string]$basePath, [string]$value) {
+            if ([System.IO.Path]::IsPathRooted($value)) {
+              return [System.IO.Path]::GetFullPath($value)
+            }
+            return [System.IO.Path]::GetFullPath((Join-Path $basePath $value))
+          }
+
+          "resolved_version=$($manifest.package.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "package_root=$(Resolve-OutputPath $manifestRoot $manifest.outputs.packageRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "log_root=$(Resolve-OutputPath $manifestRoot $manifest.outputs.logRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "validation_root=$(Resolve-OutputPath $manifestRoot $manifest.outputs.validationRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Configure Signing Environment
+        if: ${{ inputs.sign-artifacts }}
+        run: |
+          "GP_SIGN_ENABLED=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if (-not [string]::IsNullOrWhiteSpace('${{ inputs.sign-timestamp-url }}')) {
+            "GP_SIGN_TIMESTAMP_URL=${{ inputs.sign-timestamp-url }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          if (-not [string]::IsNullOrWhiteSpace('${{ secrets.sign_cert_sha1 }}')) {
+            "GP_SIGN_CERT_SHA1=${{ secrets.sign_cert_sha1 }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          if (-not [string]::IsNullOrWhiteSpace('${{ secrets.sign_pfx_password }}')) {
+            "GP_SIGN_PFX_PASSWORD=${{ secrets.sign_pfx_password }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          if (-not [string]::IsNullOrWhiteSpace('${{ secrets.sign_pfx_base64 }}')) {
+            $tempRoot = Join-Path $env:RUNNER_TEMP "gnustep-packager-signing"
+            New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+            $pfxPath = Join-Path $tempRoot "codesign.pfx"
+            $pfxBytes = [System.Convert]::FromBase64String(@'
+${{ secrets.sign_pfx_base64 }}
+'@)
+            [System.IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+            "GP_SIGN_PFX_PATH=$pfxPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+
+      - name: Run Packaging Pipeline
+        run: |
+          $toolRoot = Join-Path $env:GITHUB_WORKSPACE ".gnustep-packager-toolkit"
+          $manifestPath = [System.IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '${{ inputs.manifest-path }}'))
+          $args = @(
+            '-Manifest', $manifestPath,
+            '-Backend', '${{ inputs.backend }}'
+          )
+          if (-not [string]::IsNullOrWhiteSpace('${{ inputs.package-version }}')) {
+            $args += @('-PackageVersion', '${{ inputs.package-version }}')
+          }
+          if ('${{ inputs.run-validation }}' -ne 'true') {
+            $args += '-SkipBackendValidation'
+          }
+          if ('${{ inputs.run-smoke }}' -eq 'true') {
+            $args += '-RunSmoke'
+          }
+          & (Join-Path $toolRoot 'scripts\run-packaging-pipeline.ps1') @args
+
+      - name: Upload Package Artifacts
+        if: ${{ inputs.upload-artifacts }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}-packages
+          path: ${{ steps.manifest.outputs.package_root }}
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: error
+
+      - name: Upload Logs
+        if: ${{ inputs.upload-artifacts }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}-logs
+          path: ${{ steps.manifest.outputs.log_root }}
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: warn
+
+      - name: Upload Validation Output
+        if: ${{ inputs.upload-artifacts }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}-validation
+          path: ${{ steps.manifest.outputs.validation_root }}
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: warn

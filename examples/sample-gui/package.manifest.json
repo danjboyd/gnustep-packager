@@ -1,0 +1,108 @@
+{
+  "$schema": "../../schemas/gnustep-packager.schema.json",
+  "schemaVersion": 1,
+  "package": {
+    "id": "com.example.SampleGNUstepApp",
+    "name": "SampleGNUstepApp",
+    "displayName": "Sample GNUstep App",
+    "version": "0.1.0",
+    "manufacturer": "Example Org",
+    "summary": "Reference manifest for a packaged GNUstep desktop application.",
+    "license": "MIT",
+    "homepage": "https://example.invalid/sample-gnustep-app"
+  },
+  "pipeline": {
+    "workingDirectory": ".",
+    "shell": {
+      "kind": "pwsh",
+      "bootstrapCommands": [],
+      "environment": {
+        "GP_FIXTURE_MODE": "1"
+      }
+    },
+    "build": {
+      "command": "./scripts/build-fixture.ps1 -OutRoot out/build"
+    },
+    "stage": {
+      "command": "./scripts/stage-fixture.ps1 -StageRoot dist/stage",
+      "outputRoot": "dist/stage"
+    }
+  },
+  "payload": {
+    "layoutVersion": 1,
+    "stageRoot": "dist/stage",
+    "appRoot": "app",
+    "runtimeRoot": "runtime",
+    "resourceRoots": [
+      "app/SampleGNUstepApp.app/Resources",
+      "metadata/icons"
+    ],
+    "runtimeSeedPaths": [
+      "runtime/bin/defaults.exe"
+    ]
+  },
+  "launch": {
+    "entryRelativePath": "app/SampleGNUstepApp.app/SampleGNUstepApp.exe",
+    "workingDirectory": ".",
+    "arguments": [],
+    "pathPrepend": [
+      "runtime/bin"
+    ],
+    "resourceRoots": [
+      "metadata/icons"
+    ],
+    "env": {
+      "GNUSTEP_PATHPREFIX_LIST": "{@runtimeRoot}",
+      "GSTheme": "WinUXTheme"
+    }
+  },
+  "outputs": {
+    "root": "dist",
+    "packageRoot": "dist/packages",
+    "logRoot": "dist/logs",
+    "tempRoot": "dist/tmp",
+    "validationRoot": "dist/validation"
+  },
+  "validation": {
+    "smoke": {
+      "enabled": true,
+      "kind": "staged-layout",
+      "requiredPaths": [
+        "metadata/icons/sample-icon.txt",
+        "runtime/config/theme.conf"
+      ],
+      "timeoutSeconds": 30
+    },
+    "logs": {
+      "retainOnSuccess": true
+    }
+  },
+  "integrations": {
+    "shortcutName": "Sample GNUstep App",
+    "categories": [
+      "Utility"
+    ],
+    "fileAssociations": [
+      {
+        "kind": "extension",
+        "value": ".sample",
+        "description": "Sample GNUstep document"
+      }
+    ]
+  },
+  "backends": {
+    "msi": {
+      "enabled": true,
+      "upgradeCode": "11111111-1111-1111-1111-111111111111",
+      "installScope": "perUser",
+      "productName": "Sample GNUstep App",
+      "shortcutName": "Sample GNUstep App",
+      "installDirectoryName": "SampleGNUstepApp",
+      "launcherFileName": "SampleGNUstepApp.exe"
+    },
+    "appimage": {
+      "enabled": false,
+      "desktopEntryName": "sample-gnustep-app.desktop"
+    }
+  }
+}

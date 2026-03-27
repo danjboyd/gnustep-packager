@@ -1,0 +1,22 @@
+name: package-windows-msi
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
+    with:
+      manifest-path: packaging/package.manifest.json
+      backend: msi
+      package-version: ${{ github.ref_name }}
+      run-validation: true
+      run-smoke: true
+      artifact-name: my-gnustep-app
+      sign-artifacts: true
+    secrets:
+      sign_pfx_base64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
+      sign_pfx_password: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}

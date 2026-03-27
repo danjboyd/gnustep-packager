@@ -1,0 +1,61 @@
+# MSI Runtime Policy
+
+## Purpose
+This document defines how the Windows MSI backend treats GNUstep runtime
+content staged from an MSYS2 `CLANG64` toolchain.
+
+## Install Layout
+The backend installs a private runtime under the app root:
+
+```text
+<install-root>\
+  <launcher>.exe
+  <launcher>.launcher.ini
+  app\
+  runtime\
+  metadata\
+```
+
+The runtime stays app-private by default. The backend does not install into a
+shared machine-wide `C:\clang64` tree.
+
+## Stage Ownership
+The consumer repo's `stage` command remains responsible for staging:
+
+- the GNUstep app payload under `app/`
+- primary runtime content under `runtime/`
+- shared metadata under `metadata/`
+
+The MSI backend is allowed to augment runtime DLL closure, but it should not
+discover the app from raw build output.
+
+## Inclusion Rules
+The backend copies these stage roots into the install tree when present:
+
+- `payload.appRoot`
+- `payload.runtimeRoot`
+- `payload.metadataRoot`
+
+It excludes packaging-only directories such as stage logs unless the manifest
+explicitly points to them.
+
+## Dependency Closure
+The backend performs best-effort DLL closure for:
+
+- the launch entry executable
+- files listed in `payload.runtimeSeedPaths`
+- already-staged runtime DLLs and EXEs
+
+Missing non-system DLLs are searched under `backends.msi.runtimeSearchRoots`
+and copied into `runtime/bin` when found.
+
+## Support Assets
+GNUstep support assets such as themes, bundles, and fontconfig data should
+already be staged under `runtime/`. The backend preserves them as staged rather
+than reconstructing them through WiX-specific rules.
+
+## Fallback Runtime
+The launcher prefers the bundled `runtime\` tree. A fallback runtime root may
+be used only when configured through `backends.msi.fallbackRuntimeRoot`.
+
+The fallback is a compatibility escape hatch, not the default runtime model.
