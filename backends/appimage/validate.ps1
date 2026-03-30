@@ -4,6 +4,7 @@ param(
   [string]$Manifest,
   [string]$PackageVersion,
   [switch]$DryRun,
+  [switch]$RunSmoke,
   [string]$LogPath
 )
 
@@ -15,31 +16,32 @@ $ErrorActionPreference = "Stop"
 $context = Get-GpManifestContext -Path $Manifest -PackageVersion $PackageVersion
 $backend = "appimage"
 $artifactPlan = Get-GpArtifactPlan -Context $context -Backend $backend
-$launch = Get-GpLaunchContract -Context $context
+$validationPlan = Get-GpValidationPlan -Context $context
 $backendSupport = Get-GpBackendSupport -Backend $backend
 
-$message = "AppImage backend dispatch reached. Artifact target: $($artifactPlan.ArtifactPath)"
-Write-Host $message
-if ($LogPath) {
-  Set-Content -Path $LogPath -Value $message
+if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+  Ensure-GpDirectory -Path (Split-Path -Parent $LogPath) | Out-Null
+  Set-Content -Path $LogPath -Value ("[{0}] AppImage validation stub" -f (Get-Date).ToString("o"))
 }
 
 if ($DryRun) {
   [pscustomobject]@{
     backend = $backend
+    mode = "dry-run"
     manifest = $context.ManifestPath
     artifactPath = $artifactPlan.ArtifactPath
-    entryPath = $launch.EntryPath
     hostPlatform = $backendSupport.HostPlatform
     requiredPlatform = $backendSupport.RequiredPlatform
     hostSupported = [bool]$backendSupport.Supported
-    mode = "dry-run"
+    runSmoke = [bool]$RunSmoke
+    timeoutSeconds = $validationPlan.TimeoutSeconds
+    logPath = $LogPath
   } | ConvertTo-Json -Depth 10
   exit 0
 }
 
 if (-not $backendSupport.Supported) {
-  throw "AppImage packaging requires host platform '$($backendSupport.RequiredPlatform)'. Current host: '$($backendSupport.HostPlatform)'."
+  throw "AppImage validation requires host platform '$($backendSupport.RequiredPlatform)'. Current host: '$($backendSupport.HostPlatform)'."
 }
 
-throw "AppImage backend implementation is not complete yet. Phase 8 remains."
+throw "AppImage validation is not complete yet. Phase 8 remains."

@@ -160,7 +160,10 @@ Status: implemented in the current repo baseline.
 
 ## Phase 5: CI and Release Workflow
 Goal: make the backend usable in app repos and CI systems.
-Status: implemented in the current repo baseline.
+Status: implemented for the current Windows MSI scope.
+
+The reusable workflow and repo validation jobs currently target Windows runners.
+Linux/AppImage CI extension is tracked under `Phase 8E`.
 
 - `Phase 5A`: Local and CI parity
   Deliverables:
@@ -194,7 +197,12 @@ Status: implemented in the current repo baseline.
 
 ## Phase 6: Reference Consumer and Test Coverage
 Goal: keep the repo grounded in a real consumer shape and prevent regression.
-Status: implemented in the current repo baseline.
+Status: implemented for the current Windows MSI scope.
+
+`Phase 6A` through `Phase 6D` are complete for the Windows sample fixture and
+Windows-oriented regression coverage. `Phase 6E` and `Phase 6F` extend this
+phase so Linux/AppImage work can proceed on Linux hosts without regressing the
+shared model.
 
 - `Phase 6A`: Reference fixture app
   Deliverables:
@@ -225,13 +233,39 @@ Status: implemented in the current repo baseline.
   Exit criteria:
   - support boundaries are documented and discoverable
 
+- `Phase 6E`: Linux host readiness for shared tooling
+  Deliverables:
+  - strict manifest validation that enforces the documented schema contract
+  - backend dry-run behavior that does not assume a Windows host
+  - explicit host guards and clearer backend-not-available failures
+  - an AppImage backend validation stub for dry-run and early CLI integration
+  Exit criteria:
+  - shared CLI commands and backend dry-runs are predictable on Linux hosts
+  - Windows-only backend behavior fails clearly instead of leaking through
+    shared code paths
+
+- `Phase 6F`: Linux reference fixture and regression path
+  Deliverables:
+  - a Linux reference fixture app or manifest fixture
+  - repo tests that can exercise shared logic and Linux/AppImage backend paths
+    on Linux hosts
+  - documented local prerequisites for Linux repo validation
+  Exit criteria:
+  - a Linux host can run a stable reference build, stage, package, and validate
+    path for AppImage work
+  - Linux regressions are caught before distro-portability testing starts
+
 ## Phase 7: Linux AppImage Preparation
 Goal: prepare the architecture so AppImage is an extension, not a rewrite.
+Status: AppImage extension path is documented, but `Phase 7A` through
+`Phase 7D` remain.
 
 - `Phase 7A`: Linux backend requirements study
   Deliverables:
   - list of Linux-specific packaging requirements for the targeted GNUstep setup
   - decision on supported Linux build environment for portability
+  - decision on AppImage build tooling, including `appimagetool` bootstrap and
+    the role of optional helpers such as `linuxdeploy`
   Exit criteria:
   - Linux backend assumptions are documented before implementation starts
 
@@ -239,6 +273,8 @@ Goal: prepare the architecture so AppImage is an extension, not a rewrite.
   Deliverables:
   - mapping from shared package metadata to desktop file, icon, MIME, and other
     AppImage-relevant outputs
+  - mapping for root AppDir entries such as `.desktop`, icon symlink, and
+    `.DirIcon`
   Exit criteria:
   - no AppImage metadata requirement is left to ad hoc per-app scripting
 
@@ -246,21 +282,26 @@ Goal: prepare the architecture so AppImage is an extension, not a rewrite.
   Deliverables:
   - transform rules from staged payload to AppDir layout
   - `AppRun` generation plan
+  - placement rules for staged `app/`, `runtime/`, and `metadata/` content
+    under the AppDir
   Exit criteria:
   - AppImage backend shape is concrete and compatible with the shared model
 
 - `Phase 7D`: Linux runtime policy
   Deliverables:
-  - strategy for bundled GNUstep runtime, resource roots, and launch environment
+  - strategy for bundled GNUstep runtime, resource roots, launch environment,
+    and ELF dependency closure
   Exit criteria:
   - Linux bundling rules are explicit rather than copied from Windows
 
 ## Phase 8: Linux AppImage Backend Implementation
 Goal: ship the second backend using the same shared model.
+Status: not started.
 
 - `Phase 8A`: Shared-to-AppDir transform
   Deliverables:
-  - backend implementation that emits AppDir from the staged payload
+  - backend implementation that emits AppDir from the staged payload without
+    mutating the original stage tree
   Exit criteria:
   - AppDir generation works from the shared manifest and stage contract
 
@@ -268,6 +309,7 @@ Goal: ship the second backend using the same shared model.
   Deliverables:
   - generated `AppRun`
   - launch environment setup for the packaged GNUstep app
+  - runtime token expansion rendered from the shared launch contract
   Exit criteria:
   - packaged AppImage launches through generated startup logic, not hand-written
     per-app scripts
@@ -276,16 +318,34 @@ Goal: ship the second backend using the same shared model.
   Deliverables:
   - AppImage build path
   - artifact naming and output handling
+  - AppImage-side artifact metadata and diagnostics sidecars
   Exit criteria:
   - AppImage can be emitted from the same shared pipeline stages as MSI
 
 - `Phase 8D`: Linux validation path
   Deliverables:
   - automated AppImage smoke validation
+  - structural validation such as desktop-entry checks and extractability
   - log capture and failure diagnostics
   Exit criteria:
   - AppImage backend has an automated validation flow equivalent in spirit to
     the MSI backend
+
+- `Phase 8E`: Linux CI integration
+  Deliverables:
+  - backend-aware runner selection in the reusable workflow
+  - Linux AppImage packaging and validation jobs in repo CI
+  - artifact upload and log handling for Linux backend runs
+  Exit criteria:
+  - AppImage can run from a documented CI entry point as well as a local one
+
+- `Phase 8F`: Linux consumer docs and examples
+  Deliverables:
+  - AppImage backend usage docs and backend README updates
+  - compatibility matrix and consumer setup updates for Linux/AppImage
+  - example downstream manifest and CI usage for the Linux backend
+  Exit criteria:
+  - downstream users can adopt the AppImage backend without source spelunking
 
 ## Phase 9: Hardening and Release Readiness
 Goal: make the repo suitable for sustained reuse.

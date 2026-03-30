@@ -1359,6 +1359,7 @@ function Invoke-GpMsiPackage {
   $config = Get-GpMsiConfig -Context $Context
   $workPaths = Get-GpMsiWorkPaths -Context $Context
   $launch = Get-GpLaunchContract -Context $Context
+  $backendSupport = Get-GpBackendSupport -Backend "msi"
   $summary = [ordered]@{
     Backend = "msi"
     ManifestPath = $Context.ManifestPath
@@ -1371,11 +1372,18 @@ function Invoke-GpMsiPackage {
     PortableArtifactPath = $config.PortablePlan.ArtifactPath
     WorkRoot = $workPaths.Root
     LauncherFileName = $config.LauncherFileName
+    HostPlatform = $backendSupport.HostPlatform
+    RequiredPlatform = $backendSupport.RequiredPlatform
+    HostSupported = [bool]$backendSupport.Supported
   }
 
   if ($DryRun) {
     Write-GpMsiLogLine -LogPath $LogPath -Message ("MSI package dry-run for {0}" -f $config.ProductName)
     return [pscustomobject]$summary
+  }
+
+  if (-not $backendSupport.Supported) {
+    throw "MSI packaging requires host platform '$($backendSupport.RequiredPlatform)'. Current host: '$($backendSupport.HostPlatform)'."
   }
 
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Starting MSI package build for {0}" -f $config.ProductName)
@@ -1465,10 +1473,18 @@ function Invoke-GpMsiValidation {
   $validationPlan = Get-GpValidationPlan -Context $Context
   $launchContract = Get-GpLaunchContract -Context $Context
   $artifactPath = $config.ArtifactPlan.ArtifactPath
-  $installPath = Get-GpMsiInstallPathGuess -Config $config
-  $launcherPath = Join-Path $installPath $config.LauncherFileName
-  $appPath = Resolve-GpPathRelativeToBase -BasePath $installPath -Path $launchContract.EntryRelativePath
-  $runtimePath = Resolve-GpPathRelativeToBase -BasePath $installPath -Path $config.RuntimeRootRelative
+  $backendSupport = Get-GpBackendSupport -Backend "msi"
+  $installPath = $null
+  $launcherPath = $null
+  $appPath = $null
+  $runtimePath = $null
+
+  if ($backendSupport.Supported) {
+    $installPath = Get-GpMsiInstallPathGuess -Config $config
+    $launcherPath = Join-Path $installPath $config.LauncherFileName
+    $appPath = Resolve-GpPathRelativeToBase -BasePath $installPath -Path $launchContract.EntryRelativePath
+    $runtimePath = Resolve-GpPathRelativeToBase -BasePath $installPath -Path $config.RuntimeRootRelative
+  }
 
   if ($DryRun) {
     Write-GpMsiLogLine -LogPath $LogPath -Message ("MSI validation dry-run for {0}" -f $artifactPath)
@@ -1476,6 +1492,9 @@ function Invoke-GpMsiValidation {
       Backend = "msi"
       Mode = "dry-run"
       ArtifactPath = $artifactPath
+      HostPlatform = $backendSupport.HostPlatform
+      RequiredPlatform = $backendSupport.RequiredPlatform
+      HostSupported = [bool]$backendSupport.Supported
       InstallPath = $installPath
       LauncherPath = $launcherPath
       AppPath = $appPath
@@ -1484,6 +1503,10 @@ function Invoke-GpMsiValidation {
       TimeoutSeconds = $validationPlan.TimeoutSeconds
       LogPath = $LogPath
     }
+  }
+
+  if (-not $backendSupport.Supported) {
+    throw "MSI validation requires host platform '$($backendSupport.RequiredPlatform)'. Current host: '$($backendSupport.HostPlatform)'."
   }
 
   if (-not (Test-Path $artifactPath)) {

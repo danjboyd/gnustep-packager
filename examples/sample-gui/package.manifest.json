@@ -35,7 +35,10 @@
     "layoutVersion": 1,
     "stageRoot": "dist/stage",
     "appRoot": "app",
-    "runtimeRoot": "runtime"
+    "runtimeRoot": "runtime",
+    "runtimeSeedPaths": [
+      "runtime/bin/defaults.exe"
+    ]
   },
   "launch": {
     "entryRelativePath": "app/SampleGNUstepApp.app/SampleGNUstepApp.exe",

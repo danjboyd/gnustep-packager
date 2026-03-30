@@ -129,6 +129,42 @@ function Get-GpJsonFile {
   return (Get-Content -Raw -Path $resolvedPath | ConvertFrom-Json -AsHashtable)
 }
 
+function Get-GpManifestSchemaPath {
+  return (Join-Path (Get-GpToolRoot) "schemas\\gnustep-packager.schema.json")
+}
+
+function Test-GpManifestSchema {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $issues = [System.Collections.Generic.List[string]]::new()
+  $schemaPath = Get-GpManifestSchemaPath
+  if (-not (Test-Path $schemaPath)) {
+    $issues.Add("Manifest schema not found: $schemaPath") | Out-Null
+    return [string[]]$issues.ToArray()
+  }
+
+  $json = Get-Content -Raw -Path (Resolve-Path $Path).Path
+  $schemaErrors = @()
+  $isValid = Test-Json -Json $json -SchemaFile $schemaPath -ErrorVariable schemaErrors -ErrorAction SilentlyContinue
+  if (-not $isValid) {
+    foreach ($schemaError in @($schemaErrors)) {
+      $message = [string]$schemaError.ToString()
+      if (-not [string]::IsNullOrWhiteSpace($message)) {
+        $issues.Add($message) | Out-Null
+      }
+    }
+
+    if ($issues.Count -eq 0) {
+      $issues.Add("Manifest JSON did not satisfy the documented schema.") | Out-Null
+    }
+  }
+
+  return [string[]]$issues.ToArray()
+}
+
 function Get-GpRequestedProfiles {
   param(
     [Parameter(Mandatory = $true)]
@@ -465,6 +501,48 @@ function Get-GpEnabledBackends {
   }
 
   return [string[]]$enabled.ToArray()
+}
+
+function Test-GpBackendEnabled {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest,
+    [Parameter(Mandatory = $true)]
+    [string]$Backend
+  )
+
+  return $Backend -in @(Get-GpEnabledBackends -Manifest $Manifest)
+}
+
+function Get-GpBackendRequiredPlatform {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Backend
+  )
+
+  switch ($Backend) {
+    "msi" { return "windows" }
+    "appimage" { return "linux" }
+    default { return $null }
+  }
+}
+
+function Get-GpBackendSupport {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Backend
+  )
+
+  $hostEnvironment = Get-GpHostEnvironment
+  $requiredPlatform = Get-GpBackendRequiredPlatform -Backend $Backend
+  $supported = [string]::IsNullOrWhiteSpace($requiredPlatform) -or ($requiredPlatform -eq $hostEnvironment.Platform)
+
+  return [pscustomobject]@{
+    Backend          = $Backend
+    HostPlatform     = $hostEnvironment.Platform
+    RequiredPlatform = $requiredPlatform
+    Supported        = [bool]$supported
+  }
 }
 
 function Resolve-GpManifestPath {
@@ -969,7 +1047,13 @@ function Resolve-GpBackendName {
   )
 
   if (-not [string]::IsNullOrWhiteSpace($RequestedBackend)) {
-    return $RequestedBackend
+    $backendName = $RequestedBackend.Trim()
+    if (-not (Test-GpBackendEnabled -Manifest $Manifest -Backend $backendName)) {
+      $enabledBackends = @(Get-GpEnabledBackends -Manifest $Manifest)
+      $enabledText = if ($enabledBackends.Count -gt 0) { [string]::Join(", ", $enabledBackends) } else { "(none)" }
+      throw "Requested backend '$backendName' is not enabled in the manifest. Enabled backends: $enabledText"
+    }
+    return $backendName
   }
 
   $enabledBackends = @(Get-GpEnabledBackends -Manifest $Manifest)

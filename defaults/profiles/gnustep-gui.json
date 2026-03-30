@@ -2,9 +2,6 @@
   "payload": {
     "resourceRoots": [
       "metadata/icons"
-    ],
-    "runtimeSeedPaths": [
-      "runtime/bin/defaults.exe"
     ]
   },
   "launch": {

@@ -16,7 +16,9 @@ $ErrorActionPreference = "Stop"
 
 $context = Get-GpManifestContext -Path $Manifest -PackageVersion $PackageVersion
 $manifestData = $context.Manifest
-$issues = @(Test-GpManifest -Manifest $manifestData)
+$issues = @()
+$issues += @(Test-GpManifestSchema -Path $context.ManifestPath)
+$issues += @(Test-GpManifest -Manifest $manifestData)
 
 if ($issues.Count -gt 0) {
   Write-Host "Manifest validation failed: $($context.ManifestPath)"
