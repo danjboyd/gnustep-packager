@@ -34,6 +34,10 @@ switch ($Command) {
   "manifest-check" {
     Write-Host "Manifest is valid: $($context.ManifestPath)"
     Write-Host "Package: $($summary.Name) $($summary.Version)"
+    if ($summary.Profiles.Count -gt 0) {
+      Write-Host "Profiles: $([string]::Join(', ', $summary.Profiles))"
+    }
+    Write-Host "Compliance notices: $($summary.ComplianceNoticeCount)"
     Write-Host "Enabled backends: $enabledBackendText"
     break
   }
@@ -65,6 +69,10 @@ switch ($Command) {
     }
     Write-Host "Manufacturer: $($summary.Manufacturer)"
     Write-Host "Shell kind: $($summary.ShellKind)"
+    if ($summary.Profiles.Count -gt 0) {
+      Write-Host "Profiles: $([string]::Join(', ', $summary.Profiles))"
+    }
+    Write-Host "Compliance notices: $($summary.ComplianceNoticeCount)"
     Write-Host "Stage root: $($summary.StageRoot)"
     Write-Host "Entry path: $($summary.EntryRelative)"
     Write-Host "Build command: $($summary.BuildCommand)"

@@ -289,6 +289,8 @@ Goal: ship the second backend using the same shared model.
 
 ## Phase 9: Hardening and Release Readiness
 Goal: make the repo suitable for sustained reuse.
+Status: implemented for the current Windows MSI scope, with the AppImage
+extension path documented for later phases.
 
 - `Phase 9A`: Licensing and notices
   Deliverables:

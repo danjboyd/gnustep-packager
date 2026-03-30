@@ -1,6 +1,9 @@
 {
   "$schema": "../../schemas/gnustep-packager.schema.json",
   "schemaVersion": 1,
+  "profiles": [
+    "gnustep-gui"
+  ],
   "package": {
     "id": "com.example.SampleGNUstepApp",
     "name": "SampleGNUstepApp",
@@ -32,27 +35,13 @@
     "layoutVersion": 1,
     "stageRoot": "dist/stage",
     "appRoot": "app",
-    "runtimeRoot": "runtime",
-    "resourceRoots": [
-      "app/SampleGNUstepApp.app/Resources",
-      "metadata/icons"
-    ],
-    "runtimeSeedPaths": [
-      "runtime/bin/defaults.exe"
-    ]
+    "runtimeRoot": "runtime"
   },
   "launch": {
     "entryRelativePath": "app/SampleGNUstepApp.app/SampleGNUstepApp.exe",
     "workingDirectory": ".",
     "arguments": [],
-    "pathPrepend": [
-      "runtime/bin"
-    ],
-    "resourceRoots": [
-      "metadata/icons"
-    ],
     "env": {
-      "GNUSTEP_PATHPREFIX_LIST": "{@runtimeRoot}",
       "GSTheme": "WinUXTheme"
     }
   },
@@ -79,14 +68,29 @@
   },
   "integrations": {
     "shortcutName": "Sample GNUstep App",
-    "categories": [
-      "Utility"
-    ],
     "fileAssociations": [
       {
         "kind": "extension",
         "value": ".sample",
         "description": "Sample GNUstep document"
+      }
+    ]
+  },
+  "compliance": {
+    "runtimeNotices": [
+      {
+        "name": "SampleGNUstepApp",
+        "version": "0.1.0",
+        "license": "MIT",
+        "source": "Reference fixture application payload",
+        "homepage": "https://example.invalid/sample-gnustep-app",
+        "stageRelativePath": "metadata/licenses/SampleGNUstepApp.txt"
+      },
+      {
+        "name": "GNUstep Runtime Seed",
+        "license": "LGPL-2.1-or-later",
+        "source": "Fixture runtime payload for packaging and validation tests",
+        "stageRelativePath": "metadata/licenses/GNUstep-runtime.txt"
       }
     ]
   },

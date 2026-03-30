@@ -1,0 +1,26 @@
+{
+  "payload": {
+    "resourceRoots": [
+      "metadata/icons"
+    ],
+    "runtimeSeedPaths": [
+      "runtime/bin/defaults.exe"
+    ]
+  },
+  "launch": {
+    "pathPrepend": [
+      "runtime/bin"
+    ],
+    "resourceRoots": [
+      "metadata/icons"
+    ],
+    "env": {
+      "GNUSTEP_PATHPREFIX_LIST": "{@runtimeRoot}"
+    }
+  },
+  "integrations": {
+    "categories": [
+      "Utility"
+    ]
+  }
+}

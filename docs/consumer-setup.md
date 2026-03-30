@@ -6,6 +6,18 @@ A downstream app repo needs:
 - a `package.manifest.json`
 - a `build` command that produces app output
 - a `stage` command that produces the normalized stage layout
+- a staged payload that already includes the runtime notices and icons you want
+  to ship
+
+## Built-In Profiles
+The manifest may opt into small built-in defaults layers through `profiles`.
+
+Current profiles:
+- `gnustep-gui`
+- `gnustep-document-viewer`
+
+These profiles are intentionally small. They provide common runtime PATH,
+resource, and category defaults without hiding the manifest shape.
 
 ## Expected Stage Layout
 
@@ -16,14 +28,40 @@ A downstream app repo needs:
   metadata/
 ```
 
+Recommended metadata subdirectories:
+
+```text
+<stage-root>/metadata/
+  icons/
+  licenses/
+```
+
 ## Windows MSI Onboarding
 For the current MSI backend, the consumer should:
 
 1. build with MSYS2 `CLANG64`
 2. stage a self-contained GNUstep payload under `runtime/`
-3. enable `backends.msi`
-4. provide a stable `upgradeCode`
-5. run the shared pipeline wrapper locally before wiring CI
+3. stage any shipped notice files under `metadata/licenses/`
+4. enable `backends.msi`
+5. provide a stable `upgradeCode`
+6. run the shared pipeline wrapper locally before wiring CI
+
+## Recommended Manifest Baseline
+
+```json
+{
+  "profiles": ["gnustep-gui"],
+  "compliance": {
+    "runtimeNotices": [
+      {
+        "name": "GNUstep Base",
+        "license": "LGPL-2.1-or-later",
+        "stageRelativePath": "metadata/licenses/gnustep-base.txt"
+      }
+    ]
+  }
+}
+```
 
 ## Recommended First Run
 
@@ -37,3 +75,8 @@ For the current MSI backend, the consumer should:
 ## GitHub Actions
 Once the local run works, call the reusable workflow documented in
 [github-actions.md](github-actions.md).
+
+Related docs:
+- [manifest.md](manifest.md)
+- [compliance-notices.md](compliance-notices.md)
+- [windows-msi-triage.md](windows-msi-triage.md)

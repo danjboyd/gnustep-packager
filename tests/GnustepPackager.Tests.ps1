@@ -61,6 +61,17 @@ function Assert-GpMatch {
   }
 }
 
+function Assert-GpFalse {
+  param(
+    [bool]$Condition,
+    [string]$Message
+  )
+
+  if ($Condition) {
+    throw $Message
+  }
+}
+
 Describe "Manifest resolution" {
   It "applies defaults and honors package version override" {
     $context = Get-GpManifestContext -Path $manifestPath -PackageVersion "2.5.7-rc1"
@@ -68,12 +79,22 @@ Describe "Manifest resolution" {
     Assert-GpEqual -Actual $context.PackageVersionOverride -Expected "2.5.7-rc1" -Message "Version override should be preserved."
     Assert-GpEqual -Actual $context.Manifest["package"]["version"] -Expected "2.5.7-rc1" -Message "Resolved manifest should use the overridden version."
     Assert-GpEqual -Actual $context.Manifest["backends"]["msi"]["portableArtifactNamePattern"] -Expected "{name}-{version}-win64-portable.zip" -Message "MSI portable artifact default should be present."
+    Assert-GpEqual -Actual @($context.Manifest["profiles"]) -Expected @("gnustep-gui") -Message "Resolved manifest should preserve requested built-in profiles."
+    Assert-GpEqual -Actual @(Get-GpComplianceEntries -Manifest $context.Manifest).Count -Expected 2 -Message "Resolved manifest should surface compliance notice entries."
   }
 
   It "resolves enabled backends from the manifest" {
     $context = Get-GpManifestContext -Path $manifestPath
 
     Assert-GpEqual -Actual @(Get-GpEnabledBackends -Manifest $context.Manifest) -Expected @("msi") -Message "Enabled backends should match the sample manifest."
+  }
+
+  It "applies built-in profile defaults before manifest overrides" {
+    $context = Get-GpManifestContext -Path $manifestPath
+
+    Assert-GpEqual -Actual @($context.Manifest["launch"]["pathPrepend"]) -Expected @("runtime/bin") -Message "GUI profile should provide common runtime PATH defaults."
+    Assert-GpEqual -Actual $context.Manifest["launch"]["env"]["GNUSTEP_PATHPREFIX_LIST"] -Expected "{@runtimeRoot}" -Message "GUI profile should provide the common GNUstep runtime root token."
+    Assert-GpEqual -Actual @($context.Manifest["payload"]["runtimeSeedPaths"]) -Expected @("runtime/bin/defaults.exe") -Message "GUI profile should provide a common runtime seed path."
   }
 }
 
@@ -104,6 +125,7 @@ Describe "MSI transform behavior" {
     Assert-GpTrue -Condition (Test-Path (Join-Path $transform.InstallRoot "app\\SampleGNUstepApp.app\\SampleGNUstepApp.exe")) -Message "Transformed install tree should contain the app executable."
     Assert-GpTrue -Condition (Test-Path (Join-Path $transform.InstallRoot "runtime\\bin\\defaults.exe")) -Message "Transformed install tree should contain the staged runtime seed."
     Assert-GpTrue -Condition (Test-Path (Join-Path $transform.InstallRoot "metadata\\icons\\sample-icon.txt")) -Message "Transformed install tree should contain staged metadata."
+    Assert-GpTrue -Condition (Test-Path (Join-Path $transform.InstallRoot "metadata\\licenses\\GNUstep-runtime.txt")) -Message "Transformed install tree should contain staged license metadata."
   }
 
   It "generates launcher output and config" {
@@ -117,6 +139,46 @@ Describe "MSI transform behavior" {
     Assert-GpMatch -Actual $configText -Pattern "entryRelativePath=app/SampleGNUstepApp.app/SampleGNUstepApp.exe" -Message "Launcher config should contain the entry path."
     Assert-GpMatch -Actual $configText -Pattern "pathPrepend=runtime/bin" -Message "Launcher config should contain runtime PATH additions."
     Assert-GpMatch -Actual $configText -Pattern "env=GNUSTEP_PATHPREFIX_LIST=\{@runtimeRoot\}" -Message "Launcher config should preserve runtime token expansion."
+  }
+
+  It "writes a bundled notice report from compliance entries" {
+    $noticeText = Get-Content -Raw -Path $transform.NoticeReportPath
+
+    Assert-GpTrue -Condition (Test-Path $transform.NoticeReportPath) -Message "Transform should emit a third-party notice report."
+    Assert-GpMatch -Actual $noticeText -Pattern "Runtime notice entries: 2" -Message "Notice report should summarize compliance entries."
+    Assert-GpMatch -Actual $noticeText -Pattern "GNUstep Runtime Seed" -Message "Notice report should list configured runtime notices."
+    Assert-GpMatch -Actual $noticeText -Pattern "metadata/licenses/GNUstep-runtime.txt" -Message "Notice report should preserve staged notice paths."
+  }
+
+  It "places the shortcut at the Start Menu root" {
+    $templateText = Get-Content -Raw -Path $transformConfig.ProductTemplatePath
+
+    Assert-GpMatch -Actual $templateText -Pattern '<DirectoryRef Id="ProgramMenuFolder">' -Message "Shortcut template should write directly to the Start Menu root."
+    Assert-GpFalse -Condition ($templateText -match 'ApplicationProgramsFolder') -Message "Shortcut template should not create an extra Start Menu folder."
+  }
+}
+
+Describe "MSI icon configuration" {
+  It "resolves a staged .ico path when configured" {
+    $stageRoot = Join-Path $env:TEMP ("gp-icon-test-" + [guid]::NewGuid().ToString("N"))
+    $iconPath = Join-Path $stageRoot "metadata\\icons\\sample.ico"
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $iconPath) | Out-Null
+    Set-Content -Path $iconPath -Value "placeholder"
+
+    try {
+      $config = [pscustomobject]@{
+        StageRoot = $stageRoot
+        IconRelativePath = "metadata/icons/sample.ico"
+      }
+
+      $resolvedIconPath = [System.IO.Path]::GetFullPath((Resolve-GpMsiIconSourcePath -Config $config))
+      $expectedIconPath = [System.IO.Path]::GetFullPath($iconPath)
+      Assert-GpEqual -Actual $resolvedIconPath -Expected $expectedIconPath -Message "Configured MSI icon path should resolve inside the staged payload."
+    } finally {
+      if (Test-Path $stageRoot) {
+        Remove-Item -Recurse -Force $stageRoot
+      }
+    }
   }
 }
 

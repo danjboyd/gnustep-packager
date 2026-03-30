@@ -12,6 +12,8 @@
 | Backend | AppImage | Planned | Shared architecture exists, backend not implemented yet |
 | Install scope | MSI perMachine | Supported | Packaging works; validation may require elevation |
 | Install scope | MSI perUser | Supported | Used by sample fixture for local and CI validation |
+| Diagnostics | MSI metadata and diagnostics sidecars | Supported | Package step emits `.metadata.json` and `.diagnostics.txt` next to the MSI |
+| Compliance | MSI notice report generation | Supported | Built from `compliance.runtimeNotices` into the installed metadata tree |
 
 ## Validation Scope
 
@@ -28,3 +30,4 @@ The current support contract is intentionally narrow:
 - Windows packaging expects MSYS2-style GNUstep runtime layout
 - the launcher assumes a private `runtime/` tree by default
 - the example fixture validates x64 Windows packaging only
+- consumers are expected to stage any shipped notice files explicitly

@@ -18,6 +18,13 @@
       "type": "integer",
       "const": 1
     },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "package": {
       "type": "object",
       "additionalProperties": false,
@@ -379,6 +386,44 @@
         }
       }
     },
+    "compliance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runtimeNotices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "version": {
+                "type": "string"
+              },
+              "license": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "homepage": {
+                "type": "string"
+              },
+              "stageRelativePath": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
     "backends": {
       "type": "object",
       "additionalProperties": false,
@@ -413,6 +458,9 @@
             "launcherFileName": {
               "type": "string"
             },
+            "iconRelativePath": {
+              "type": "string"
+            },
             "artifactNamePattern": {
               "type": "string"
             },
@@ -444,6 +492,16 @@
                 "toolRoot": {
                   "type": "string",
                   "minLength": 1
+                },
+                "skipValidation": {
+                  "type": "boolean"
+                },
+                "suppressedIces": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               }
             },

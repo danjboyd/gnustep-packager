@@ -153,6 +153,11 @@ function Get-GpMsiConfig {
   $wixToolRoot = Resolve-GpPathRelativeToBase -BasePath $Context.ToolRoot -Path ([string]$wixConfig["toolRoot"])
   $stageRoot = Resolve-GpManifestPath -Context $Context -RelativePath ([string]$payload["stageRoot"])
   $normalizedVersion = Normalize-GpMsiVersion -Version ([string]$package["version"])
+  $iconRelativePath = if ($backend.Contains("iconRelativePath") -and -not [string]::IsNullOrWhiteSpace([string]$backend["iconRelativePath"])) {
+    [string]$backend["iconRelativePath"]
+  } else {
+    $null
+  }
 
   return [pscustomobject]@{
     PackageId = [string]$package["id"]
@@ -168,6 +173,7 @@ function Get-GpMsiConfig {
     ShortcutName = $shortcutName
     LauncherFileName = $launcherFileName
     LauncherConfigName = ("{0}.launcher.ini" -f [System.IO.Path]::GetFileNameWithoutExtension($launcherFileName))
+    IconRelativePath = $iconRelativePath
     FallbackRuntimeRoot = [string]$backend["fallbackRuntimeRoot"]
     RuntimeSearchRoots = [string[]]@($backend["runtimeSearchRoots"])
     ArtifactPlan = $artifactPlan
@@ -181,6 +187,8 @@ function Get-GpMsiConfig {
     WixToolRoot = $wixToolRoot
     WixVersion = [string]$wixConfig["version"]
     WixDownloadUrl = [string]$wixConfig["downloadUrl"]
+    WixSkipValidation = [bool]$wixConfig["skipValidation"]
+    WixSuppressedIces = [string[]]@($wixConfig["suppressedIces"])
     SigningEnabled = [bool]$signingConfig["enabled"]
     SigningToolPath = [string]$signingConfig["toolPath"]
     SigningTimestampUrl = [string]$signingConfig["timestampUrl"]
@@ -207,6 +215,302 @@ function Get-GpMsiWorkPaths {
     WixRoot = Join-Path $workRoot "wix"
     DownloadRoot = Join-Path $workRoot "downloads"
   }
+}
+
+function Get-GpMsiDiagnosticsDocPath {
+  return (Join-Path (Get-GpToolRoot) "docs\\windows-msi-triage.md")
+}
+
+function Get-GpMsiSidecarPaths {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config
+  )
+
+  return [pscustomobject]@{
+    MetadataPath = Get-GpArtifactSidecarPath -ArtifactPath $Config.ArtifactPlan.ArtifactPath -Suffix "metadata.json"
+    DiagnosticsPath = Get-GpArtifactSidecarPath -ArtifactPath $Config.ArtifactPlan.ArtifactPath -Suffix "diagnostics.txt"
+  }
+}
+
+function Get-GpMsiRuntimeNoticeEntries {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [string]$InstallRoot
+  )
+
+  $entries = [System.Collections.Generic.List[psobject]]::new()
+  foreach ($entry in @(Get-GpComplianceEntries -Manifest $Context.Manifest)) {
+    $stageRelativePath = if ($entry.ContainsKey("stageRelativePath") -and -not [string]::IsNullOrWhiteSpace([string]$entry["stageRelativePath"])) {
+      [string]$entry["stageRelativePath"]
+    } else {
+      $null
+    }
+
+    $installedPath = $null
+    if (-not [string]::IsNullOrWhiteSpace($stageRelativePath)) {
+      $installedPath = Resolve-GpPathRelativeToBase -BasePath $InstallRoot -Path $stageRelativePath
+      if (-not (Test-Path $installedPath)) {
+        throw "Configured compliance.runtimeNotices entry '$($entry["name"])' references a missing bundled file: $installedPath"
+      }
+    }
+
+    $entries.Add([pscustomobject]@{
+      Name = [string]$entry["name"]
+      Version = $(if ($entry.ContainsKey("version")) { [string]$entry["version"] } else { $null })
+      License = $(if ($entry.ContainsKey("license")) { [string]$entry["license"] } else { $null })
+      Source = $(if ($entry.ContainsKey("source")) { [string]$entry["source"] } else { $null })
+      Homepage = $(if ($entry.ContainsKey("homepage")) { [string]$entry["homepage"] } else { $null })
+      StageRelativePath = $stageRelativePath
+      InstalledPath = $installedPath
+    }) | Out-Null
+  }
+
+  return @($entries.ToArray())
+}
+
+function Write-GpMsiNoticeReport {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [string]$InstallRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  $package = $Context.Manifest["package"]
+  $entries = @(Get-GpMsiRuntimeNoticeEntries -Context $Context -InstallRoot $InstallRoot)
+  $metadataRoot = Ensure-GpDirectory -Path (Resolve-GpPathRelativeToBase -BasePath $InstallRoot -Path $Config.MetadataRootRelative)
+  $reportPath = Join-Path $metadataRoot "THIRD-PARTY-NOTICES.txt"
+  $lines = [System.Collections.Generic.List[string]]::new()
+
+  $lines.Add(("Package: {0}" -f [string]$package["name"])) | Out-Null
+  $lines.Add(("Version: {0}" -f [string]$package["version"])) | Out-Null
+  $lines.Add(("Manufacturer: {0}" -f [string]$package["manufacturer"])) | Out-Null
+  if ($package.Contains("license") -and -not [string]::IsNullOrWhiteSpace([string]$package["license"])) {
+    $lines.Add(("Package license: {0}" -f [string]$package["license"])) | Out-Null
+  }
+  if ($package.Contains("homepage") -and -not [string]::IsNullOrWhiteSpace([string]$package["homepage"])) {
+    $lines.Add(("Package homepage: {0}" -f [string]$package["homepage"])) | Out-Null
+  }
+
+  $lines.Add("") | Out-Null
+  $lines.Add(("Runtime notice entries: {0}" -f $entries.Count)) | Out-Null
+
+  if ($entries.Count -eq 0) {
+    $lines.Add("No compliance.runtimeNotices entries were declared in the manifest.") | Out-Null
+  } else {
+    foreach ($entry in $entries) {
+      $lines.Add("") | Out-Null
+      $lines.Add(("[{0}]" -f $entry.Name)) | Out-Null
+      if (-not [string]::IsNullOrWhiteSpace($entry.Version)) {
+        $lines.Add(("Version: {0}" -f $entry.Version)) | Out-Null
+      }
+      if (-not [string]::IsNullOrWhiteSpace($entry.License)) {
+        $lines.Add(("License: {0}" -f $entry.License)) | Out-Null
+      }
+      if (-not [string]::IsNullOrWhiteSpace($entry.Source)) {
+        $lines.Add(("Source: {0}" -f $entry.Source)) | Out-Null
+      }
+      if (-not [string]::IsNullOrWhiteSpace($entry.Homepage)) {
+        $lines.Add(("Homepage: {0}" -f $entry.Homepage)) | Out-Null
+      }
+      if (-not [string]::IsNullOrWhiteSpace($entry.StageRelativePath)) {
+        $lines.Add(("Bundled notice path: {0}" -f $entry.StageRelativePath)) | Out-Null
+      }
+    }
+  }
+
+  Set-Content -Path $reportPath -Value $lines -Encoding ascii
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Generated notice report: {0}" -f $reportPath)
+
+  return [pscustomobject]@{
+    ReportPath = $reportPath
+    Entries = $entries
+  }
+}
+
+function Write-GpMsiArtifactMetadata {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [psobject]$WorkPaths,
+    [Parameter(Mandatory = $true)]
+    [psobject]$WixTools,
+    [Parameter(Mandatory = $true)]
+    [psobject]$InstallTree,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Artifacts,
+    [Parameter(Mandatory = $true)]
+    [psobject]$NoticeReport,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  $package = $Context.Manifest["package"]
+  $launch = Get-GpLaunchContract -Context $Context
+  $profiles = @(Get-GpRequestedProfiles -Manifest $Context.Manifest)
+  $sidecars = Get-GpMsiSidecarPaths -Config $Config
+  $signing = Get-GpMsiSigningSettings -Config $Config
+  $hostEnvironment = Get-GpHostEnvironment
+
+  $metadata = [ordered]@{
+    generatedAt = (Get-Date).ToString("o")
+    backend = "msi"
+    manifestPath = $Context.ManifestPath
+    profiles = [string[]]$profiles
+    package = [ordered]@{
+      id = [string]$package["id"]
+      name = [string]$package["name"]
+      displayName = $Config.DisplayName
+      productName = $Config.ProductName
+      version = $Config.Version
+      msiVersion = $Config.MsiVersion
+      manufacturer = [string]$package["manufacturer"]
+      license = $(if ($package.Contains("license")) { [string]$package["license"] } else { $null })
+      homepage = $(if ($package.Contains("homepage")) { [string]$package["homepage"] } else { $null })
+    }
+    artifacts = [ordered]@{
+      msi = [ordered]@{
+        path = $Artifacts.ArtifactPath
+        sha256 = Get-GpFileSha256 -Path $Artifacts.ArtifactPath
+        sizeBytes = (Get-Item $Artifacts.ArtifactPath).Length
+      }
+      portableZip = [ordered]@{
+        path = $Artifacts.PortableArtifactPath
+        sha256 = Get-GpFileSha256 -Path $Artifacts.PortableArtifactPath
+        sizeBytes = (Get-Item $Artifacts.PortableArtifactPath).Length
+      }
+      metadata = [ordered]@{
+        path = $sidecars.MetadataPath
+      }
+      diagnostics = [ordered]@{
+        path = $sidecars.DiagnosticsPath
+      }
+    }
+    install = [ordered]@{
+      scope = $Config.InstallScope
+      installDirectoryName = $Config.InstallDirectoryName
+      launcherFileName = $Config.LauncherFileName
+      launcherConfigName = $Config.LauncherConfigName
+      installTreeRoot = $InstallTree.InstallRoot
+      noticeReportPath = $NoticeReport.ReportPath
+    }
+    launch = [ordered]@{
+      entryRelativePath = $launch.EntryRelativePath
+      workingDirectory = $launch.WorkingDirectory
+      arguments = [string[]]@($launch.Arguments)
+      pathPrepend = [string[]]@($launch.PathPrepend)
+      resourceRoots = [string[]]@($launch.ResourceRoots)
+      environment = [hashtable](Copy-GpValue -Value $launch.Environment)
+    }
+    runtime = [ordered]@{
+      fallbackRuntimeRoot = $Config.FallbackRuntimeRoot
+      runtimeSearchRoots = [string[]]@($Config.RuntimeSearchRoots)
+      unresolvedDependencies = [string[]]@($InstallTree.UnresolvedDependencies)
+    }
+    tooling = [ordered]@{
+      clang = Get-GpPreferredWindowsClang
+      windres = Get-GpPreferredWindowsWindres
+      wix = [ordered]@{
+        heat = $WixTools.Heat
+        candle = $WixTools.Candle
+        light = $WixTools.Light
+        skipValidation = [bool]($Config.WixSkipValidation -or ($env:GP_WIX_SKIP_VALIDATION -eq "1") -or ($env:GP_WIX_SKIP_VALIDATION -eq "true"))
+        suppressedIces = [string[]]@($Config.WixSuppressedIces)
+      }
+      signing = [ordered]@{
+        enabled = [bool]$signing.Enabled
+        toolPath = $signing.ToolPath
+        timestampUrl = $signing.TimestampUrl
+      }
+    }
+    compliance = [ordered]@{
+      noticeReportPath = $NoticeReport.ReportPath
+      runtimeNotices = @(
+        foreach ($entry in @($NoticeReport.Entries)) {
+          [ordered]@{
+            name = $entry.Name
+            version = $entry.Version
+            license = $entry.License
+            source = $entry.Source
+            homepage = $entry.Homepage
+            stageRelativePath = $entry.StageRelativePath
+            installedPath = $entry.InstalledPath
+          }
+        }
+      )
+    }
+    outputs = [ordered]@{
+      logPath = $LogPath
+      workRoot = $WorkPaths.Root
+      diagnosticsDocPath = Get-GpMsiDiagnosticsDocPath
+    }
+    host = [ordered]@{
+      platform = $hostEnvironment.Platform
+      pwshVersion = $hostEnvironment.PwshVersion
+      currentPath = $hostEnvironment.CurrentPath
+      toolRoot = $hostEnvironment.ToolRoot
+    }
+  }
+
+  $metadata | ConvertTo-Json -Depth 20 | Set-Content -Path $sidecars.MetadataPath -Encoding utf8
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Wrote artifact metadata: {0}" -f $sidecars.MetadataPath)
+
+  return $sidecars.MetadataPath
+}
+
+function Write-GpMsiDiagnosticsSummary {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [psobject]$InstallTree,
+    [Parameter(Mandatory = $true)]
+    [string]$MetadataPath,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  $sidecars = Get-GpMsiSidecarPaths -Config $Config
+  $lines = [System.Collections.Generic.List[string]]::new()
+  $lines.Add(("MSI packaging summary for {0}" -f $Config.ProductName)) | Out-Null
+  $lines.Add(("Manifest: {0}" -f $Context.ManifestPath)) | Out-Null
+  $lines.Add(("MSI artifact: {0}" -f $Config.ArtifactPlan.ArtifactPath)) | Out-Null
+  $lines.Add(("Portable ZIP: {0}" -f $Config.PortablePlan.ArtifactPath)) | Out-Null
+  $lines.Add(("Metadata: {0}" -f $MetadataPath)) | Out-Null
+  $lines.Add(("Package log: {0}" -f $LogPath)) | Out-Null
+  $lines.Add(("Triage guide: {0}" -f (Get-GpMsiDiagnosticsDocPath))) | Out-Null
+  if (-not [string]::IsNullOrWhiteSpace($InstallTree.NoticeReportPath)) {
+    $lines.Add(("Notice report: {0}" -f $InstallTree.NoticeReportPath)) | Out-Null
+  }
+  $lines.Add("") | Out-Null
+  $lines.Add("Reproduction commands:") | Out-Null
+  $lines.Add(("./scripts/gnustep-packager.ps1 -Command package -Manifest `"{0}`" -Backend msi" -f $Context.ManifestPath)) | Out-Null
+  $lines.Add(("./scripts/gnustep-packager.ps1 -Command validate -Manifest `"{0}`" -Backend msi -RunSmoke" -f $Context.ManifestPath)) | Out-Null
+  $lines.Add("") | Out-Null
+  if ($InstallTree.UnresolvedDependencies.Count -gt 0) {
+    $lines.Add(("Unresolved runtime dependencies: {0}" -f ([string]::Join(", ", $InstallTree.UnresolvedDependencies)))) | Out-Null
+  } else {
+    $lines.Add("Unresolved runtime dependencies: none") | Out-Null
+  }
+  $lines.Add("") | Out-Null
+  $lines.Add("Common failure areas: launcher compilation, runtime closure, WiX bootstrap/compile/link, signing, smoke validation.") | Out-Null
+
+  Set-Content -Path $sidecars.DiagnosticsPath -Value $lines -Encoding ascii
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Wrote diagnostics summary: {0}" -f $sidecars.DiagnosticsPath)
+
+  return $sidecars.DiagnosticsPath
 }
 
 function Reset-GpDirectory {
@@ -462,7 +766,88 @@ function Get-GpPreferredWindowsClang {
     return $command.Source
   }
 
-  throw "clang not found. MSI launcher compilation requires a Windows-capable clang."
+  throw "clang not found. MSI launcher compilation requires a Windows-capable clang. See $(Get-GpMsiDiagnosticsDocPath)."
+}
+
+function Get-GpPreferredWindowsWindres {
+  $candidates = @(
+    "C:\msys64\clang64\bin\windres.exe",
+    "C:\msys64\mingw64\bin\windres.exe"
+  )
+
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+      return $candidate
+    }
+  }
+
+  foreach ($name in @("windres.exe", "windres")) {
+    $command = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command) {
+      return $command.Source
+    }
+  }
+
+  return $null
+}
+
+function Resolve-GpMsiIconSourcePath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Config.IconRelativePath)) {
+    return $null
+  }
+
+  if (-not $Config.IconRelativePath.EndsWith(".ico", [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "MSI iconRelativePath must point to a staged .ico file: $($Config.IconRelativePath)"
+  }
+
+  $iconPath = Resolve-GpPathRelativeToBase -BasePath $Config.StageRoot -Path $Config.IconRelativePath
+  if (-not (Test-Path $iconPath)) {
+    throw "MSI icon file was not found in the staged payload: $iconPath"
+  }
+
+  return $iconPath
+}
+
+function Build-GpMsiLauncherResourceObject {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [string]$WorkRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  $iconPath = Resolve-GpMsiIconSourcePath -Config $Config
+  if ([string]::IsNullOrWhiteSpace($iconPath)) {
+    return $null
+  }
+
+  $windres = Get-GpPreferredWindowsWindres
+  if (-not $windres) {
+    throw "windres not found. MSI icon embedding requires a Windows resource compiler. See $(Get-GpMsiDiagnosticsDocPath)."
+  }
+
+  Ensure-GpDirectory -Path $WorkRoot | Out-Null
+  $resourceScriptPath = Join-Path $WorkRoot "launcher-icon.rc"
+  $resourceObjectPath = Join-Path $WorkRoot "launcher-icon.o"
+  $iconPathForRc = $iconPath.Replace('\', '/')
+
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Embedding launcher icon from {0}" -f $iconPath)
+  Set-Content -Path $resourceScriptPath -Value ("1 ICON `"{0}`"" -f $iconPathForRc) -Encoding ascii
+  Invoke-GpMsiExternalTool -FilePath $windres -ArgumentList @(
+    "-J", "rc",
+    "-O", "coff",
+    "-i", $resourceScriptPath,
+    "-o", $resourceObjectPath
+  ) -LogPath $LogPath
+
+  return $resourceObjectPath
 }
 
 function Get-GpMsiSigningSettings {
@@ -552,7 +937,7 @@ function Invoke-GpMsiSignFile {
   }
 
   if ([string]::IsNullOrWhiteSpace($Signing.ToolPath) -or -not (Test-Path $Signing.ToolPath)) {
-    throw "Signing enabled but signtool was not found."
+    throw "Signing enabled but signtool was not found. See $(Get-GpMsiDiagnosticsDocPath)."
   }
 
   $args = [System.Collections.Generic.List[string]]::new()
@@ -583,7 +968,7 @@ function Invoke-GpMsiSignFile {
       $args.Add($Signing.PfxPassword) | Out-Null
     }
   } else {
-    throw "Signing enabled but neither GP_SIGN_CERT_SHA1 nor GP_SIGN_PFX_PATH is configured."
+    throw "Signing enabled but neither GP_SIGN_CERT_SHA1 nor GP_SIGN_PFX_PATH is configured. See $(Get-GpMsiDiagnosticsDocPath)."
   }
 
   foreach ($argument in @($Signing.AdditionalArguments)) {
@@ -601,24 +986,41 @@ function Build-GpMsiLauncher {
     [Parameter(Mandatory = $true)]
     [psobject]$Config,
     [Parameter(Mandatory = $true)]
+    [string]$WorkRoot,
+    [Parameter(Mandatory = $true)]
     [string]$OutputPath,
     [Parameter(Mandatory = $true)]
     [string]$LogPath
   )
 
   $clang = Get-GpPreferredWindowsClang
+  $resourceObjectPath = Build-GpMsiLauncherResourceObject -Config $Config -WorkRoot $WorkRoot -LogPath $LogPath
   Ensure-GpDirectory -Path (Split-Path -Parent $OutputPath) | Out-Null
 
-  Invoke-GpMsiExternalTool -FilePath $clang -ArgumentList @(
+  $clangArguments = [System.Collections.Generic.List[string]]::new()
+  foreach ($argument in @(
     "-O2",
     "-municode",
     "-mwindows",
     "-DWIN32_LEAN_AND_MEAN",
     "-o", $OutputPath,
-    $Config.LauncherSourcePath,
+    $Config.LauncherSourcePath
+  )) {
+    $clangArguments.Add($argument) | Out-Null
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($resourceObjectPath)) {
+    $clangArguments.Add($resourceObjectPath) | Out-Null
+  }
+
+  foreach ($argument in @(
     "-lshell32",
     "-lshlwapi"
-  ) -LogPath $LogPath
+  )) {
+    $clangArguments.Add($argument) | Out-Null
+  }
+
+  Invoke-GpMsiExternalTool -FilePath $clang -ArgumentList ([string[]]$clangArguments.ToArray()) -LogPath $LogPath
 }
 
 function Get-GpLaunchEnvironmentForMsi {
@@ -705,7 +1107,7 @@ function Prepare-GpMsiInstallTree {
 
   $signing = Get-GpMsiSigningSettings -Config $Config
   $launcherOutputPath = Join-Path $WorkPaths.InstallRoot $Config.LauncherFileName
-  Build-GpMsiLauncher -Config $Config -OutputPath $launcherOutputPath -LogPath $LogPath
+  Build-GpMsiLauncher -Config $Config -WorkRoot $WorkPaths.BuildRoot -OutputPath $launcherOutputPath -LogPath $LogPath
   Invoke-GpMsiSignFile -Signing $signing -Path $launcherOutputPath -LogPath $LogPath
   $launcherConfigPath = Write-GpMsiLauncherConfig -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Generated launcher config: {0}" -f $launcherConfigPath)
@@ -719,10 +1121,14 @@ function Prepare-GpMsiInstallTree {
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Unresolved runtime dependencies: {0}" -f ([string]::Join(", ", $unresolved)))
   }
 
+  $noticeReport = Write-GpMsiNoticeReport -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot -LogPath $LogPath
+
   return [pscustomobject]@{
     InstallRoot = $WorkPaths.InstallRoot
     LauncherPath = $launcherOutputPath
     LauncherConfigPath = $launcherConfigPath
+    NoticeReportPath = $noticeReport.ReportPath
+    RuntimeNotices = @($noticeReport.Entries)
     UnresolvedDependencies = $unresolved
   }
 }
@@ -769,7 +1175,7 @@ function Ensure-GpWixTools {
   $light = Resolve-Tool -toolName "light.exe"
 
   if (-not $heat -or -not $candle -or -not $light) {
-    throw "WiX tools not found after bootstrap. Expected tools under $($Config.WixToolRoot)."
+    throw "WiX tools not found after bootstrap. Expected tools under $($Config.WixToolRoot). See $(Get-GpMsiDiagnosticsDocPath)."
   }
 
   return [pscustomobject]@{ Heat = $heat; Candle = $candle; Light = $light }
@@ -842,7 +1248,6 @@ function Write-GpMsiSources {
     "__INSTALL_PRIVILEGES__" = $(if ($Config.InstallScope -eq "perUser") { "limited" } else { "elevated" })
     "__ROOT_DIRECTORY_ID__" = $rootDirectoryId
     "__INSTALL_DIRECTORY_NAME__" = Escape-GpXmlText -Value $Config.InstallDirectoryName
-    "__PROGRAM_MENU_FOLDER_NAME__" = Escape-GpXmlText -Value $Config.ProductName
     "__SHORTCUT_COMPONENT_GUID__" = ([guid]::NewGuid().ToString())
     "__SHORTCUT_NAME__" = Escape-GpXmlText -Value $Config.ShortcutName
     "__LAUNCHER_FILE_NAME__" = Escape-GpXmlText -Value $Config.LauncherFileName
@@ -898,12 +1303,35 @@ function Build-GpMsiArtifacts {
   ) -LogPath $LogPath
 
   $lightArgs = [System.Collections.Generic.List[string]]::new()
+  $suppressedIces = [System.Collections.Generic.List[string]]::new()
+  $skipValidation = $Config.WixSkipValidation -or ($env:GP_WIX_SKIP_VALIDATION -eq "1") -or ($env:GP_WIX_SKIP_VALIDATION -eq "true")
+
+  function Add-SuppressedIce([string]$IceName) {
+    if (-not [string]::IsNullOrWhiteSpace($IceName) -and (-not $suppressedIces.Contains($IceName))) {
+      $suppressedIces.Add($IceName) | Out-Null
+    }
+  }
+
   $lightArgs.Add("-out") | Out-Null
   $lightArgs.Add($msiPath) | Out-Null
+  if ($skipValidation) {
+    $lightArgs.Add("-sval") | Out-Null
+  }
   if ($Config.InstallScope -eq "perUser") {
     foreach ($ice in @("ICE38", "ICE64", "ICE91")) {
-      $lightArgs.Add("-sice:$ice") | Out-Null
+      Add-SuppressedIce $ice
     }
+  }
+  foreach ($ice in @($Config.WixSuppressedIces)) {
+    Add-SuppressedIce $ice
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:GP_WIX_SUPPRESS_ICES)) {
+    foreach ($ice in ($env:GP_WIX_SUPPRESS_ICES -split "[,; ]+")) {
+      Add-SuppressedIce $ice
+    }
+  }
+  foreach ($ice in @($suppressedIces)) {
+    $lightArgs.Add("-sice:$ice") | Out-Null
   }
   $lightArgs.Add((Join-Path $WorkPaths.WixRoot "Product.wixobj")) | Out-Null
   $lightArgs.Add((Join-Path $WorkPaths.WixRoot "InstalledFiles.wixobj")) | Out-Null
@@ -951,6 +1379,11 @@ function Invoke-GpMsiPackage {
   }
 
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Starting MSI package build for {0}" -f $config.ProductName)
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Manifest: {0}" -f $Context.ManifestPath)
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Stage root: {0}" -f $config.StageRoot)
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Artifact output: {0}" -f $config.ArtifactPlan.ArtifactPath)
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Portable output: {0}" -f $config.PortablePlan.ArtifactPath)
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Install scope: {0}" -f $config.InstallScope)
   Ensure-GpDirectory -Path $config.OutputPaths.TempRoot | Out-Null
   Ensure-GpDirectory -Path $config.OutputPaths.PackageRoot | Out-Null
 
@@ -958,6 +1391,8 @@ function Invoke-GpMsiPackage {
   $wixTools = Ensure-GpWixTools -Config $config -WorkPaths $workPaths -LogPath $LogPath
   $sources = Write-GpMsiSources -Context $Context -Config $config -WorkPaths $workPaths -WixTools $wixTools -LogPath $LogPath
   $artifacts = Build-GpMsiArtifacts -Context $Context -Config $config -WorkPaths $workPaths -WixTools $wixTools -Sources $sources -LogPath $LogPath
+  $metadataPath = Write-GpMsiArtifactMetadata -Context $Context -Config $config -WorkPaths $workPaths -WixTools $wixTools -InstallTree $installTree -Artifacts $artifacts -NoticeReport ([pscustomobject]@{ ReportPath = $installTree.NoticeReportPath; Entries = @($installTree.RuntimeNotices) }) -LogPath $LogPath
+  $diagnosticsPath = Write-GpMsiDiagnosticsSummary -Context $Context -Config $config -InstallTree $installTree -MetadataPath $metadataPath -LogPath $LogPath
 
   return [pscustomobject]@{
     Backend = "msi"
@@ -965,9 +1400,12 @@ function Invoke-GpMsiPackage {
     ProductName = $config.ProductName
     ArtifactPath = $artifacts.ArtifactPath
     PortableArtifactPath = $artifacts.PortableArtifactPath
+    MetadataPath = $metadataPath
+    DiagnosticsPath = $diagnosticsPath
     InstallRoot = $installTree.InstallRoot
     LauncherPath = $installTree.LauncherPath
     LauncherConfigPath = $installTree.LauncherConfigPath
+    NoticeReportPath = $installTree.NoticeReportPath
     UnresolvedDependencies = $installTree.UnresolvedDependencies
     LogPath = $LogPath
   }
@@ -1057,10 +1495,14 @@ function Invoke-GpMsiValidation {
   $installLog = Join-Path $validationRoot "install.log"
   $uninstallLog = Join-Path $validationRoot "uninstall.log"
 
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Validation manifest: {0}" -f $Context.ManifestPath)
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Validation artifact: {0}" -f $artifactPath)
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Expected install path: {0}" -f $installPath)
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Validation logs: install={0}; uninstall={1}" -f $installLog, $uninstallLog)
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Installing MSI: {0}" -f $artifactPath)
   $installProcess = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @("/i", $artifactPath, "/qn", "/norestart", "/l*v", $installLog)
   if ($installProcess.ExitCode -ne 0) {
-    throw "MSI install failed with exit code $($installProcess.ExitCode). See $installLog"
+    throw "MSI install failed with exit code $($installProcess.ExitCode). See $installLog and $(Get-GpMsiDiagnosticsDocPath)."
   }
 
   if (-not (Test-Path $launcherPath)) {
@@ -1099,17 +1541,17 @@ function Invoke-GpMsiValidation {
         $proc | Stop-Process -Force
       } catch {
       }
-      throw "Smoke launcher did not exit within $($validationPlan.TimeoutSeconds) seconds: $launcherPath"
+      throw "Smoke launcher did not exit within $($validationPlan.TimeoutSeconds) seconds: $launcherPath. See $(Get-GpMsiDiagnosticsDocPath)."
     }
 
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke process exit code: {0}" -f $proc.ExitCode)
     if ($proc.ExitCode -ne 0) {
-      throw "Smoke launcher exited with code $($proc.ExitCode): $launcherPath"
+      throw "Smoke launcher exited with code $($proc.ExitCode): $launcherPath. See $(Get-GpMsiDiagnosticsDocPath)."
     }
 
     $childProcesses = @(Get-GpMsiProcessesByExecutablePath -ExecutablePath $appPath)
     if ($childProcesses.Count -eq 0) {
-      throw "Smoke launch did not leave the packaged application running: $appPath"
+      throw "Smoke launch did not leave the packaged application running: $appPath. See $(Get-GpMsiDiagnosticsDocPath)."
     }
 
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke child process count: {0}" -f $childProcesses.Count)
@@ -1124,7 +1566,7 @@ function Invoke-GpMsiValidation {
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Uninstalling MSI: {0}" -f $artifactPath)
   $uninstallProcess = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @("/x", $artifactPath, "/qn", "/norestart", "/l*v", $uninstallLog)
   if ($uninstallProcess.ExitCode -ne 0) {
-    throw "MSI uninstall failed with exit code $($uninstallProcess.ExitCode). See $uninstallLog"
+    throw "MSI uninstall failed with exit code $($uninstallProcess.ExitCode). See $uninstallLog and $(Get-GpMsiDiagnosticsDocPath)."
   }
 
   if (Test-Path $launcherPath) {

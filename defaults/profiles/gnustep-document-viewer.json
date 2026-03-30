@@ -1,0 +1,13 @@
+{
+  "integrations": {
+    "categories": [
+      "Office",
+      "Viewer"
+    ]
+  },
+  "launch": {
+    "resourceRoots": [
+      "metadata/icons"
+    ]
+  }
+}

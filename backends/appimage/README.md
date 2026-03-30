@@ -26,3 +26,6 @@ of the core contract built for MSI.
 ## Current Phase 2 State
 The backend currently exposes a package-dispatch stub for shared CLI testing.
 Real AppDir and AppImage work starts in later phases.
+
+See `../../docs/appimage-extension-path.md` for the Phase 9 extension-path
+baseline.

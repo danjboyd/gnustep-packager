@@ -129,7 +129,44 @@ function Get-GpJsonFile {
   return (Get-Content -Raw -Path $resolvedPath | ConvertFrom-Json -AsHashtable)
 }
 
+function Get-GpRequestedProfiles {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest
+  )
+
+  $profiles = [System.Collections.Generic.List[string]]::new()
+  if ($Manifest.Contains("profiles")) {
+    foreach ($profile in @($Manifest["profiles"])) {
+      if (($profile -is [string]) -and (-not [string]::IsNullOrWhiteSpace($profile))) {
+        $profiles.Add($profile.Trim()) | Out-Null
+      }
+    }
+  }
+
+  return [string[]]@($profiles | Select-Object -Unique)
+}
+
+function Resolve-GpProfileDefaultsPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ProfileName
+  )
+
+  $toolRoot = Get-GpToolRoot
+  $profilePath = Join-Path $toolRoot ("defaults\\profiles\\{0}.json" -f $ProfileName)
+  if (-not (Test-Path $profilePath)) {
+    throw "Unknown manifest profile '$ProfileName'. Expected defaults file: $profilePath"
+  }
+
+  return $profilePath
+}
+
 function Get-GpDefaultManifest {
+  param(
+    [string[]]$Profiles = @()
+  )
+
   $toolRoot = Get-GpToolRoot
   $merged = @{}
 
@@ -141,6 +178,12 @@ function Get-GpDefaultManifest {
     $merged = Merge-GpHashtable -Base $merged -Overlay (Get-GpJsonFile -Path $path)
   }
 
+  foreach ($profileName in @($Profiles)) {
+    if (-not [string]::IsNullOrWhiteSpace($profileName)) {
+      $merged = Merge-GpHashtable -Base $merged -Overlay (Get-GpJsonFile -Path (Resolve-GpProfileDefaultsPath -ProfileName $profileName))
+    }
+  }
+
   return $merged
 }
 
@@ -150,7 +193,7 @@ function Resolve-GpManifestData {
     [System.Collections.IDictionary]$Manifest
   )
 
-  $defaults = Get-GpDefaultManifest
+  $defaults = Get-GpDefaultManifest -Profiles (Get-GpRequestedProfiles -Manifest $Manifest)
   return (Merge-GpHashtable -Base $defaults -Overlay $Manifest)
 }
 
@@ -276,6 +319,14 @@ function Test-GpManifest {
     Add-Issue "Unsupported schemaVersion '$($Manifest["schemaVersion"])'. Expected 1."
   }
 
+  if ($Manifest.Contains("profiles")) {
+    foreach ($profile in @($Manifest["profiles"])) {
+      if (-not (($profile -is [string]) -and (-not [string]::IsNullOrWhiteSpace($profile)))) {
+        Add-Issue "Manifest profiles must contain non-empty strings."
+      }
+    }
+  }
+
   $package = Require-Object -Parent $Manifest -Key "package" -Label "package"
   if ($package) {
     Require-String -Parent $package -Key "id" -Label "package.id"
@@ -365,6 +416,32 @@ function Test-GpManifest {
     }
   }
 
+  if ($Manifest.Contains("compliance")) {
+    if (-not ($Manifest["compliance"] -is [System.Collections.IDictionary])) {
+      Add-Issue "compliance must be an object when present."
+    } else {
+      $compliance = $Manifest["compliance"]
+      if ($compliance.Contains("runtimeNotices")) {
+        foreach ($entry in @($compliance["runtimeNotices"])) {
+          if (-not ($entry -is [System.Collections.IDictionary])) {
+            Add-Issue "compliance.runtimeNotices entries must be objects."
+            continue
+          }
+
+          if (-not $entry.Contains("name") -or -not (Test-StringValue $entry["name"])) {
+            Add-Issue "Missing required string: compliance.runtimeNotices[].name"
+          }
+
+          foreach ($optionalKey in @("version", "license", "source", "homepage", "stageRelativePath")) {
+            if ($entry.Contains($optionalKey) -and ($entry[$optionalKey] -ne $null) -and (-not ($entry[$optionalKey] -is [string]))) {
+              Add-Issue "compliance.runtimeNotices[].$optionalKey must be a string when present."
+            }
+          }
+        }
+      }
+    }
+  }
+
   return [string[]]$issues.ToArray()
 }
 
@@ -448,6 +525,53 @@ function Get-GpHostEnvironment {
     CurrentPath   = (Get-Location).Path
     ToolRoot      = Get-GpToolRoot
   }
+}
+
+function Get-GpComplianceEntries {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest
+  )
+
+  $entries = [System.Collections.Generic.List[hashtable]]::new()
+  if ($Manifest.Contains("compliance") -and ($Manifest["compliance"] -is [System.Collections.IDictionary])) {
+    $compliance = $Manifest["compliance"]
+    if ($compliance.Contains("runtimeNotices")) {
+      foreach ($entry in @($compliance["runtimeNotices"])) {
+        if ($entry -is [System.Collections.IDictionary]) {
+          $entries.Add([hashtable](Copy-GpValue -Value $entry)) | Out-Null
+        }
+      }
+    }
+  }
+
+  return [hashtable[]]@($entries.ToArray())
+}
+
+function Get-GpFileSha256 {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (-not (Test-Path $Path)) {
+    return $null
+  }
+
+  return (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
+}
+
+function Get-GpArtifactSidecarPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ArtifactPath,
+    [Parameter(Mandatory = $true)]
+    [string]$Suffix
+  )
+
+  $artifactDirectory = Split-Path -Parent $ArtifactPath
+  $artifactBaseName = [System.IO.Path]::GetFileNameWithoutExtension($ArtifactPath)
+  return (Join-Path $artifactDirectory ("{0}.{1}" -f $artifactBaseName, $Suffix))
 }
 
 function Escape-GpPwshLiteral {
@@ -926,6 +1050,7 @@ function Get-GpManifestSummary {
     Name            = $package["name"]
     Version         = $package["version"]
     Manufacturer    = $package["manufacturer"]
+    Profiles        = [string[]](Get-GpRequestedProfiles -Manifest $Manifest)
     StageRoot       = $payload["stageRoot"]
     EntryRelative   = $launch["entryRelativePath"]
     BuildCommand    = $pipeline["build"]["command"]
@@ -934,6 +1059,7 @@ function Get-GpManifestSummary {
     LogRoot         = $outputs["logRoot"]
     PackageRoot     = $outputs["packageRoot"]
     ValidationKind  = $validation["smoke"]["kind"]
+    ComplianceNoticeCount = @(Get-GpComplianceEntries -Manifest $Manifest).Count
     EnabledBackends = [string[]](Get-GpEnabledBackends -Manifest $Manifest)
   }
 }

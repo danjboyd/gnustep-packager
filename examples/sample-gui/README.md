@@ -5,13 +5,15 @@ This example is the current reference consumer for the repo.
 It exists to:
 
 - exercise the manifest schema and defaults layering
+- exercise built-in profile layering and compliance notice generation
 - prove the MSI backend against a stable input
 - give CI and local development one known-good fixture
 
 ## What It Includes
 
 - `package.manifest.json`
-  Reference manifest with MSI enabled
+  Reference manifest with MSI enabled, `gnustep-gui` profile usage, and
+  compliance notice entries
 - `src/SampleGNUstepApp.c`
   Tiny Windows GUI executable used as the inner app
 - `scripts/build-fixture.ps1`

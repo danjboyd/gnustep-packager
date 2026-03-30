@@ -1,0 +1,94 @@
+{
+  "$schema": "../../schemas/gnustep-packager.schema.json",
+  "schemaVersion": 1,
+  "profiles": [
+    "gnustep-gui",
+    "gnustep-document-viewer"
+  ],
+  "package": {
+    "id": "com.example.MarkdownViewer",
+    "name": "MarkdownViewer",
+    "displayName": "Markdown Viewer",
+    "version": "0.1.0",
+    "manufacturer": "Example Org",
+    "license": "MIT"
+  },
+  "pipeline": {
+    "workingDirectory": ".",
+    "shell": {
+      "kind": "pwsh",
+      "bootstrapCommands": [],
+      "environment": {}
+    },
+    "build": {
+      "command": "./scripts/build.ps1"
+    },
+    "stage": {
+      "command": "./scripts/stage.ps1 -StageRoot dist/stage",
+      "outputRoot": "dist/stage"
+    }
+  },
+  "payload": {
+    "layoutVersion": 1,
+    "stageRoot": "dist/stage",
+    "appRoot": "app",
+    "runtimeRoot": "runtime"
+  },
+  "launch": {
+    "entryRelativePath": "app/MarkdownViewer.app/MarkdownViewer.exe",
+    "workingDirectory": ".",
+    "env": {}
+  },
+  "outputs": {
+    "root": "dist",
+    "packageRoot": "dist/packages",
+    "logRoot": "dist/logs",
+    "tempRoot": "dist/tmp",
+    "validationRoot": "dist/validation"
+  },
+  "validation": {
+    "smoke": {
+      "enabled": true,
+      "kind": "staged-layout",
+      "requiredPaths": [
+        "metadata/icons"
+      ],
+      "timeoutSeconds": 30
+    },
+    "logs": {
+      "retainOnSuccess": true
+    }
+  },
+  "integrations": {
+    "shortcutName": "Markdown Viewer",
+    "fileAssociations": [
+      {
+        "kind": "extension",
+        "value": ".md",
+        "description": "Markdown document"
+      }
+    ]
+  },
+  "compliance": {
+    "runtimeNotices": [
+      {
+        "name": "GNUstep Runtime",
+        "license": "<set-license>",
+        "stageRelativePath": "metadata/licenses/gnustep-runtime.txt"
+      }
+    ]
+  },
+  "backends": {
+    "msi": {
+      "enabled": true,
+      "upgradeCode": "00000000-0000-0000-0000-000000000000",
+      "shortcutName": "Markdown Viewer",
+      "iconRelativePath": "metadata/icons/app.ico"
+    },
+    "appimage": {
+      "enabled": false,
+      "desktopEntryName": "markdown-viewer.desktop",
+      "iconRelativePath": "metadata/icons/app.png"
+    }
+  }
+}

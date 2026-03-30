@@ -7,6 +7,7 @@
       "shortcutName": "",
       "installDirectoryName": "",
       "launcherFileName": "",
+      "iconRelativePath": "",
       "artifactNamePattern": "{name}-{version}-win64.msi",
       "portableArtifactNamePattern": "{name}-{version}-win64-portable.zip",
       "fallbackRuntimeRoot": "C:\\clang64",
@@ -23,7 +24,9 @@
       "wix": {
         "version": "3.11.2",
         "downloadUrl": "https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix311-binaries.zip",
-        "toolRoot": "tools/wix"
+        "toolRoot": "tools/wix",
+        "skipValidation": false,
+        "suppressedIces": []
       },
       "signing": {
         "enabled": false,

@@ -67,6 +67,7 @@ This repo now includes the phase 1 through phase 4 implementation baseline:
 - MSI backend docs for backend boundary, runtime policy, launcher design, and
   WiX rendering
 - a manifest-driven Windows launcher plus generated `.launcher.ini`
+- support for embedding a staged `.ico` into the MSI launcher
 - a real MSI backend that transforms the staged payload into an install tree,
   harvests it with WiX, and emits both MSI and ZIP artifacts
 - backend MSI validation for install, launch, and uninstall smoke testing
@@ -79,6 +80,14 @@ This repo now also includes the phase 5 and phase 6 foundation:
 - optional signing hooks for release packaging
 - Pester regression tests for manifest, versioning, and MSI transform behavior
 - a documented compatibility matrix and consumer setup path
+
+This repo now also includes the phase 9 Windows hardening pass:
+
+- manifest-level compliance notice entries plus generated runtime notice reports
+- package-side artifact provenance and diagnostics sidecars
+- built-in manifest profiles for common GNUstep GUI app shapes
+- MSI failure triage guidance and release-gate documentation
+- a documented AppImage extension path for the future Linux backend
 
 Current sample verification covers:
 - `build`
@@ -135,8 +144,12 @@ Release and consumer docs:
 - [docs/local-ci-parity.md](docs/local-ci-parity.md)
 - [docs/github-actions.md](docs/github-actions.md)
 - [docs/versioning-release.md](docs/versioning-release.md)
+- [docs/release-gate.md](docs/release-gate.md)
 - [docs/signing.md](docs/signing.md)
 - [docs/consumer-setup.md](docs/consumer-setup.md)
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md)
+- [docs/compliance-notices.md](docs/compliance-notices.md)
+- [docs/windows-msi-triage.md](docs/windows-msi-triage.md)
+- [docs/appimage-extension-path.md](docs/appimage-extension-path.md)
 
 See [Roadmap.md](Roadmap.md) for the implementation phases.

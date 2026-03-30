@@ -10,6 +10,7 @@ The package manifest tells `gnustep-packager`:
 
 ## Top-Level Sections
 - `schemaVersion`
+- `profiles`
 - `package`
 - `pipeline`
 - `payload`
@@ -17,7 +18,15 @@ The package manifest tells `gnustep-packager`:
 - `outputs`
 - `validation`
 - `integrations`
+- `compliance`
 - `backends`
+
+## `profiles`
+Optional built-in defaults layers for common consumer shapes.
+
+Current built-in profiles:
+- `gnustep-gui`
+- `gnustep-document-viewer`
 
 ## `package`
 Shared identity and display metadata.
@@ -88,6 +97,17 @@ Examples:
 - menu categories
 - file associations
 
+## `compliance`
+Optional runtime notice metadata for packaged payload contents.
+
+Important fields:
+- `runtimeNotices[].name`
+- `runtimeNotices[].version`
+- `runtimeNotices[].license`
+- `runtimeNotices[].source`
+- `runtimeNotices[].homepage`
+- `runtimeNotices[].stageRelativePath`
+
 ## `backends`
 Backend-specific toggles and settings.
 
@@ -103,6 +123,7 @@ Important fields:
 - `shortcutName`
 - `installDirectoryName`
 - `launcherFileName`
+- `iconRelativePath`
 - `artifactNamePattern`
 - `portableArtifactNamePattern`
 - `fallbackRuntimeRoot`
@@ -110,6 +131,8 @@ Important fields:
 - `wix.version`
 - `wix.downloadUrl`
 - `wix.toolRoot`
+- `wix.skipValidation`
+- `wix.suppressedIces`
 - `signing.enabled`
 - `signing.toolPath`
 - `signing.timestampUrl`
@@ -132,3 +155,7 @@ override from:
 - `GP_PACKAGE_VERSION_OVERRIDE`
 
 See [configuration-layering.md](configuration-layering.md).
+
+See also:
+- [consumer-setup.md](consumer-setup.md)
+- [compliance-notices.md](compliance-notices.md)

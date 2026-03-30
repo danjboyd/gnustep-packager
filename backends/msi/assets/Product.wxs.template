@@ -18,18 +18,15 @@
       <Directory Id="__ROOT_DIRECTORY_ID__">
         <Directory Id="INSTALLDIR" Name="__INSTALL_DIRECTORY_NAME__" />
       </Directory>
-      <Directory Id="ProgramMenuFolder">
-        <Directory Id="ApplicationProgramsFolder" Name="__PROGRAM_MENU_FOLDER_NAME__" />
-      </Directory>
+      <Directory Id="ProgramMenuFolder" />
     </Directory>
 
-    <DirectoryRef Id="ApplicationProgramsFolder">
+    <DirectoryRef Id="ProgramMenuFolder">
       <Component Id="AppShortcut" Guid="__SHORTCUT_COMPONENT_GUID__">
         <Shortcut Id="ApplicationStartMenuShortcut"
                   Name="__SHORTCUT_NAME__"
                   WorkingDirectory="INSTALLDIR"
                   Target="[INSTALLDIR]__LAUNCHER_FILE_NAME__" />
-        <RemoveFolder Id="ApplicationProgramsFolderRemove" On="uninstall" />
         <RegistryValue Root="__REGISTRY_ROOT__"
                        Key="Software\__REGISTRY_MANUFACTURER__\__REGISTRY_PRODUCT_NAME__"
                        Name="installed"

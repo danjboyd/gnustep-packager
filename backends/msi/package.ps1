@@ -23,7 +23,10 @@ if ($DryRun) {
 
 Write-Host "MSI created: $($result.ArtifactPath)"
 Write-Host "Portable ZIP created: $($result.PortableArtifactPath)"
+Write-Host "Artifact metadata: $($result.MetadataPath)"
+Write-Host "Diagnostics summary: $($result.DiagnosticsPath)"
 Write-Host "Launcher: $($result.LauncherPath)"
+Write-Host "Notice report: $($result.NoticeReportPath)"
 if ($result.UnresolvedDependencies.Count -gt 0) {
   Write-Host "Unresolved runtime dependencies: $([string]::Join(', ', $result.UnresolvedDependencies))"
 }

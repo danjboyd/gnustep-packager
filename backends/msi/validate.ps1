@@ -25,3 +25,5 @@ if ($DryRun) {
 Write-Host "MSI validation passed: $($result.ArtifactPath)"
 Write-Host "Installed path probe: $($result.InstallPath)"
 Write-Host "Validation log: $($result.LogPath)"
+Write-Host "Install log: $($result.InstallLog)"
+Write-Host "Uninstall log: $($result.UninstallLog)"

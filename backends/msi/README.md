@@ -27,12 +27,19 @@ package contract around MSI-only concepts.
 The backend now implements:
 - staged payload to install-tree transform
 - generic Windows launcher compilation and config generation
+- optional launcher icon embedding from a staged `.ico`
 - best-effort runtime DLL closure from configured search roots
 - WiX bootstrap, harvest, compile, and link steps
 - MSI plus portable ZIP artifact emission
+- package metadata and diagnostics sidecar outputs
+- bundled third-party notice report generation from manifest compliance entries
 - backend validation for install, launch, and uninstall smoke paths
 
 Key backend assets:
 - `assets/GpWindowsLauncher.c`
 - `assets/Product.wxs.template`
 - `lib/msi.ps1`
+
+Related docs:
+- `../../docs/compliance-notices.md`
+- `../../docs/windows-msi-triage.md`
