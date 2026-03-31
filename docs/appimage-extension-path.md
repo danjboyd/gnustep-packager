@@ -1,8 +1,9 @@
 # AppImage Extension Path
 
 ## Purpose
-Phase 9D does not require a working AppImage backend yet, but it does require a
-clear path from the shared model into a future AppImage implementation.
+This document captured the Phase 9 extension-path baseline before the AppImage
+backend landed. The backend is now implemented; this file remains as a compact
+overview of how the shared model maps into AppImage concerns.
 
 ## Shared Model Reuse
 The existing manifest already carries most of the AppImage inputs:
@@ -39,11 +40,11 @@ The existing manifest already carries most of the AppImage inputs:
 - bundled notice reports should continue to be generated from
   `compliance.runtimeNotices`
 
-## Implementation Sequence
-The expected next implementation steps still match the roadmap:
+## Implemented Follow-Through
+The detailed implementation docs now live here:
 
-1. `Phase 7A`: supported Linux environment and portability target
-2. `Phase 7B`: manifest-to-desktop metadata mapping
-3. `Phase 7C`: AppDir transform and `AppRun` design
-4. `Phase 7D`: Linux runtime policy
-5. `Phase 8A` through `8D`: backend implementation and validation
+- [appimage-requirements.md](appimage-requirements.md)
+- [appimage-metadata-mapping.md](appimage-metadata-mapping.md)
+- [appimage-appdir-design.md](appimage-appdir-design.md)
+- [appimage-runtime-policy.md](appimage-runtime-policy.md)
+- [../backends/appimage/README.md](../backends/appimage/README.md)

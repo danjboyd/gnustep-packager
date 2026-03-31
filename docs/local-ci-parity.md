@@ -26,6 +26,13 @@ It drives the same sequence in both local and CI contexts:
   -RunSmoke
 ```
 
+```powershell
+./scripts/run-packaging-pipeline.ps1 `
+  -Manifest examples/sample-linux/package.manifest.json `
+  -Backend appimage `
+  -RunSmoke
+```
+
 ## CI Usage
 The reusable GitHub Actions workflow calls the same wrapper rather than
 re-encoding packaging logic in YAML.
@@ -35,6 +42,7 @@ That keeps:
 - local reproduction straightforward
 - workflow behavior easier to reason about
 - release changes concentrated in PowerShell and manifest logic
+- backend-specific host setup constrained to a small workflow preflight step
 
 ## Version Overrides
 Both local and CI flows can override the package version with:

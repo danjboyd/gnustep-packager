@@ -65,7 +65,7 @@ on:
 
 jobs:
   package:
-    runs-on: windows-latest
+    runs-on: ${{ inputs.backend == 'appimage' && 'ubuntu-latest' || 'windows-latest' }}
     outputs:
       resolved-version: ${{ steps.manifest.outputs.resolved_version }}
       package-root: ${{ steps.manifest.outputs.package_root }}
@@ -95,6 +95,13 @@ jobs:
           ref: ${{ steps.packager.outputs.ref }}
           path: .gnustep-packager-toolkit
 
+      - name: Install Linux AppImage Prerequisites
+        if: ${{ inputs.backend == 'appimage' }}
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y squashfs-tools desktop-file-utils
+
       - name: Resolve Manifest Outputs
         id: manifest
         run: |
@@ -107,7 +114,7 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace('${{ inputs.package-version }}')) {
             $args += @('-PackageVersion', '${{ inputs.package-version }}')
           }
-          $manifestJson = & (Join-Path $toolRoot 'scripts\gnustep-packager.ps1') @args
+          $manifestJson = & (Join-Path $toolRoot 'scripts/gnustep-packager.ps1') @args
           $manifest = $manifestJson | ConvertFrom-Json -AsHashtable
           $manifestRoot = Split-Path -Parent $manifestPath
 
@@ -124,7 +131,7 @@ jobs:
           "validation_root=$(Resolve-OutputPath $manifestRoot $manifest.outputs.validationRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Configure Signing Environment
-        if: ${{ inputs.sign-artifacts }}
+        if: ${{ inputs.sign-artifacts && inputs.backend == 'msi' }}
         run: |
           "GP_SIGN_ENABLED=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           if (-not [string]::IsNullOrWhiteSpace('${{ inputs.sign-timestamp-url }}')) {
@@ -164,7 +171,7 @@ ${{ secrets.sign_pfx_base64 }}
           if ('${{ inputs.run-smoke }}' -eq 'true') {
             $args += '-RunSmoke'
           }
-          & (Join-Path $toolRoot 'scripts\run-packaging-pipeline.ps1') @args
+          & (Join-Path $toolRoot 'scripts/run-packaging-pipeline.ps1') @args
 
       - name: Upload Package Artifacts
         if: ${{ inputs.upload-artifacts }}

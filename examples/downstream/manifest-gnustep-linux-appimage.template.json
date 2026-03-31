@@ -5,25 +5,27 @@
     "gnustep-gui"
   ],
   "package": {
-    "id": "com.example.MyGNUstepApp",
-    "name": "MyGNUstepApp",
-    "displayName": "My GNUstep App",
+    "id": "com.example.MyGNUstepLinuxApp",
+    "name": "MyGNUstepLinuxApp",
+    "displayName": "My GNUstep Linux App",
     "version": "0.1.0",
     "manufacturer": "Example Org",
-    "license": "MIT"
+    "summary": "Short desktop summary for the AppImage metadata.",
+    "license": "MIT",
+    "homepage": "https://example.com/my-gnustep-linux-app"
   },
   "pipeline": {
     "workingDirectory": ".",
     "shell": {
-      "kind": "pwsh",
+      "kind": "bash",
       "bootstrapCommands": [],
       "environment": {}
     },
     "build": {
-      "command": "./scripts/build.ps1"
+      "command": "./scripts/build.sh"
     },
     "stage": {
-      "command": "./scripts/stage.ps1 -StageRoot dist/stage",
+      "command": "./scripts/stage.sh dist/stage",
       "outputRoot": "dist/stage"
     }
   },
@@ -34,8 +36,8 @@
     "runtimeRoot": "runtime"
   },
   "launch": {
-    "entryRelativePath": "app/MyGNUstepApp.app/MyGNUstepApp.exe",
-    "workingDirectory": ".",
+    "entryRelativePath": "app/MyGNUstepLinuxApp.app/MyGNUstepLinuxApp",
+    "workingDirectory": "app/MyGNUstepLinuxApp.app",
     "env": {}
   },
   "outputs": {
@@ -49,7 +51,9 @@
     "smoke": {
       "enabled": true,
       "kind": "staged-layout",
-      "requiredPaths": [],
+      "requiredPaths": [
+        "metadata/icons/app.png"
+      ],
       "timeoutSeconds": 30
     },
     "logs": {
@@ -57,7 +61,7 @@
     }
   },
   "integrations": {
-    "shortcutName": "My GNUstep App",
+    "shortcutName": "My GNUstep Linux App",
     "fileAssociations": []
   },
   "compliance": {
@@ -71,12 +75,11 @@
   },
   "backends": {
     "msi": {
-      "enabled": true,
-      "upgradeCode": "00000000-0000-0000-0000-000000000000"
+      "enabled": false
     },
     "appimage": {
-      "enabled": false,
-      "desktopEntryName": "my-gnustep-app.desktop",
+      "enabled": true,
+      "desktopEntryName": "my-gnustep-linux-app.desktop",
       "iconRelativePath": "metadata/icons/app.png"
     }
   }

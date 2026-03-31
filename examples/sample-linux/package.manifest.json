@@ -1,0 +1,107 @@
+{
+  "$schema": "../../schemas/gnustep-packager.schema.json",
+  "schemaVersion": 1,
+  "profiles": [
+    "gnustep-gui"
+  ],
+  "package": {
+    "id": "com.example.SampleGNUstepLinuxApp",
+    "name": "SampleGNUstepLinuxApp",
+    "displayName": "Sample GNUstep Linux App",
+    "version": "0.1.0",
+    "manufacturer": "Example Org",
+    "summary": "Reference manifest for Linux AppImage packaging validation.",
+    "license": "MIT",
+    "homepage": "https://example.invalid/sample-gnustep-linux-app"
+  },
+  "pipeline": {
+    "workingDirectory": ".",
+    "shell": {
+      "kind": "bash",
+      "bootstrapCommands": [],
+      "environment": {
+        "GP_FIXTURE_MODE": "1"
+      }
+    },
+    "build": {
+      "command": "./scripts/build-fixture.sh out/build"
+    },
+    "stage": {
+      "command": "./scripts/stage-fixture.sh dist/stage",
+      "outputRoot": "dist/stage"
+    }
+  },
+  "payload": {
+    "layoutVersion": 1,
+    "stageRoot": "dist/stage",
+    "appRoot": "app",
+    "runtimeRoot": "runtime"
+  },
+  "launch": {
+    "entryRelativePath": "app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp",
+    "workingDirectory": "app/SampleGNUstepLinuxApp.app",
+    "arguments": [],
+    "env": {
+      "GP_FIXTURE_NAME": "SampleGNUstepLinuxApp"
+    }
+  },
+  "outputs": {
+    "root": "dist",
+    "packageRoot": "dist/packages",
+    "logRoot": "dist/logs",
+    "tempRoot": "dist/tmp",
+    "validationRoot": "dist/validation"
+  },
+  "validation": {
+    "smoke": {
+      "enabled": true,
+      "kind": "staged-layout",
+      "requiredPaths": [
+        "metadata/icons/sample-linux.png",
+        "runtime/config/theme.conf"
+      ],
+      "timeoutSeconds": 30
+    },
+    "logs": {
+      "retainOnSuccess": true
+    }
+  },
+  "integrations": {
+    "shortcutName": "Sample GNUstep Linux App",
+    "fileAssociations": [
+      {
+        "kind": "extension",
+        "value": ".samplelinux",
+        "description": "Sample GNUstep Linux document"
+      }
+    ]
+  },
+  "compliance": {
+    "runtimeNotices": [
+      {
+        "name": "SampleGNUstepLinuxApp",
+        "version": "0.1.0",
+        "license": "MIT",
+        "source": "Reference Linux fixture application payload",
+        "homepage": "https://example.invalid/sample-gnustep-linux-app",
+        "stageRelativePath": "metadata/licenses/SampleGNUstepLinuxApp.txt"
+      },
+      {
+        "name": "GNUstep Runtime Seed",
+        "license": "LGPL-2.1-or-later",
+        "source": "Fixture runtime payload for Linux packaging and validation tests",
+        "stageRelativePath": "metadata/licenses/GNUstep-runtime.txt"
+      }
+    ]
+  },
+  "backends": {
+    "msi": {
+      "enabled": false
+    },
+    "appimage": {
+      "enabled": true,
+      "desktopEntryName": "sample-gnustep-linux.desktop",
+      "iconRelativePath": "metadata/icons/sample-linux.png"
+    }
+  }
+}

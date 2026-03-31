@@ -160,10 +160,10 @@ Status: implemented in the current repo baseline.
 
 ## Phase 5: CI and Release Workflow
 Goal: make the backend usable in app repos and CI systems.
-Status: implemented for the current Windows MSI scope.
+Status: implemented for the current Windows MSI and Linux AppImage scope.
 
-The reusable workflow and repo validation jobs currently target Windows runners.
-Linux/AppImage CI extension is tracked under `Phase 8E`.
+The reusable workflow now selects backend-appropriate runners, and repo CI
+exercises both the Windows MSI and Linux AppImage reference paths.
 
 - `Phase 5A`: Local and CI parity
   Deliverables:
@@ -197,12 +197,12 @@ Linux/AppImage CI extension is tracked under `Phase 8E`.
 
 ## Phase 6: Reference Consumer and Test Coverage
 Goal: keep the repo grounded in a real consumer shape and prevent regression.
-Status: implemented for the current Windows MSI scope.
+Status: implemented for the current Windows MSI and Linux AppImage scope.
 
-`Phase 6A` through `Phase 6D` are complete for the Windows sample fixture and
-Windows-oriented regression coverage. `Phase 6E` and `Phase 6F` extend this
-phase so Linux/AppImage work can proceed on Linux hosts without regressing the
-shared model.
+`Phase 6A` through `Phase 6F` are complete. The repo now carries both a
+Windows MSI reference fixture and a Linux AppImage reference fixture, and
+`scripts/test-repo.ps1` selects platform-appropriate regression coverage on
+Windows and Linux hosts.
 
 - `Phase 6A`: Reference fixture app
   Deliverables:
@@ -257,8 +257,7 @@ shared model.
 
 ## Phase 7: Linux AppImage Preparation
 Goal: prepare the architecture so AppImage is an extension, not a rewrite.
-Status: AppImage extension path is documented, but `Phase 7A` through
-`Phase 7D` remain.
+Status: implemented.
 
 - `Phase 7A`: Linux backend requirements study
   Deliverables:
@@ -296,7 +295,7 @@ Status: AppImage extension path is documented, but `Phase 7A` through
 
 ## Phase 8: Linux AppImage Backend Implementation
 Goal: ship the second backend using the same shared model.
-Status: not started.
+Status: implemented.
 
 - `Phase 8A`: Shared-to-AppDir transform
   Deliverables:
@@ -349,8 +348,7 @@ Status: not started.
 
 ## Phase 9: Hardening and Release Readiness
 Goal: make the repo suitable for sustained reuse.
-Status: implemented for the current Windows MSI scope, with the AppImage
-extension path documented for later phases.
+Status: implemented for the current Windows MSI and Linux AppImage scope.
 
 - `Phase 9A`: Licensing and notices
   Deliverables:
@@ -379,8 +377,7 @@ extension path documented for later phases.
 - `Phase 9D`: Version 1 release gate
   Deliverables:
   - stable Windows MSI backend
-  - documented AppImage extension path, or working AppImage backend if Phase 8
-    is complete
+  - stable Linux AppImage backend
   Exit criteria:
   - repo can be tagged and presented as a reusable toolkit rather than an
     internal experiment

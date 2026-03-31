@@ -1,0 +1,201 @@
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+Describe "MSI backend" {
+  BeforeAll {
+    function Assert-GpEqual {
+      param(
+        [object]$Actual,
+        [object]$Expected,
+        [string]$Message
+      )
+
+      if ($Actual -is [System.Array] -or $Expected -is [System.Array]) {
+        $actualJson = ConvertTo-Json @($Actual) -Compress
+        $expectedJson = ConvertTo-Json @($Expected) -Compress
+        if ($actualJson -ne $expectedJson) {
+          throw "$Message Expected: $expectedJson Actual: $actualJson"
+        }
+        return
+      }
+
+      if ($Actual -ne $Expected) {
+        throw "$Message Expected: $Expected Actual: $Actual"
+      }
+    }
+
+    function Assert-GpTrue {
+      param(
+        [bool]$Condition,
+        [string]$Message
+      )
+
+      if (-not $Condition) {
+        throw $Message
+      }
+    }
+
+    function Assert-GpMatch {
+      param(
+        [string]$Actual,
+        [string]$Pattern,
+        [string]$Message
+      )
+
+      if ($Actual -notmatch $Pattern) {
+        throw "$Message Pattern: $Pattern Actual: $Actual"
+      }
+    }
+
+    function Assert-GpFalse {
+      param(
+        [bool]$Condition,
+        [string]$Message
+      )
+
+      if ($Condition) {
+        throw $Message
+      }
+    }
+
+    $script:repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\\.."))
+    $script:manifestPath = Join-Path $script:repoRoot "examples\\sample-gui\\package.manifest.json"
+    $script:toolScript = Join-Path $script:repoRoot "scripts\\gnustep-packager.ps1"
+
+    . (Join-Path $script:repoRoot "scripts\\lib\\core.ps1")
+    . (Join-Path $script:repoRoot "backends\\msi\\lib\\msi.ps1")
+
+    & $script:toolScript -Command build -Manifest $script:manifestPath
+    & $script:toolScript -Command stage -Manifest $script:manifestPath
+
+    $script:transformContext = Get-GpManifestContext -Path $script:manifestPath
+    $script:transformConfig = Get-GpMsiConfig -Context $script:transformContext
+    $script:transformWorkPaths = Get-GpMsiWorkPaths -Context $script:transformContext
+    $script:transformLogPath = Join-Path $script:transformConfig.OutputPaths.LogRoot "pester-msi-transform.log"
+    $script:transform = Prepare-GpMsiInstallTree -Context $script:transformContext -Config $script:transformConfig -WorkPaths $script:transformWorkPaths -LogPath $script:transformLogPath
+  }
+
+  Context "Manifest resolution" {
+    It "applies defaults and honors package version override" {
+      $context = Get-GpManifestContext -Path $script:manifestPath -PackageVersion "2.5.7-rc1"
+
+      Assert-GpEqual -Actual $context.PackageVersionOverride -Expected "2.5.7-rc1" -Message "Version override should be preserved."
+      Assert-GpEqual -Actual $context.Manifest["package"]["version"] -Expected "2.5.7-rc1" -Message "Resolved manifest should use the overridden version."
+      Assert-GpEqual -Actual $context.Manifest["backends"]["msi"]["portableArtifactNamePattern"] -Expected "{name}-{version}-win64-portable.zip" -Message "MSI portable artifact default should be present."
+      Assert-GpEqual -Actual @($context.Manifest["profiles"]) -Expected @("gnustep-gui") -Message "Resolved manifest should preserve requested built-in profiles."
+      Assert-GpEqual -Actual @(Get-GpComplianceEntries -Manifest $context.Manifest).Count -Expected 2 -Message "Resolved manifest should surface compliance notice entries."
+    }
+
+    It "resolves enabled backends from the manifest" {
+      $context = Get-GpManifestContext -Path $script:manifestPath
+
+      Assert-GpEqual -Actual @(Get-GpEnabledBackends -Manifest $context.Manifest) -Expected @("msi") -Message "Enabled backends should match the sample manifest."
+    }
+
+    It "applies built-in profile defaults before manifest overrides" {
+      $context = Get-GpManifestContext -Path $script:manifestPath
+
+      Assert-GpEqual -Actual @($context.Manifest["launch"]["pathPrepend"]) -Expected @("runtime/bin") -Message "GUI profile should provide common runtime PATH defaults."
+      Assert-GpEqual -Actual $context.Manifest["launch"]["env"]["GNUSTEP_PATHPREFIX_LIST"] -Expected "{@runtimeRoot}" -Message "GUI profile should provide the common GNUstep runtime root token."
+      Assert-GpEqual -Actual @($context.Manifest["payload"]["runtimeSeedPaths"]) -Expected @("runtime/bin/defaults.exe") -Message "The Windows fixture manifest should declare its runtime seed paths."
+    }
+  }
+
+  Context "Versioning and transform" {
+    It "normalizes semantic versions for MSI upgrade semantics" {
+      Assert-GpEqual -Actual (Normalize-GpMsiVersion -Version "1.2.3-rc1+7") -Expected "1.2.3.1" -Message "MSI version normalization should keep the first four numeric groups."
+    }
+
+    It "builds artifact names from the overridden package version" {
+      $context = Get-GpManifestContext -Path $script:manifestPath -PackageVersion "3.4.5"
+      $config = Get-GpMsiConfig -Context $context
+
+      Assert-GpEqual -Actual $config.ArtifactPlan.ArtifactName -Expected "SampleGNUstepApp-3.4.5-win64.msi" -Message "MSI artifact name should track the overridden version."
+      Assert-GpEqual -Actual $config.PortablePlan.ArtifactName -Expected "SampleGNUstepApp-3.4.5-win64-portable.zip" -Message "Portable artifact name should track the overridden version."
+      Assert-GpEqual -Actual $config.MsiVersion -Expected "3.4.5.0" -Message "MSI numeric version should be normalized from the overridden version."
+    }
+
+    It "computes the per-user install root used by validation" {
+      $context = Get-GpManifestContext -Path $script:manifestPath
+      $config = Get-GpMsiConfig -Context $context
+
+      Assert-GpMatch -Actual (Get-GpMsiInstallPathGuess -Config $config) -Pattern ([regex]::Escape((Join-Path $env:LOCALAPPDATA "SampleGNUstepApp"))) -Message "Validation install path should point to LocalAppData for per-user installs."
+    }
+
+    It "copies the staged payload into the install tree" {
+      Assert-GpTrue -Condition (Test-Path (Join-Path $script:transform.InstallRoot "app\\SampleGNUstepApp.app\\SampleGNUstepApp.exe")) -Message "Transformed install tree should contain the app executable."
+      Assert-GpTrue -Condition (Test-Path (Join-Path $script:transform.InstallRoot "runtime\\bin\\defaults.exe")) -Message "Transformed install tree should contain the staged runtime seed."
+      Assert-GpTrue -Condition (Test-Path (Join-Path $script:transform.InstallRoot "metadata\\icons\\sample-icon.txt")) -Message "Transformed install tree should contain staged metadata."
+      Assert-GpTrue -Condition (Test-Path (Join-Path $script:transform.InstallRoot "metadata\\licenses\\GNUstep-runtime.txt")) -Message "Transformed install tree should contain staged license metadata."
+    }
+
+    It "generates launcher output and config" {
+      Assert-GpTrue -Condition (Test-Path $script:transform.LauncherPath) -Message "Launcher executable should be generated."
+      Assert-GpTrue -Condition (Test-Path $script:transform.LauncherConfigPath) -Message "Launcher config should be generated."
+    }
+
+    It "writes the launch contract into the generated launcher config" {
+      $configText = Get-Content -Raw -Path $script:transform.LauncherConfigPath
+
+      Assert-GpMatch -Actual $configText -Pattern "entryRelativePath=app/SampleGNUstepApp.app/SampleGNUstepApp.exe" -Message "Launcher config should contain the entry path."
+      Assert-GpMatch -Actual $configText -Pattern "pathPrepend=runtime/bin" -Message "Launcher config should contain runtime PATH additions."
+      Assert-GpMatch -Actual $configText -Pattern "env=GNUSTEP_PATHPREFIX_LIST=\{@runtimeRoot\}" -Message "Launcher config should preserve runtime token expansion."
+    }
+
+    It "writes a bundled notice report from compliance entries" {
+      $noticeText = Get-Content -Raw -Path $script:transform.NoticeReportPath
+
+      Assert-GpTrue -Condition (Test-Path $script:transform.NoticeReportPath) -Message "Transform should emit a third-party notice report."
+      Assert-GpMatch -Actual $noticeText -Pattern "Runtime notice entries: 2" -Message "Notice report should summarize compliance entries."
+      Assert-GpMatch -Actual $noticeText -Pattern "GNUstep Runtime Seed" -Message "Notice report should list configured runtime notices."
+      Assert-GpMatch -Actual $noticeText -Pattern "metadata/licenses/GNUstep-runtime.txt" -Message "Notice report should preserve staged notice paths."
+    }
+
+    It "places the shortcut at the Start Menu root" {
+      $templateText = Get-Content -Raw -Path $script:transformConfig.ProductTemplatePath
+
+      Assert-GpMatch -Actual $templateText -Pattern '<DirectoryRef Id="ProgramMenuFolder">' -Message "Shortcut template should write directly to the Start Menu root."
+      Assert-GpFalse -Condition ($templateText -match 'ApplicationProgramsFolder') -Message "Shortcut template should not create an extra Start Menu folder."
+    }
+  }
+
+  Context "Icon configuration and wrapper" {
+    It "resolves a staged .ico path when configured" {
+      $stageRoot = Join-Path $env:TEMP ("gp-icon-test-" + [guid]::NewGuid().ToString("N"))
+      $iconPath = Join-Path $stageRoot "metadata\\icons\\sample.ico"
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $iconPath) | Out-Null
+      Set-Content -Path $iconPath -Value "placeholder"
+
+      try {
+        $config = [pscustomobject]@{
+          StageRoot = $stageRoot
+          IconRelativePath = "metadata/icons/sample.ico"
+        }
+
+        $resolvedIconPath = [System.IO.Path]::GetFullPath((Resolve-GpMsiIconSourcePath -Config $config))
+        $expectedIconPath = [System.IO.Path]::GetFullPath($iconPath)
+        Assert-GpEqual -Actual $resolvedIconPath -Expected $expectedIconPath -Message "Configured MSI icon path should resolve inside the staged payload."
+      } finally {
+        if (Test-Path $stageRoot) {
+          Remove-Item -Recurse -Force $stageRoot
+        }
+      }
+    }
+
+    It "supports dry-run packaging with a version override" {
+      try {
+        & (Join-Path $script:repoRoot "scripts\\run-packaging-pipeline.ps1") `
+          -Manifest $script:manifestPath `
+          -Backend msi `
+          -PackageVersion "9.9.9" `
+          -SkipBuild `
+          -SkipStage `
+          -SkipSharedValidation `
+          -SkipBackendValidation `
+          -DryRun | Out-Null
+      } catch {
+        throw "Dry-run pipeline wrapper should not throw. Error: $($_.Exception.Message)"
+      }
+    }
+  }
+}

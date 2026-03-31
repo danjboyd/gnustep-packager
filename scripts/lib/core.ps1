@@ -447,7 +447,14 @@ function Test-GpManifest {
       $appimage = $backends["appimage"]
       if ($appimage.Contains("enabled") -and $appimage["enabled"]) {
         Require-String -Parent $appimage -Key "desktopEntryName" -Label "backends.appimage.desktopEntryName"
+        Require-String -Parent $appimage -Key "iconRelativePath" -Label "backends.appimage.iconRelativePath"
         Require-String -Parent $appimage -Key "artifactNamePattern" -Label "backends.appimage.artifactNamePattern"
+        if ($appimage.Contains("iconRelativePath") -and (Test-StringValue $appimage["iconRelativePath"])) {
+          $iconRelativePath = [string]$appimage["iconRelativePath"]
+          if (-not $iconRelativePath.EndsWith(".png", [System.StringComparison]::OrdinalIgnoreCase)) {
+            Add-Issue "backends.appimage.iconRelativePath must point to a staged .png icon for AppImage packaging."
+          }
+        }
       }
     }
   }

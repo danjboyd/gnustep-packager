@@ -7,6 +7,11 @@ The repo now exposes a reusable workflow:
 
 Downstream repos can call it without copying packaging logic.
 
+The workflow is backend-aware:
+- `backend: msi` runs on `windows-latest`
+- `backend: appimage` runs on `ubuntu-latest`
+- Linux prerequisite packages are installed automatically for AppImage jobs
+
 ## Inputs
 Primary inputs:
 
@@ -43,6 +48,15 @@ jobs:
     secrets:
       sign_pfx_base64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
       sign_pfx_password: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
+
+  package-linux:
+    uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
+    with:
+      manifest-path: packaging/package.manifest.json
+      backend: appimage
+      run-validation: true
+      run-smoke: true
+      artifact-name: my-app-linux
 ```
 
 ## Implementation Note

@@ -49,6 +49,10 @@ Important fields:
 - `stage.command`
 - `stage.outputRoot`
 
+Current `shell.kind` values used by the reference fixtures:
+- `pwsh`
+- `bash`
+
 ## `payload`
 Describes the staged layout.
 
@@ -139,6 +143,19 @@ Important fields:
 - `signing.certificateSha1`
 - `signing.description`
 - `signing.additionalArguments`
+
+### `backends.appimage`
+Important fields:
+- `appDirName`
+- `desktopEntryName`
+- `iconRelativePath`
+- `artifactNamePattern`
+- `toolRoot`
+- `downloadUrl`
+- `skipAppStreamValidation`
+
+When `backends.appimage.enabled` is `true`, `iconRelativePath` must point to a
+staged `.png` asset.
 
 ## Resolution
 The CLI resolves manifests through layered defaults before validation and

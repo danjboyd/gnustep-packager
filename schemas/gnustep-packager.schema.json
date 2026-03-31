@@ -555,6 +555,15 @@
             },
             "artifactNamePattern": {
               "type": "string"
+            },
+            "toolRoot": {
+              "type": "string"
+            },
+            "downloadUrl": {
+              "type": "string"
+            },
+            "skipAppStreamValidation": {
+              "type": "boolean"
             }
           }
         }

@@ -18,7 +18,7 @@ AppImage without rewriting the entire packaging system.
 ## Intended Outcomes
 - A backend-neutral package manifest and staged payload contract
 - A Windows MSI backend suitable for MSYS2 `CLANG64` GNUstep apps
-- A future Linux AppImage backend built on the same core packaging model
+- A Linux AppImage backend built on the same core packaging model
 - Reusable local scripts and reusable GitHub Actions workflows
 - Clean validation paths for package smoke testing
 
@@ -36,9 +36,9 @@ AppImage without rewriting the entire packaging system.
 4. Produce the distributable artifact.
 5. Validate the artifact in an automated smoke path.
 
-## Planned Backends
+## Supported Backends
 ### Windows MSI
-Initial backend target.
+Supported backend.
 
 Expected stack:
 - MSYS2 `CLANG64`
@@ -47,16 +47,16 @@ Expected stack:
 - GitHub Actions on Windows runners
 
 ### Linux AppImage
-Planned second backend.
+Supported backend.
 
-Expected shape:
+Current shape:
 - backend-specific AppDir transform
 - generated `AppRun`
-- desktop metadata and icon handling
+- desktop metadata, icon, and MIME handling
 - Linux validation path in CI
 
 ## Repo Status
-This repo now includes the phase 1 through phase 4 implementation baseline:
+This repo includes the phase 1 through phase 4 implementation baseline:
 
 - layered manifest resolution
 - shared CLI entry points
@@ -72,28 +72,35 @@ This repo now includes the phase 1 through phase 4 implementation baseline:
   harvests it with WiX, and emits both MSI and ZIP artifacts
 - backend MSI validation for install, launch, and uninstall smoke testing
 
-This repo now also includes the phase 5 and phase 6 foundation:
+This repo also includes the phase 5 and phase 6 foundation:
 
 - a shared local/CI pipeline wrapper in `scripts/run-packaging-pipeline.ps1`
 - package version override support for release automation
 - a reusable GitHub Actions workflow for downstream repos
 - optional signing hooks for release packaging
-- Pester regression tests for manifest, versioning, and MSI transform behavior
+- platform-aware Pester regression tests for Windows MSI and Linux AppImage
+- a Windows sample fixture and a Linux AppImage sample fixture
 - a documented compatibility matrix and consumer setup path
 
-This repo now also includes the phase 9 Windows hardening pass:
+This repo also includes the phase 7 through phase 9 AppImage completion and
+hardening pass:
 
 - manifest-level compliance notice entries plus generated runtime notice reports
 - package-side artifact provenance and diagnostics sidecars
 - built-in manifest profiles for common GNUstep GUI app shapes
-- MSI failure triage guidance and release-gate documentation
-- a documented AppImage extension path for the future Linux backend
+- backend-specific runtime and transform docs for AppImage
+- a real AppImage backend that emits AppDir-based `.AppImage` artifacts
+- automated AppImage extractability, desktop-entry, and smoke validation
+- backend-aware reusable GitHub Actions workflows for Windows and Linux
+- MSI and AppImage release-gate documentation
 
 Current sample verification covers:
 - `build`
 - `stage`
 - `package -Backend msi`
 - `validate -Backend msi -RunSmoke`
+- `package -Backend appimage`
+- `validate -Backend appimage -RunSmoke`
 - `scripts/test-repo.ps1`
 
 ## Proposed Structure
@@ -114,9 +121,9 @@ Current sample verification covers:
 - Hide all packaging details behind opaque automation
 - Treat generated backend output as hand-maintained source
 
-## Near-Term Direction
-MSI is the first concrete deliverable, but implementation choices should always
-be reviewed through a future AppImage lens:
+## Backend Direction
+MSI was the first concrete deliverable, but the repo now supports both MSI and
+AppImage from the same staged payload model:
 - no MSI-only assumptions in shared code
 - launch behavior modeled as a contract, not a Windows bootstrap special case
 - runtime inclusion rules expressed declaratively
@@ -132,13 +139,19 @@ Examples:
 ./scripts/gnustep-packager.ps1 -Command validate
 ./scripts/gnustep-packager.ps1 -Command package -Backend msi
 ./scripts/gnustep-packager.ps1 -Command validate -Backend msi -RunSmoke
+./scripts/gnustep-packager.ps1 -Command package -Backend appimage
+./scripts/gnustep-packager.ps1 -Command validate -Backend appimage -RunSmoke
 ```
 
-MSI-specific design notes:
+Backend design notes:
 - [docs/msi-boundary.md](docs/msi-boundary.md)
 - [docs/msi-runtime-policy.md](docs/msi-runtime-policy.md)
 - [docs/msi-launcher-design.md](docs/msi-launcher-design.md)
 - [docs/msi-wix-rendering.md](docs/msi-wix-rendering.md)
+- [docs/appimage-requirements.md](docs/appimage-requirements.md)
+- [docs/appimage-metadata-mapping.md](docs/appimage-metadata-mapping.md)
+- [docs/appimage-appdir-design.md](docs/appimage-appdir-design.md)
+- [docs/appimage-runtime-policy.md](docs/appimage-runtime-policy.md)
 
 Release and consumer docs:
 - [docs/local-ci-parity.md](docs/local-ci-parity.md)
@@ -150,6 +163,7 @@ Release and consumer docs:
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md)
 - [docs/compliance-notices.md](docs/compliance-notices.md)
 - [docs/windows-msi-triage.md](docs/windows-msi-triage.md)
+- [backends/appimage/README.md](backends/appimage/README.md)
 - [docs/appimage-extension-path.md](docs/appimage-extension-path.md)
 
 See [Roadmap.md](Roadmap.md) for the implementation phases.

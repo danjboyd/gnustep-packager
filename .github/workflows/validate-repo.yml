@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  repo-validation:
+  windows-validation:
     runs-on: windows-latest
     defaults:
       run:
@@ -36,3 +36,38 @@ jobs:
       - name: Run Shared Packaging Pipeline
         run: |
           ./scripts/run-packaging-pipeline.ps1 -Manifest examples/sample-gui/package.manifest.json -Backend msi -RunSmoke
+
+  linux-validation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux Prerequisites
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y squashfs-tools desktop-file-utils
+
+      - name: Validate Linux Example Manifest
+        run: |
+          ./scripts/gnustep-packager.ps1 -Command manifest-check -Manifest examples/sample-linux/package.manifest.json
+
+      - name: Resolve Linux Example Manifest
+        run: |
+          ./scripts/gnustep-packager.ps1 -Command resolve-manifest -Manifest examples/sample-linux/package.manifest.json
+
+      - name: Describe Linux Example Manifest
+        run: |
+          ./scripts/gnustep-packager.ps1 -Command describe -Manifest examples/sample-linux/package.manifest.json
+
+      - name: Run Pester Regression Tests
+        run: |
+          ./scripts/test-repo.ps1 -CI
+
+      - name: Run Shared Packaging Pipeline
+        run: |
+          ./scripts/run-packaging-pipeline.ps1 -Manifest examples/sample-linux/package.manifest.json -Backend appimage -RunSmoke

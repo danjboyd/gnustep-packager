@@ -11,35 +11,20 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "..\\..\\scripts\\lib\\core.ps1")
+. (Join-Path $PSScriptRoot "lib\\appimage.ps1")
 
 $context = Get-GpManifestContext -Path $Manifest -PackageVersion $PackageVersion
-$backend = "appimage"
-$artifactPlan = Get-GpArtifactPlan -Context $context -Backend $backend
-$launch = Get-GpLaunchContract -Context $context
-$backendSupport = Get-GpBackendSupport -Backend $backend
-
-$message = "AppImage backend dispatch reached. Artifact target: $($artifactPlan.ArtifactPath)"
-Write-Host $message
-if ($LogPath) {
-  Set-Content -Path $LogPath -Value $message
-}
+$result = Invoke-GpAppImagePackage -Context $context -DryRun:$DryRun -LogPath $LogPath
 
 if ($DryRun) {
-  [pscustomobject]@{
-    backend = $backend
-    manifest = $context.ManifestPath
-    artifactPath = $artifactPlan.ArtifactPath
-    entryPath = $launch.EntryPath
-    hostPlatform = $backendSupport.HostPlatform
-    requiredPlatform = $backendSupport.RequiredPlatform
-    hostSupported = [bool]$backendSupport.Supported
-    mode = "dry-run"
-  } | ConvertTo-Json -Depth 10
+  $result | ConvertTo-Json -Depth 20
   exit 0
 }
 
-if (-not $backendSupport.Supported) {
-  throw "AppImage packaging requires host platform '$($backendSupport.RequiredPlatform)'. Current host: '$($backendSupport.HostPlatform)'."
-}
-
-throw "AppImage backend implementation is not complete yet. Phase 8 remains."
+Write-Host "AppImage created: $($result.ArtifactPath)"
+Write-Host "Artifact metadata: $($result.MetadataPath)"
+Write-Host "Diagnostics summary: $($result.DiagnosticsPath)"
+Write-Host "AppDir: $($result.AppDirRoot)"
+Write-Host "AppRun: $($result.AppRunPath)"
+Write-Host "Desktop entry: $($result.DesktopEntryPath)"
+Write-Host "Notice report: $($result.NoticeReportPath)"

@@ -12,36 +12,18 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "..\\..\\scripts\\lib\\core.ps1")
+. (Join-Path $PSScriptRoot "lib\\appimage.ps1")
 
 $context = Get-GpManifestContext -Path $Manifest -PackageVersion $PackageVersion
-$backend = "appimage"
-$artifactPlan = Get-GpArtifactPlan -Context $context -Backend $backend
-$validationPlan = Get-GpValidationPlan -Context $context
-$backendSupport = Get-GpBackendSupport -Backend $backend
-
-if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
-  Ensure-GpDirectory -Path (Split-Path -Parent $LogPath) | Out-Null
-  Set-Content -Path $LogPath -Value ("[{0}] AppImage validation stub" -f (Get-Date).ToString("o"))
-}
+$result = Invoke-GpAppImageValidation -Context $context -DryRun:$DryRun -RunSmoke:$RunSmoke -LogPath $LogPath
 
 if ($DryRun) {
-  [pscustomobject]@{
-    backend = $backend
-    mode = "dry-run"
-    manifest = $context.ManifestPath
-    artifactPath = $artifactPlan.ArtifactPath
-    hostPlatform = $backendSupport.HostPlatform
-    requiredPlatform = $backendSupport.RequiredPlatform
-    hostSupported = [bool]$backendSupport.Supported
-    runSmoke = [bool]$RunSmoke
-    timeoutSeconds = $validationPlan.TimeoutSeconds
-    logPath = $LogPath
-  } | ConvertTo-Json -Depth 10
+  $result | ConvertTo-Json -Depth 20
   exit 0
 }
 
-if (-not $backendSupport.Supported) {
-  throw "AppImage validation requires host platform '$($backendSupport.RequiredPlatform)'. Current host: '$($backendSupport.HostPlatform)'."
+Write-Host "AppImage validation completed. Extracted root: $($result.ExpandedRoot)"
+Write-Host "Extract log: $($result.ExtractLog)"
+if (-not [string]::IsNullOrWhiteSpace($result.SmokeLog)) {
+  Write-Host "Smoke log: $($result.SmokeLog)"
 }
-
-throw "AppImage validation is not complete yet. Phase 8 remains."

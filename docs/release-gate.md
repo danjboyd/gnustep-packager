@@ -1,16 +1,17 @@
 # Release Gate
 
 ## Version 1 Criteria
-The repo is ready to present as a reusable Windows packaging toolkit when all
+The repo is ready to present as a reusable GNUstep packaging toolkit when all
 of the following are true:
 
 - `scripts/test-repo.ps1` passes
-- the sample fixture passes the shared pipeline wrapper with MSI packaging and
-  smoke validation
+- the Windows sample fixture passes the shared pipeline wrapper with MSI
+  packaging and smoke validation
+- the Linux sample fixture passes the shared pipeline wrapper with AppImage
+  packaging and smoke validation
 - package outputs include notice and provenance sidecars
 - downstream onboarding docs and examples are current
-- the AppImage extension path is documented, even if the backend is still
-  pending
+- both supported backends have documented local and CI entry points
 
 ## Windows MSI Checklist
 
@@ -32,7 +33,19 @@ of the following are true:
 - `metadata/THIRD-PARTY-NOTICES.txt` inside the transformed install tree
 
 ## AppImage Requirement
-Until Phase 8 is complete, the AppImage requirement for a v1 Windows release is
-documentation, not a stub pretending to be complete.
+Run:
 
-See [appimage-extension-path.md](appimage-extension-path.md).
+```powershell
+./scripts/run-packaging-pipeline.ps1 `
+  -Manifest examples/sample-linux/package.manifest.json `
+  -Backend appimage `
+  -RunSmoke
+```
+
+Confirm these outputs exist:
+- AppImage artifact
+- `<artifact-base>.metadata.json`
+- `<artifact-base>.diagnostics.txt`
+- `usr/metadata/THIRD-PARTY-NOTICES.txt` inside the extracted AppDir
+
+See [../backends/appimage/README.md](../backends/appimage/README.md).
