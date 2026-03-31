@@ -5,11 +5,17 @@
       "appDirName": "{name}.AppDir",
       "desktopEntryName": "{name}.desktop",
       "iconRelativePath": "",
-      "artifactNamePattern": "{name}-{version}-x86_64.AppImage"
-      ,
+      "artifactNamePattern": "{name}-{version}-x86_64.AppImage",
       "toolRoot": "tools/appimage",
       "downloadUrl": "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage",
-      "skipAppStreamValidation": true
+      "skipAppStreamValidation": true,
+      "smoke": {
+        "mode": "launch-only",
+        "arguments": [],
+        "environment": {},
+        "documentStageRelativePath": "",
+        "startupSeconds": 5
+      }
     }
   }
 }

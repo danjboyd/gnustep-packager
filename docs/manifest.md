@@ -93,6 +93,9 @@ Important fields:
 - `smoke.timeoutSeconds`
 - `logs.retainOnSuccess`
 
+Current shared smoke behavior only covers staged-layout validation. Backend
+artifact smoke strategies stay under backend-specific configuration.
+
 ## `integrations`
 Logical desktop integrations that backends may map differently.
 
@@ -153,9 +156,28 @@ Important fields:
 - `toolRoot`
 - `downloadUrl`
 - `skipAppStreamValidation`
+- `smoke.mode`
+- `smoke.arguments`
+- `smoke.environment`
+- `smoke.documentStageRelativePath`
+- `smoke.startupSeconds`
 
 When `backends.appimage.enabled` is `true`, `iconRelativePath` must point to a
 staged `.png` asset.
+
+Supported AppImage smoke modes:
+
+- `launch-only`
+  Launch the packaged app and treat a clean exit or a still-running process
+  after the startup window as success.
+- `open-file`
+  Launch the packaged app with a staged sample document path appended after any
+  configured smoke arguments.
+- `custom-arguments`
+  Launch the packaged app with manifest-defined smoke arguments.
+- `marker-file`
+  Launch the packaged app with a marker-file compatibility argument and the
+  same path exported as `GP_APPIMAGE_SMOKE_MARKER_PATH`.
 
 ## Resolution
 The CLI resolves manifests through layered defaults before validation and

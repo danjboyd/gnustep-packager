@@ -10,8 +10,8 @@ It is intentionally simple:
   roots
 - `package -Backend appimage` transforms that staged payload into an AppDir and
   emits an AppImage
-- `validate -Backend appimage -RunSmoke` launches the packaged fixture and
-  checks that it writes a smoke marker
+- `validate -Backend appimage -RunSmoke` launches the packaged fixture through
+  the configured AppImage smoke mode
 
 Local commands:
 
@@ -21,3 +21,7 @@ Local commands:
 ./scripts/gnustep-packager.ps1 -Command package -Manifest examples/sample-linux/package.manifest.json -Backend appimage
 ./scripts/gnustep-packager.ps1 -Command validate -Manifest examples/sample-linux/package.manifest.json -Backend appimage -RunSmoke
 ```
+
+The fixture manifest currently demonstrates `backends.appimage.smoke.mode:
+launch-only`. The backend also supports explicit `open-file`,
+`custom-arguments`, and `marker-file` smoke modes.

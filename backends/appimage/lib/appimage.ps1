@@ -209,6 +209,11 @@ function Get-GpAppImageConfig {
   if ([string]::IsNullOrWhiteSpace($desktopEntryBaseName)) {
     $desktopEntryBaseName = [string]$package["name"]
   }
+  $smoke = if ($backend.Contains("smoke") -and ($backend["smoke"] -is [System.Collections.IDictionary])) {
+    $backend["smoke"]
+  } else {
+    @{}
+  }
 
   $downloadUrl = [string]$backend["downloadUrl"]
   $downloadLeaf = Split-Path -Leaf $downloadUrl
@@ -249,6 +254,21 @@ function Get-GpAppImageConfig {
     AppImageToolDownloadUrl = $downloadUrl
     AppImageToolFileName = $downloadLeaf
     SkipAppStreamValidation = [bool]$backend["skipAppStreamValidation"]
+    Smoke = [pscustomobject]@{
+      Mode = [string]$smoke["mode"]
+      Arguments = [string[]]@($smoke["arguments"])
+      Environment = $(if ($smoke.Contains("environment") -and ($smoke["environment"] -is [System.Collections.IDictionary])) {
+        [hashtable](Copy-GpValue -Value $smoke["environment"])
+      } else {
+        @{}
+      })
+      DocumentStageRelativePath = $(if ($smoke.Contains("documentStageRelativePath") -and -not [string]::IsNullOrWhiteSpace([string]$smoke["documentStageRelativePath"])) {
+        [string]$smoke["documentStageRelativePath"]
+      } else {
+        $null
+      })
+      StartupSeconds = $(if ($smoke.Contains("startupSeconds")) { [int]$smoke["startupSeconds"] } else { 5 })
+    }
   }
 }
 
@@ -267,6 +287,68 @@ function Get-GpAppImageWorkPaths {
     AppDirRoot = Join-Path $workRoot $Config.AppDirName
     ExtractRoot = Join-Path $workRoot "extract"
     DownloadRoot = Join-Path $workRoot "downloads"
+  }
+}
+
+function Get-GpAppImageSmokePlan {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [string]$ValidationRoot
+  )
+
+  $smoke = $Config.Smoke
+  $environment = [hashtable](Copy-GpValue -Value $smoke.Environment)
+  $arguments = [System.Collections.Generic.List[string]]::new()
+  $markerPath = $null
+  $documentPath = $null
+
+  switch ($smoke.Mode) {
+    "launch-only" {
+    }
+
+    "custom-arguments" {
+      foreach ($argument in @($smoke.Arguments)) {
+        $arguments.Add([string]$argument) | Out-Null
+      }
+    }
+
+    "open-file" {
+      if ([string]::IsNullOrWhiteSpace($smoke.DocumentStageRelativePath)) {
+        throw "AppImage smoke mode 'open-file' requires backends.appimage.smoke.documentStageRelativePath."
+      }
+      foreach ($argument in @($smoke.Arguments)) {
+        $arguments.Add([string]$argument) | Out-Null
+      }
+      $documentPath = Resolve-GpStagePath -Context $Context -RelativePath $smoke.DocumentStageRelativePath
+      if (-not (Test-Path $documentPath)) {
+        throw "Configured AppImage smoke document does not exist in the staged payload: $documentPath"
+      }
+      $arguments.Add($documentPath) | Out-Null
+    }
+
+    "marker-file" {
+      $markerPath = Join-Path $ValidationRoot "smoke-marker.txt"
+      $environment["GP_APPIMAGE_SMOKE_MARKER_PATH"] = $markerPath
+      $arguments.Add($markerPath) | Out-Null
+    }
+
+    default {
+      throw "Unsupported AppImage smoke mode: $($smoke.Mode)"
+    }
+  }
+
+  Assert-GpAppImageEnvironmentKeys -Environment $environment -Label "AppImage smoke"
+  return [pscustomobject]@{
+    Mode = $smoke.Mode
+    Arguments = [string[]]@($arguments.ToArray())
+    Environment = $environment
+    MarkerPath = $markerPath
+    DocumentPath = $documentPath
+    StartupSeconds = [int]$smoke.StartupSeconds
   }
 }
 
@@ -336,6 +418,71 @@ function Ensure-GpAppImageTool {
   return $toolPath
 }
 
+function Ensure-GpAppImageRuntimeFile {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ToolPath,
+    [Parameter(Mandatory = $true)]
+    [psobject]$WorkPaths,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  if (-not $ToolPath.EndsWith(".AppImage", [System.StringComparison]::OrdinalIgnoreCase)) {
+    return $null
+  }
+
+  Ensure-GpDirectory -Path $WorkPaths.DownloadRoot | Out-Null
+  $runtimePath = Join-Path $WorkPaths.DownloadRoot "runtime-x86_64"
+  if (Test-Path $runtimePath) {
+    Set-GpUnixExecutable -Path $runtimePath
+    return $runtimePath
+  }
+
+  $global:LASTEXITCODE = 0
+  $offsetText = & env "APPIMAGE_EXTRACT_AND_RUN=1" $ToolPath "--appimage-offset"
+  $exitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+  if ($exitCode -ne 0) {
+    throw "Failed to determine the AppImage runtime offset from tool: $ToolPath"
+  }
+
+  $offset = 0L
+  if (-not [long]::TryParse(([string]$offsetText).Trim(), [ref]$offset) -or ($offset -lt 1)) {
+    throw "AppImage tool did not return a valid runtime offset: $offsetText"
+  }
+
+  Write-GpAppImageLogLine -LogPath $LogPath -Message ("Extracting AppImage runtime from {0} to {1}" -f $ToolPath, $runtimePath)
+  $buffer = New-Object byte[] 81920
+  $remaining = $offset
+  $inputStream = $null
+  $outputStream = $null
+
+  try {
+    $inputStream = [System.IO.File]::OpenRead($ToolPath)
+    $outputStream = [System.IO.File]::Create($runtimePath)
+
+    while ($remaining -gt 0) {
+      $count = if ($remaining -gt $buffer.Length) { $buffer.Length } else { [int]$remaining }
+      $read = $inputStream.Read($buffer, 0, $count)
+      if ($read -le 0) {
+        throw "Unexpected end of file while extracting AppImage runtime from $ToolPath"
+      }
+      $outputStream.Write($buffer, 0, $read)
+      $remaining -= $read
+    }
+  } finally {
+    if ($null -ne $outputStream) {
+      $outputStream.Dispose()
+    }
+    if ($null -ne $inputStream) {
+      $inputStream.Dispose()
+    }
+  }
+
+  Set-GpUnixExecutable -Path $runtimePath
+  return $runtimePath
+}
+
 function Get-GpLaunchEnvironmentForAppImage {
   param(
     [Parameter(Mandatory = $true)]
@@ -348,13 +495,23 @@ function Get-GpLaunchEnvironmentForAppImage {
     $environment["GNUSTEP_PATHPREFIX_LIST"] = "{@runtimeRoot}"
   }
 
+  Assert-GpAppImageEnvironmentKeys -Environment $environment -Label "AppImage launch"
+  return $environment
+}
+
+function Assert-GpAppImageEnvironmentKeys {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Environment,
+    [Parameter(Mandatory = $true)]
+    [string]$Label
+  )
+
   foreach ($key in @($environment.Keys)) {
     if (-not [regex]::IsMatch([string]$key, "^[A-Za-z_][A-Za-z0-9_]*$")) {
-      throw "AppImage launch environment key '$key' is not a valid POSIX shell variable name."
+      throw "$Label environment key '$key' is not a valid POSIX shell variable name."
     }
   }
-
-  return $environment
 }
 
 function Convert-GpAppImageStagePathToShellExpression {
@@ -765,10 +922,15 @@ function Build-GpAppImageArtifact {
   if ($ToolPath.EndsWith(".AppImage", [System.StringComparison]::OrdinalIgnoreCase)) {
     $toolEnvironment["APPIMAGE_EXTRACT_AND_RUN"] = "1"
   }
+  $runtimeFile = Ensure-GpAppImageRuntimeFile -ToolPath $ToolPath -WorkPaths $WorkPaths -LogPath $LogPath
 
   $arguments = [System.Collections.Generic.List[string]]::new()
   if ($Config.SkipAppStreamValidation) {
     $arguments.Add("-n") | Out-Null
+  }
+  if (-not [string]::IsNullOrWhiteSpace($runtimeFile)) {
+    $arguments.Add("--runtime-file") | Out-Null
+    $arguments.Add($runtimeFile) | Out-Null
   }
   $arguments.Add($WorkPaths.AppDirRoot) | Out-Null
   $arguments.Add($Config.ArtifactPlan.ArtifactPath) | Out-Null
@@ -855,6 +1017,21 @@ function Write-GpAppImageArtifactMetadata {
       iconName = $Config.IconName
       mimeTypes = [string[]](Get-GpAppImageDesktopMimeTypes -MimeEntries $mimeEntries)
     }
+    validation = [ordered]@{
+      sharedSmoke = [ordered]@{
+        enabled = [bool]$Context.Manifest["validation"]["smoke"]["enabled"]
+        kind = [string]$Context.Manifest["validation"]["smoke"]["kind"]
+        requiredPaths = [string[]]@($Context.Manifest["validation"]["smoke"]["requiredPaths"])
+        timeoutSeconds = [int]$Context.Manifest["validation"]["smoke"]["timeoutSeconds"]
+      }
+      appimageSmoke = [ordered]@{
+        mode = $Config.Smoke.Mode
+        arguments = [string[]]@($Config.Smoke.Arguments)
+        environment = [hashtable](Copy-GpValue -Value $Config.Smoke.Environment)
+        documentStageRelativePath = $Config.Smoke.DocumentStageRelativePath
+        startupSeconds = [int]$Config.Smoke.StartupSeconds
+      }
+    }
     compliance = [ordered]@{
       noticeReportPath = $AppDir.NoticeReportPath
       runtimeNotices = @(
@@ -916,6 +1093,7 @@ function Write-GpAppImageDiagnosticsSummary {
   $lines.Add(("Package log: {0}" -f $LogPath)) | Out-Null
   $lines.Add(("AppDir: {0}" -f $AppDir.AppDirRoot)) | Out-Null
   $lines.Add(("Desktop entry: {0}" -f $AppDir.DesktopEntryPath)) | Out-Null
+  $lines.Add(("Smoke mode: {0}" -f $Config.Smoke.Mode)) | Out-Null
   $lines.Add(("Triage guide: {0}" -f (Get-GpAppImageDiagnosticsDocPath))) | Out-Null
   $lines.Add("") | Out-Null
   $lines.Add("Reproduction commands:") | Out-Null
@@ -1061,6 +1239,225 @@ function Expand-GpAppImageArtifact {
   return $expandedPath
 }
 
+function Start-GpAppImageSmokeProcess {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ArtifactPath,
+    [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
+    [string[]]$ArgumentList,
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Environment,
+    [Parameter(Mandatory = $true)]
+    [string]$StdOutPath,
+    [Parameter(Mandatory = $true)]
+    [string]$StdErrPath,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  if (Test-Path $StdOutPath) {
+    Remove-Item -Force $StdOutPath
+  }
+  if (Test-Path $StdErrPath) {
+    Remove-Item -Force $StdErrPath
+  }
+
+  $commandParts = [System.Collections.Generic.List[string]]::new()
+  foreach ($key in ($Environment.Keys | Sort-Object)) {
+    $commandParts.Add(("{0}={1}" -f $key, [string]$Environment[$key])) | Out-Null
+  }
+  $commandParts.Add($ArtifactPath) | Out-Null
+  foreach ($argument in @($ArgumentList)) {
+    $commandParts.Add($argument) | Out-Null
+  }
+
+  Write-GpAppImageLogLine -LogPath $LogPath -Message ("RUN env {0}" -f ([string]::Join(" ", @($commandParts.ToArray()))))
+  return (Start-Process -FilePath "env" -ArgumentList @($commandParts.ToArray()) -PassThru -RedirectStandardOutput $StdOutPath -RedirectStandardError $StdErrPath)
+}
+
+function Stop-GpAppImageSmokeProcess {
+  param(
+    [AllowNull()]
+    [System.Diagnostics.Process]$Process
+  )
+
+  if ($null -eq $Process) {
+    return
+  }
+
+  try {
+    $Process.Refresh()
+    if (-not $Process.HasExited) {
+      Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+      $Process.WaitForExit(5000) | Out-Null
+    }
+  } catch {
+  }
+}
+
+function Complete-GpAppImageSmokeProcess {
+  param(
+    [AllowNull()]
+    [System.Diagnostics.Process]$Process,
+    [Parameter(Mandatory = $true)]
+    [string]$StdOutPath,
+    [Parameter(Mandatory = $true)]
+    [string]$StdErrPath,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  $exitCode = 0
+  if ($null -ne $Process) {
+    try {
+      $Process.Refresh()
+      if (-not $Process.HasExited) {
+        $Process.WaitForExit(5000) | Out-Null
+        $Process.Refresh()
+      }
+      if ($Process.HasExited) {
+        $exitCode = [int]$Process.ExitCode
+      }
+    } catch {
+    }
+  }
+
+  foreach ($stream in @(
+    [pscustomobject]@{ Label = "stdout"; Path = $StdOutPath },
+    [pscustomobject]@{ Label = "stderr"; Path = $StdErrPath }
+  )) {
+    if (Test-Path $stream.Path) {
+      $content = Get-Content -Raw -Path $stream.Path
+      if (-not [string]::IsNullOrWhiteSpace($content)) {
+        Add-Content -Path $LogPath -Value ""
+        Add-Content -Path $LogPath -Value ("[{0}]" -f $stream.Label)
+        Add-Content -Path $LogPath -Value $content
+      }
+      Remove-Item -Force $stream.Path
+    }
+  }
+
+  return $exitCode
+}
+
+function Invoke-GpAppImageSmoke {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [psobject]$ValidationPlan,
+    [Parameter(Mandatory = $true)]
+    [string]$ValidationRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$SmokeLog
+  )
+
+  $smokePlan = Get-GpAppImageSmokePlan -Context $Context -Config $Config -ValidationRoot $ValidationRoot
+  $smokeEnvironment = [hashtable](Copy-GpValue -Value $smokePlan.Environment)
+  $smokeEnvironment["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+  $stdoutPath = Join-Path $ValidationRoot "smoke.stdout.txt"
+  $stderrPath = Join-Path $ValidationRoot "smoke.stderr.txt"
+  $process = $null
+  $successReason = $null
+
+  Set-Content -Path $SmokeLog -Value ("[{0}] AppImage smoke validation" -f (Get-Date).ToString("o"))
+  Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Smoke mode: {0}" -f $smokePlan.Mode)
+  if (-not [string]::IsNullOrWhiteSpace($smokePlan.DocumentPath)) {
+    Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Smoke document path: {0}" -f $smokePlan.DocumentPath)
+  }
+  if ($smokePlan.MarkerPath -and (Test-Path $smokePlan.MarkerPath)) {
+    Remove-Item -Force $smokePlan.MarkerPath
+  }
+
+  try {
+    $process = Start-GpAppImageSmokeProcess `
+      -ArtifactPath $Config.ArtifactPlan.ArtifactPath `
+      -ArgumentList @($smokePlan.Arguments) `
+      -Environment $smokeEnvironment `
+      -StdOutPath $stdoutPath `
+      -StdErrPath $stderrPath `
+      -LogPath $SmokeLog
+
+    switch ($smokePlan.Mode) {
+      "marker-file" {
+        $deadline = (Get-Date).AddSeconds([Math]::Max($ValidationPlan.TimeoutSeconds, 1))
+        while ((Get-Date) -lt $deadline) {
+          if ($smokePlan.MarkerPath -and (Test-Path $smokePlan.MarkerPath)) {
+            $successReason = "marker-file-created"
+            break
+          }
+
+          $process.Refresh()
+          if ($process.HasExited) {
+            if ([int]$process.ExitCode -ne 0) {
+              throw "AppImage smoke launch failed with exit code $($process.ExitCode). See $SmokeLog."
+            }
+            if ($smokePlan.MarkerPath -and (Test-Path $smokePlan.MarkerPath)) {
+              $successReason = "marker-file-created"
+              break
+            }
+            throw "AppImage smoke launch did not create the expected marker file: $($smokePlan.MarkerPath)"
+          }
+
+          Start-Sleep -Milliseconds 200
+        }
+
+        if (-not $successReason) {
+          if ($smokePlan.MarkerPath -and (Test-Path $smokePlan.MarkerPath)) {
+            $successReason = "marker-file-created"
+          } else {
+            throw "AppImage smoke launch did not create the expected marker file: $($smokePlan.MarkerPath)"
+          }
+        }
+      }
+
+      default {
+        $startupWindow = [Math]::Min([Math]::Max($smokePlan.StartupSeconds, 1), [Math]::Max($ValidationPlan.TimeoutSeconds, 1))
+        $deadline = (Get-Date).AddSeconds($startupWindow)
+        while ((Get-Date) -lt $deadline) {
+          $process.Refresh()
+          if ($process.HasExited) {
+            if ([int]$process.ExitCode -ne 0) {
+              throw "AppImage smoke launch failed with exit code $($process.ExitCode). See $SmokeLog."
+            }
+            $successReason = "process-exited-cleanly"
+            break
+          }
+          Start-Sleep -Milliseconds 200
+        }
+
+        if (-not $successReason) {
+          $process.Refresh()
+          if ($process.HasExited) {
+            if ([int]$process.ExitCode -ne 0) {
+              throw "AppImage smoke launch failed with exit code $($process.ExitCode). See $SmokeLog."
+            }
+            $successReason = "process-exited-cleanly"
+          } else {
+            $successReason = "process-remained-running-through-startup-window"
+          }
+        }
+      }
+    }
+  } finally {
+    Stop-GpAppImageSmokeProcess -Process $process
+    $exitCode = Complete-GpAppImageSmokeProcess -Process $process -StdOutPath $stdoutPath -StdErrPath $stderrPath -LogPath $SmokeLog
+    Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Smoke process exit code: {0}" -f $exitCode)
+  }
+
+  Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Smoke validation succeeded: {0}" -f $successReason)
+  return [pscustomobject]@{
+    Mode = $smokePlan.Mode
+    Outcome = $successReason
+    MarkerPath = $smokePlan.MarkerPath
+    DocumentPath = $smokePlan.DocumentPath
+    SmokeLog = $SmokeLog
+  }
+}
+
 function Invoke-GpAppImageValidation {
   param(
     [Parameter(Mandatory = $true)]
@@ -1089,6 +1486,7 @@ function Invoke-GpAppImageValidation {
       RequiredPlatform = $backendSupport.RequiredPlatform
       HostSupported = [bool]$backendSupport.Supported
       RunSmoke = [bool]$RunSmoke
+      SmokeMode = $config.Smoke.Mode
       TimeoutSeconds = $validationPlan.TimeoutSeconds
       LogPath = $LogPath
     }
@@ -1137,22 +1535,9 @@ function Invoke-GpAppImageValidation {
     Invoke-GpAppImageExternalTool -FilePath $desktopFileValidate.Source -ArgumentList @((Join-Path $expandedRoot $config.DesktopEntryName)) -LogPath $LogPath
   }
 
+  $smokeResult = $null
   if ($RunSmoke -or $validationPlan.Enabled) {
-    $smokeMarker = Join-Path $validationRoot "smoke-marker.txt"
-    if (Test-Path $smokeMarker) {
-      Remove-Item -Force $smokeMarker
-    }
-
-    $global:LASTEXITCODE = 0
-    & env "APPIMAGE_EXTRACT_AND_RUN=1" $config.ArtifactPlan.ArtifactPath $smokeMarker 2>&1 | Tee-Object -FilePath $smokeLog -Append | Out-Host
-    $exitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
-    if ($exitCode -ne 0) {
-      throw "AppImage smoke launch failed with exit code $exitCode. See $smokeLog."
-    }
-
-    if (-not (Test-Path $smokeMarker)) {
-      throw "AppImage smoke launch did not create the expected marker file: $smokeMarker"
-    }
+    $smokeResult = Invoke-GpAppImageSmoke -Context $Context -Config $config -ValidationPlan $validationPlan -ValidationRoot $validationRoot -SmokeLog $smokeLog
   }
 
   Write-GpAppImageLogLine -LogPath $LogPath -Message ("Validated AppImage artifact: {0}" -f $config.ArtifactPlan.ArtifactPath)
@@ -1163,6 +1548,10 @@ function Invoke-GpAppImageValidation {
     ExpandedRoot = $expandedRoot
     ExtractLog = $extractLog
     SmokeLog = $smokeLog
+    SmokeMode = $(if ($smokeResult) { $smokeResult.Mode } else { $null })
+    SmokeOutcome = $(if ($smokeResult) { $smokeResult.Outcome } else { $null })
+    SmokeMarkerPath = $(if ($smokeResult) { $smokeResult.MarkerPath } else { $null })
+    SmokeDocumentPath = $(if ($smokeResult) { $smokeResult.DocumentPath } else { $null })
     LogPath = $LogPath
   }
 }

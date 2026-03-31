@@ -54,6 +54,13 @@ Backend validation checks:
 - optional `desktop-file-validate` output when available
 - smoke launch through the packaged AppImage
 
+Supported smoke modes:
+
+- `launch-only`
+- `open-file`
+- `custom-arguments`
+- `marker-file`
+
 ## Known Limitations
 - current artifact generation targets x86_64 only
 - the staged Linux payload must already include its runtime closure
@@ -61,8 +68,16 @@ Backend validation checks:
 
 ## CI Usage
 Use `.github/workflows/package-gnustep-app.yml` with `backend: appimage`.
-The reusable workflow selects `ubuntu-latest` and installs Linux prerequisites
-before calling the shared pipeline wrapper.
+By default the reusable workflow selects `["ubuntu-latest"]` and installs
+`squashfs-tools` plus `desktop-file-utils` before calling the shared pipeline
+wrapper.
+
+Downstreams can override:
+
+- `runs-on-appimage` for self-hosted runner labels
+- `skip-default-host-setup` when the runner is already provisioned
+- `appimage-apt-packages` to change the default apt package list
+- `preflight-shell` and `preflight-command` for repo-specific bootstrap work
 
 ## Related Docs
 - [../../docs/appimage-requirements.md](../../docs/appimage-requirements.md)

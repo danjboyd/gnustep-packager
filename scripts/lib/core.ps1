@@ -455,6 +455,32 @@ function Test-GpManifest {
             Add-Issue "backends.appimage.iconRelativePath must point to a staged .png icon for AppImage packaging."
           }
         }
+
+        if ($appimage.Contains("smoke")) {
+          if (-not ($appimage["smoke"] -is [System.Collections.IDictionary])) {
+            Add-Issue "backends.appimage.smoke must be an object when present."
+          } else {
+            $appimageSmoke = $appimage["smoke"]
+            $validSmokeModes = @("launch-only", "open-file", "custom-arguments", "marker-file")
+
+            if ($appimageSmoke.Contains("mode")) {
+              if (-not (Test-StringValue $appimageSmoke["mode"])) {
+                Add-Issue "backends.appimage.smoke.mode must be a non-empty string when present."
+              } elseif ([string]$appimageSmoke["mode"] -notin $validSmokeModes) {
+                Add-Issue "backends.appimage.smoke.mode must be one of: launch-only, open-file, custom-arguments, marker-file."
+              } elseif (($appimageSmoke["mode"] -eq "open-file") -and (-not $appimageSmoke.Contains("documentStageRelativePath") -or -not (Test-StringValue $appimageSmoke["documentStageRelativePath"]))) {
+                Add-Issue "backends.appimage.smoke.documentStageRelativePath is required when backends.appimage.smoke.mode is open-file."
+              }
+            }
+
+            if ($appimageSmoke.Contains("startupSeconds")) {
+              $startupSecondsValue = 0
+              if (-not [int]::TryParse([string]$appimageSmoke["startupSeconds"], [ref]$startupSecondsValue) -or ($startupSecondsValue -lt 1)) {
+                Add-Issue "backends.appimage.smoke.startupSeconds must be an integer greater than or equal to 1."
+              }
+            }
+          }
+        }
       }
     }
   }

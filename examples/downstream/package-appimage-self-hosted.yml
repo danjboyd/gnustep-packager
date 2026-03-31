@@ -1,4 +1,4 @@
-name: package-windows-msi
+name: package-linux-appimage-self-hosted
 
 on:
   workflow_dispatch:
@@ -11,14 +11,12 @@ jobs:
     uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
     with:
       manifest-path: packaging/package.manifest.json
-      backend: msi
+      backend: appimage
       package-version: ${{ github.ref_name }}
-      msys2-packages: >-
-        mingw-w64-clang-x86_64-cmark
+      runs-on-appimage: '["self-hosted","linux","gnustep-clang"]'
+      skip-default-host-setup: true
+      preflight-shell: bash
+      preflight-command: ./packaging/ci/preflight-appimage.sh
       run-validation: true
       run-smoke: true
-      artifact-name: my-gnustep-app
-      sign-artifacts: true
-    secrets:
-      sign_pfx_base64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
-      sign_pfx_password: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
+      artifact-name: my-gnustep-linux-app

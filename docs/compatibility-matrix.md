@@ -5,13 +5,17 @@
 | Area | Baseline | Status | Notes |
 | --- | --- | --- | --- |
 | Host OS | Windows x64 | Supported | MSI backend local and CI validation path |
-| Host OS | Linux x64 (`ubuntu-latest` baseline) | Supported | AppImage backend local and CI validation path |
+| Host OS | Linux x64 (`ubuntu-latest` default runner) | Supported | AppImage backend local and CI validation path |
+| Host OS | Linux x64 self-hosted GNUstep runner | Supported | Reusable workflow accepts caller-supplied `runs-on-appimage` labels |
 | PowerShell | PowerShell 7+ | Supported | Shared scripts and tests use `pwsh` |
 | Toolchain | MSYS2 `CLANG64` x64 | Supported | Current runtime discovery and launcher assumptions target this layout |
 | Toolchain | clang-based GNUstep stage on Linux x64 | Supported | AppImage backend expects a self-contained staged payload |
 | WiX | WiX 3.11.x | Supported | Bootstrapped automatically when missing |
 | AppImage tooling | `appimagetool` x86_64 | Supported | Uses `PATH` when present or bootstraps from the configured download URL |
 | Linux host packages | `squashfs-tools`, `desktop-file-utils` | Supported | Required for repo CI and recommended for local AppImage validation |
+| Workflow | Caller-selected runner labels | Supported | Reusable workflow exposes `runs-on-msi` and `runs-on-appimage` |
+| Workflow | Caller preflight hooks | Supported | Reusable workflow exposes `preflight-shell` and `preflight-command` |
+| Workflow | Additive backend prerequisite packages | Supported | Reusable workflow exposes `msys2-packages` and `appimage-apt-packages` |
 | Backend | MSI | Supported | Build, package, ZIP, and backend validation implemented |
 | Backend | AppImage | Supported | AppDir transform, `AppRun`, artifact build, and backend validation implemented |
 | Install scope | MSI perMachine | Supported | Packaging works; validation may require elevation |
@@ -30,7 +34,7 @@
 | MSI install, launch, uninstall smoke path | Supported |
 | AppImage package build on Linux | Supported |
 | AppImage extractability and desktop-entry validation | Supported |
-| AppImage smoke launch path | Supported |
+| AppImage smoke launch path | Supported | `launch-only`, `open-file`, `custom-arguments`, and `marker-file` modes |
 
 ## Consumer Boundary
 The current support contract is intentionally narrow:

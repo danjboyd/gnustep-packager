@@ -20,6 +20,11 @@ That mode verifies:
 - declared resource roots exist
 - any extra required smoke paths exist
 
+Backend-specific packaged-artifact smoke behavior remains backend-owned. For
+example, AppImage launch strategies are configured under
+`backends.appimage.smoke.*` rather than expanding the shared staged-layout
+contract with AppImage-only semantics.
+
 ## Logs
 Shared validation logs belong under:
 - `outputs.validationRoot`
@@ -35,4 +40,3 @@ Shared output roots are declared through:
 
 Backends may define their own artifact name patterns, but they should render
 those names through shared token replacement instead of inventing ad hoc rules.
-

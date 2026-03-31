@@ -564,6 +564,60 @@
             },
             "skipAppStreamValidation": {
               "type": "boolean"
+            },
+            "smoke": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "launch-only",
+                    "open-file",
+                    "custom-arguments",
+                    "marker-file"
+                  ]
+                },
+                "arguments": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "environment": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "documentStageRelativePath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "startupSeconds": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "mode": {
+                        "const": "open-file"
+                      }
+                    },
+                    "required": [
+                      "mode"
+                    ]
+                  },
+                  "then": {
+                    "required": [
+                      "documentStageRelativePath"
+                    ]
+                  }
+                }
+              ]
             }
           }
         }

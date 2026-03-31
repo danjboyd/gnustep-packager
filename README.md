@@ -90,8 +90,8 @@ hardening pass:
 - built-in manifest profiles for common GNUstep GUI app shapes
 - backend-specific runtime and transform docs for AppImage
 - a real AppImage backend that emits AppDir-based `.AppImage` artifacts
-- automated AppImage extractability, desktop-entry, and smoke validation
-- backend-aware reusable GitHub Actions workflows for Windows and Linux
+- automated AppImage extractability, desktop-entry, and configurable smoke validation
+- backend-aware reusable GitHub Actions workflows for Windows and Linux with caller-selected runners, preflight hooks, and additive prerequisite inputs
 - MSI and AppImage release-gate documentation
 
 Current sample verification covers:

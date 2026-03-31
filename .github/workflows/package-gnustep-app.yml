@@ -14,6 +14,34 @@ on:
         required: false
         type: string
         default: ""
+      runs-on-msi:
+        required: false
+        type: string
+        default: '["windows-latest"]'
+      runs-on-appimage:
+        required: false
+        type: string
+        default: '["ubuntu-latest"]'
+      skip-default-host-setup:
+        required: false
+        type: boolean
+        default: false
+      msys2-packages:
+        required: false
+        type: string
+        default: ""
+      appimage-apt-packages:
+        required: false
+        type: string
+        default: "squashfs-tools desktop-file-utils"
+      preflight-shell:
+        required: false
+        type: string
+        default: pwsh
+      preflight-command:
+        required: false
+        type: string
+        default: ""
       run-validation:
         required: false
         type: boolean
@@ -65,7 +93,7 @@ on:
 
 jobs:
   package:
-    runs-on: ${{ inputs.backend == 'appimage' && 'ubuntu-latest' || 'windows-latest' }}
+    runs-on: ${{ fromJSON(inputs.backend == 'appimage' && inputs.runs-on-appimage || inputs.runs-on-msi) }}
     outputs:
       resolved-version: ${{ steps.manifest.outputs.resolved_version }}
       package-root: ${{ steps.manifest.outputs.package_root }}
@@ -96,27 +124,46 @@ jobs:
           path: .gnustep-packager-toolkit
 
       - name: Install MSYS2 CLANG64 Prerequisites
-        if: ${{ inputs.backend == 'msi' }}
+        if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup }}
         id: msys2
         uses: msys2/setup-msys2@v2
         with:
           msystem: CLANG64
           update: true
           install: >-
-            mingw-w64-clang-x86_64-clang
+            make
+            mingw-w64-clang-x86_64-gnustep-make
+            mingw-w64-clang-x86_64-gnustep-base
+            mingw-w64-clang-x86_64-gnustep-gui
+            mingw-w64-clang-x86_64-gnustep-back
+            mingw-w64-clang-x86_64-libdispatch
+            mingw-w64-clang-x86_64-libobjc2
+            mingw-w64-clang-x86_64-toolchain
+            ${{ inputs.msys2-packages }}
 
       - name: Expose MSYS2 Toolchain
-        if: ${{ inputs.backend == 'msi' }}
+        if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup }}
         run: |
           "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           (Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'clang64\bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Install Linux AppImage Prerequisites
-        if: ${{ inputs.backend == 'appimage' }}
+        if: ${{ inputs.backend == 'appimage' && !inputs.skip-default-host-setup }}
         shell: bash
         run: |
+          set -euo pipefail
+          packages='${{ inputs.appimage-apt-packages }}'
+          if [ -z "$packages" ]; then
+            exit 0
+          fi
           sudo apt-get update
-          sudo apt-get install -y squashfs-tools desktop-file-utils
+          sudo apt-get install -y $packages
+
+      - name: Run Caller Preflight
+        if: ${{ inputs.preflight-command != '' }}
+        shell: ${{ inputs.preflight-shell }}
+        run: |
+          ${{ inputs.preflight-command }}
 
       - name: Resolve Manifest Outputs
         id: manifest

@@ -11,6 +11,9 @@ Contents:
 - `package-appimage.yml`
   Example GitHub Actions workflow that calls the reusable workflow for Linux
   AppImage packaging
+- `package-appimage-self-hosted.yml`
+  Example GitHub Actions workflow that targets a self-hosted GNUstep Linux
+  runner and uses a caller-provided preflight script
 - `manifest-gnustep-gui.template.json`
   Minimal manifest starting point for a typical GNUstep GUI app
 - `manifest-gnustep-document-viewer.template.json`

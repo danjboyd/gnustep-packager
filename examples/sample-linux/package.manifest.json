@@ -101,7 +101,10 @@
     "appimage": {
       "enabled": true,
       "desktopEntryName": "sample-gnustep-linux.desktop",
-      "iconRelativePath": "metadata/icons/sample-linux.png"
+      "iconRelativePath": "metadata/icons/sample-linux.png",
+      "smoke": {
+        "mode": "launch-only"
+      }
     }
   }
 }

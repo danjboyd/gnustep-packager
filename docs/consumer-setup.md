@@ -45,6 +45,12 @@ For the current MSI backend, the consumer should:
 4. enable `backends.msi`
 5. provide a stable `upgradeCode`
 6. run the shared pipeline wrapper locally before wiring CI
+7. add app-specific MSYS2 packages in reusable-workflow calls through
+   `msys2-packages` when the default GNUstep baseline is not enough
+
+The reusable workflow's default MSI host setup installs a GNUstep-capable MSYS2
+`CLANG64` baseline. Downstream apps remain responsible for app-specific
+dependencies such as `mingw-w64-clang-x86_64-cmark`.
 
 ## Linux AppImage Onboarding
 For the AppImage backend, the consumer should:
@@ -55,8 +61,16 @@ For the AppImage backend, the consumer should:
    at it
 4. enable `backends.appimage`
 5. provide a stable `desktopEntryName`
-6. install `squashfs-tools` and `desktop-file-utils` before local validation or
-   CI runs
+6. choose an AppImage smoke mode under `backends.appimage.smoke`
+7. install `squashfs-tools` and `desktop-file-utils` before local validation or
+   let the reusable workflow install them in CI
+
+Recommended AppImage smoke modes:
+
+- `launch-only` for normal GUI apps that should just start successfully
+- `open-file` for document apps that should open a staged sample document
+- `custom-arguments` for app-specific automation flags
+- `marker-file` only when the app intentionally participates in that harness
 
 The backend bootstraps `appimagetool` automatically when it is not already on
 `PATH`.
@@ -97,6 +111,10 @@ The backend bootstraps `appimagetool` automatically when it is not already on
 ## GitHub Actions
 Once the local run works, call the reusable workflow documented in
 [github-actions.md](github-actions.md).
+
+Hosted-runner consumers can usually rely on the workflow defaults. Self-hosted
+or more advanced consumers can override `runs-on-*`, disable default host setup,
+and inject repo-owned preflight commands without forking the workflow.
 
 Related docs:
 - [manifest.md](manifest.md)

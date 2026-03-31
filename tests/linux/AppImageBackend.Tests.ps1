@@ -47,6 +47,21 @@ Describe "AppImage backend" {
       }
     }
 
+    function New-GpSiblingManifest {
+      param(
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Customize
+      )
+
+      $manifest = Get-GpJsonFile -Path $script:manifestPath
+      & $Customize $manifest
+
+      $manifestDirectory = Split-Path -Parent $script:manifestPath
+      $tempManifestPath = Join-Path $manifestDirectory ("pester-appimage-" + [guid]::NewGuid().ToString("N") + ".json")
+      $manifest | ConvertTo-Json -Depth 20 | Set-Content -Path $tempManifestPath -Encoding utf8
+      return $tempManifestPath
+    }
+
     $script:repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\\.."))
     $script:manifestPath = Join-Path $script:repoRoot "examples/sample-linux/package.manifest.json"
     $script:toolScript = Join-Path $script:repoRoot "scripts\\gnustep-packager.ps1"
@@ -63,6 +78,7 @@ Describe "AppImage backend" {
     $script:packageResult = Invoke-GpAppImagePackage -Context $script:packageContext -LogPath $script:packageLogPath
     $script:validationLogPath = Join-Path $script:packageConfig.OutputPaths.ValidationRoot "pester-appimage-validate.log"
     $script:validationResult = Invoke-GpAppImageValidation -Context $script:packageContext -RunSmoke -LogPath $script:validationLogPath
+    $script:launchOnlySmokeLogText = Get-Content -Raw -Path $script:validationResult.SmokeLog
   }
 
   Context "Manifest resolution" {
@@ -73,6 +89,7 @@ Describe "AppImage backend" {
       Assert-GpEqual -Actual @(Get-GpEnabledBackends -Manifest $context.Manifest) -Expected @("appimage") -Message "Linux fixture should only enable the AppImage backend."
       Assert-GpEqual -Actual $config.ArtifactPlan.ArtifactName -Expected "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage" -Message "AppImage artifact name should use the default naming pattern."
       Assert-GpEqual -Actual $config.DesktopEntryName -Expected "sample-gnustep-linux.desktop" -Message "AppImage desktop entry name should come from the manifest."
+      Assert-GpEqual -Actual $config.Smoke.Mode -Expected "launch-only" -Message "Linux fixture should default to launch-only AppImage smoke validation."
     }
 
     It "keeps the shared launch contract backend-neutral" {
@@ -117,13 +134,113 @@ Describe "AppImage backend" {
       Assert-GpTrue -Condition (Test-Path (Join-Path $script:validationResult.ExpandedRoot "sample-gnustep-linux.desktop")) -Message "Extracted AppImage should contain the desktop entry."
     }
 
-    It "runs the smoke path through the packaged AppImage" {
-      $smokeMarkerPath = Join-Path (Split-Path -Parent $script:validationLogPath) "smoke-marker.txt"
-      $smokeMarkerText = Get-Content -Raw -Path $smokeMarkerPath
+    It "runs the launch-only smoke path through the packaged AppImage" {
+      Assert-GpEqual -Actual $script:validationResult.SmokeMode -Expected "launch-only" -Message "The default Linux fixture should use launch-only smoke validation."
+      Assert-GpMatch -Actual $script:validationResult.SmokeOutcome -Pattern "process-" -Message "Launch-only smoke validation should succeed through process startup behavior."
+      Assert-GpMatch -Actual $script:launchOnlySmokeLogText -Pattern "Sample GNUstep Linux fixture running" -Message "Smoke validation should capture packaged app output."
+      Assert-GpTrue -Condition ([string]::IsNullOrWhiteSpace([string]$script:validationResult.SmokeMarkerPath)) -Message "Launch-only smoke validation should not require a marker file."
+    }
+  }
 
-      Assert-GpTrue -Condition (Test-Path $smokeMarkerPath) -Message "Smoke validation should create the marker file."
-      Assert-GpMatch -Actual $smokeMarkerText -Pattern "fixture=sample-linux" -Message "The packaged fixture should write its smoke marker."
-      Assert-GpMatch -Actual $smokeMarkerText -Pattern "gnustep=" -Message "The packaged fixture should capture GNUstep-related environment output."
+  Context "Smoke modes" {
+    It "builds a marker-file smoke plan with compatibility marker plumbing" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["smoke"] = @{
+          mode = "marker-file"
+        }
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $config = Get-GpAppImageConfig -Context $context
+        $plan = Get-GpAppImageSmokePlan -Context $context -Config $config -ValidationRoot $config.OutputPaths.ValidationRoot
+
+        Assert-GpEqual -Actual $plan.Mode -Expected "marker-file" -Message "Marker-file smoke mode should resolve from the manifest."
+        Assert-GpMatch -Actual $plan.MarkerPath -Pattern "smoke-marker\.txt$" -Message "Marker-file smoke mode should allocate a smoke marker path."
+        Assert-GpEqual -Actual $plan.Environment["GP_APPIMAGE_SMOKE_MARKER_PATH"] -Expected $plan.MarkerPath -Message "Marker-file smoke mode should expose the marker path through an environment variable."
+        Assert-GpEqual -Actual @($plan.Arguments) -Expected @($plan.MarkerPath) -Message "Marker-file smoke mode should preserve the compatibility positional marker argument."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
+    }
+
+    It "supports marker-file smoke validation as an explicit opt-in mode" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["smoke"] = @{
+          mode = "marker-file"
+        }
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $validationPath = Join-Path $script:packageConfig.OutputPaths.ValidationRoot "pester-appimage-validate-marker.log"
+        $result = Invoke-GpAppImageValidation -Context $context -RunSmoke -LogPath $validationPath
+        $markerText = Get-Content -Raw -Path $result.SmokeMarkerPath
+
+        Assert-GpEqual -Actual $result.SmokeMode -Expected "marker-file" -Message "Marker-file smoke validation should report its configured mode."
+        Assert-GpTrue -Condition (Test-Path $result.SmokeMarkerPath) -Message "Marker-file smoke validation should create the requested marker."
+        Assert-GpMatch -Actual $markerText -Pattern "fixture=sample-linux" -Message "Marker-file smoke validation should preserve the fixture marker behavior."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
+    }
+
+    It "supports open-file smoke validation with a staged document path" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["smoke"] = @{
+          mode = "open-file"
+          documentStageRelativePath = "metadata/smoke/smoke-document.md"
+          environment = @{
+            GP_FIXTURE_EXPECT_ARG0_BASENAME = "smoke-document.md"
+          }
+        }
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $validationPath = Join-Path $script:packageConfig.OutputPaths.ValidationRoot "pester-appimage-validate-open-file.log"
+        $result = Invoke-GpAppImageValidation -Context $context -RunSmoke -LogPath $validationPath
+
+        Assert-GpEqual -Actual $result.SmokeMode -Expected "open-file" -Message "Open-file smoke validation should report its configured mode."
+        Assert-GpMatch -Actual $result.SmokeDocumentPath -Pattern "metadata[/\\\\]smoke[/\\\\]smoke-document\.md$" -Message "Open-file smoke validation should resolve the staged document path."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
+    }
+
+    It "supports custom-arguments smoke validation" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["smoke"] = @{
+          mode = "custom-arguments"
+          arguments = @("--smoke-arg")
+          environment = @{
+            GP_FIXTURE_EXPECT_ARG0 = "--smoke-arg"
+          }
+        }
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $validationPath = Join-Path $script:packageConfig.OutputPaths.ValidationRoot "pester-appimage-validate-custom-args.log"
+        $result = Invoke-GpAppImageValidation -Context $context -RunSmoke -LogPath $validationPath
+
+        Assert-GpEqual -Actual $result.SmokeMode -Expected "custom-arguments" -Message "Custom-arguments smoke validation should report its configured mode."
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $result.SmokeLog) -Pattern "--smoke-arg" -Message "Custom-arguments smoke validation should pass the configured argument to the packaged app."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
     }
   }
 }

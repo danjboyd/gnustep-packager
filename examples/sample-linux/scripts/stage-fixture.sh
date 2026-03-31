@@ -11,10 +11,11 @@ runtime_fonts="$stage_root/runtime/etc/fonts"
 runtime_config="$stage_root/runtime/config"
 metadata_icons="$stage_root/metadata/icons"
 metadata_licenses="$stage_root/metadata/licenses"
+metadata_smoke="$stage_root/metadata/smoke"
 log_root="$stage_root/logs"
 
 rm -rf "$stage_root"
-mkdir -p "$app_root" "$runtime_bin" "$runtime_fonts" "$runtime_config" "$metadata_icons" "$metadata_licenses" "$log_root"
+mkdir -p "$app_root" "$runtime_bin" "$runtime_fonts" "$runtime_config" "$metadata_icons" "$metadata_licenses" "$metadata_smoke" "$log_root"
 
 if [ ! -f "$built_executable" ]; then
   printf 'Expected built sample executable not found: %s\n' "$built_executable" >&2
@@ -30,6 +31,7 @@ printf 'GSTheme=LinuxTheme\n' >"$runtime_config/theme.conf"
 printf '<fontconfig></fontconfig>\n' >"$runtime_fonts/fonts.conf"
 printf 'SampleGNUstepLinuxApp fixture license notice. License: MIT.\n' >"$metadata_licenses/SampleGNUstepLinuxApp.txt"
 printf 'GNUstep runtime fixture notice. License: LGPL-2.1-or-later.\n' >"$metadata_licenses/GNUstep-runtime.txt"
+printf '# Sample smoke document\n\nThis file is staged for AppImage open-file smoke tests.\n' >"$metadata_smoke/smoke-document.md"
 printf 'fixture stage complete\n' >"$log_root/stage.txt"
 
 base64 -d >"$metadata_icons/sample-linux.png" <<'EOF'

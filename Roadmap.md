@@ -162,8 +162,10 @@ Status: implemented in the current repo baseline.
 Goal: make the backend usable in app repos and CI systems.
 Status: implemented for the current Windows MSI and Linux AppImage scope.
 
-The reusable workflow now selects backend-appropriate runners, and repo CI
-exercises both the Windows MSI and Linux AppImage reference paths.
+The reusable workflow now supports backend-specific runner selection,
+caller-provided host preflight hooks, and additive package inputs while still
+driving packaging through the shared pipeline wrapper. Repo CI continues to
+exercise both the Windows MSI and Linux AppImage reference paths.
 
 - `Phase 5A`: Local and CI parity
   Deliverables:
@@ -296,6 +298,10 @@ Status: implemented.
 ## Phase 8: Linux AppImage Backend Implementation
 Goal: ship the second backend using the same shared model.
 Status: implemented.
+
+AppImage validation now supports launch-only, open-file, custom-arguments, and
+marker-file smoke modes so real GUI apps do not have to adopt fixture-specific
+marker behavior just to participate in backend validation.
 
 - `Phase 8A`: Shared-to-AppDir transform
   Deliverables:

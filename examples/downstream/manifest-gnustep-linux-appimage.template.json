@@ -80,7 +80,10 @@
     "appimage": {
       "enabled": true,
       "desktopEntryName": "my-gnustep-linux-app.desktop",
-      "iconRelativePath": "metadata/icons/app.png"
+      "iconRelativePath": "metadata/icons/app.png",
+      "smoke": {
+        "mode": "launch-only"
+      }
     }
   }
 }

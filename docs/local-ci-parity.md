@@ -42,7 +42,8 @@ That keeps:
 - local reproduction straightforward
 - workflow behavior easier to reason about
 - release changes concentrated in PowerShell and manifest logic
-- backend-specific host setup constrained to a small workflow preflight step
+- backend-specific host setup constrained to a small, caller-extensible workflow
+  preflight step
 
 ## Version Overrides
 Both local and CI flows can override the package version with:
