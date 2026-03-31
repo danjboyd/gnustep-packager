@@ -17,6 +17,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install MSYS2 CLANG64 Prerequisites
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            mingw-w64-clang-x86_64-clang
+
+      - name: Expose MSYS2 Toolchain
+        run: |
+          "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          (Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'clang64\bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
       - name: Validate Example Manifest
         run: |
           ./scripts/gnustep-packager.ps1 -Command manifest-check -Manifest examples/sample-gui/package.manifest.json

@@ -9,6 +9,7 @@ Downstream repos can call it without copying packaging logic.
 
 The workflow is backend-aware:
 - `backend: msi` runs on `windows-latest`
+- MSI jobs install the MSYS2 `CLANG64` toolchain before packaging
 - `backend: appimage` runs on `ubuntu-latest`
 - Linux prerequisite packages are installed automatically for AppImage jobs
 

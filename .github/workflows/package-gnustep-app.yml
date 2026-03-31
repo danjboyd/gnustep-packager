@@ -95,6 +95,22 @@ jobs:
           ref: ${{ steps.packager.outputs.ref }}
           path: .gnustep-packager-toolkit
 
+      - name: Install MSYS2 CLANG64 Prerequisites
+        if: ${{ inputs.backend == 'msi' }}
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            mingw-w64-clang-x86_64-clang
+
+      - name: Expose MSYS2 Toolchain
+        if: ${{ inputs.backend == 'msi' }}
+        run: |
+          "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          (Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'clang64\bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
       - name: Install Linux AppImage Prerequisites
         if: ${{ inputs.backend == 'appimage' }}
         shell: bash

@@ -13,10 +13,13 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $sourcePath = Join-Path (Split-Path -Parent $scriptRoot) "src\\SampleGNUstepApp.c"
 $outputExe = Join-Path $resolvedRoot "SampleGNUstepApp.exe"
 
-$clangCandidates = @(
-  "C:\msys64\clang64\bin\clang.exe",
-  "C:\msys64\mingw64\bin\clang.exe"
-)
+$clangCandidates = [System.Collections.Generic.List[string]]::new()
+if (-not [string]::IsNullOrWhiteSpace($env:MSYS2_LOCATION)) {
+  $clangCandidates.Add((Join-Path $env:MSYS2_LOCATION "clang64\\bin\\clang.exe")) | Out-Null
+  $clangCandidates.Add((Join-Path $env:MSYS2_LOCATION "mingw64\\bin\\clang.exe")) | Out-Null
+}
+$clangCandidates.Add("C:\msys64\clang64\bin\clang.exe") | Out-Null
+$clangCandidates.Add("C:\msys64\mingw64\bin\clang.exe") | Out-Null
 $clang = $null
 foreach ($candidate in $clangCandidates) {
   if (Test-Path $candidate) {

@@ -16,14 +16,16 @@ $metadataIcons = Join-Path $resolvedStageRoot "metadata\\icons"
 $metadataLicenses = Join-Path $resolvedStageRoot "metadata\\licenses"
 $logRoot = Join-Path $resolvedStageRoot "logs"
 $builtExe = [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path "out\\build\\SampleGNUstepApp.exe"))
-$defaultsCandidates = @(
-  "C:\msys64\clang64\bin\defaults.exe",
-  "C:\clang64\bin\defaults.exe"
-)
-$fontConfigCandidates = @(
-  "C:\msys64\clang64\etc\fonts\fonts.conf",
-  "C:\clang64\etc\fonts\fonts.conf"
-)
+$defaultsCandidates = [System.Collections.Generic.List[string]]::new()
+$fontConfigCandidates = [System.Collections.Generic.List[string]]::new()
+if (-not [string]::IsNullOrWhiteSpace($env:MSYS2_LOCATION)) {
+  $defaultsCandidates.Add((Join-Path $env:MSYS2_LOCATION "clang64\\bin\\defaults.exe")) | Out-Null
+  $fontConfigCandidates.Add((Join-Path $env:MSYS2_LOCATION "clang64\\etc\\fonts\\fonts.conf")) | Out-Null
+}
+$defaultsCandidates.Add("C:\msys64\clang64\bin\defaults.exe") | Out-Null
+$defaultsCandidates.Add("C:\clang64\bin\defaults.exe") | Out-Null
+$fontConfigCandidates.Add("C:\msys64\clang64\etc\fonts\fonts.conf") | Out-Null
+$fontConfigCandidates.Add("C:\clang64\etc\fonts\fonts.conf") | Out-Null
 
 if (Test-Path $resolvedStageRoot) {
   Remove-Item -Recurse -Force $resolvedStageRoot
