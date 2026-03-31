@@ -42,7 +42,11 @@
     "workingDirectory": "app/SampleGNUstepLinuxApp.app",
     "arguments": [],
     "env": {
-      "GP_FIXTURE_NAME": "SampleGNUstepLinuxApp"
+      "GP_FIXTURE_NAME": "SampleGNUstepLinuxApp",
+      "GSTheme": {
+        "value": "Adwaita",
+        "policy": "ifUnset"
+      }
     }
   },
   "outputs": {

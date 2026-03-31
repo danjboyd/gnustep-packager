@@ -293,6 +293,53 @@ function Get-GpManifestContext {
   }
 }
 
+function New-GpLaunchEnvironmentEntry {
+  param(
+    [AllowNull()]
+    [string]$Value,
+    [ValidateSet("override", "ifUnset")]
+    [string]$Policy = "override"
+  )
+
+  return [ordered]@{
+    value = $Value
+    policy = $Policy
+  }
+}
+
+function Get-GpNormalizedLaunchEnvironment {
+  param(
+    [AllowNull()]
+    [object]$Environment
+  )
+
+  $normalized = @{}
+  if (-not ($Environment -is [System.Collections.IDictionary])) {
+    return $normalized
+  }
+
+  foreach ($key in $Environment.Keys) {
+    if ([string]::IsNullOrWhiteSpace([string]$key)) {
+      continue
+    }
+
+    $entry = $Environment[$key]
+    if ($entry -is [System.Collections.IDictionary]) {
+      $value = if ($entry.Contains("value")) { [string]$entry["value"] } else { $null }
+      $policy = if ($entry.Contains("policy") -and -not [string]::IsNullOrWhiteSpace([string]$entry["policy"])) {
+        [string]$entry["policy"]
+      } else {
+        "override"
+      }
+      $normalized[[string]$key] = New-GpLaunchEnvironmentEntry -Value $value -Policy $policy
+    } else {
+      $normalized[[string]$key] = New-GpLaunchEnvironmentEntry -Value ([string]$entry) -Policy "override"
+    }
+  }
+
+  return $normalized
+}
+
 function Test-GpManifest {
   param(
     [Parameter(Mandatory = $true)]
@@ -346,6 +393,36 @@ function Test-GpManifest {
 
     if (-not $Parent.Contains($Key) -or -not ($Parent[$Key] -is [bool])) {
       Add-Issue "Missing required boolean: $Label"
+    }
+  }
+
+  function Test-LaunchEnvEntry {
+    param(
+      [string]$Key,
+      [AllowNull()]
+      [object]$Value,
+      [string]$Label
+    )
+
+    if ($Value -is [string]) {
+      return
+    }
+
+    if (-not ($Value -is [System.Collections.IDictionary])) {
+      Add-Issue "$Label.$Key must be a string or an object."
+      return
+    }
+
+    if (-not $Value.Contains("value") -or -not ($Value["value"] -is [string])) {
+      Add-Issue "$Label.$Key.value must be a string."
+    }
+
+    if ($Value.Contains("policy")) {
+      if (-not (Test-StringValue $Value["policy"])) {
+        Add-Issue "$Label.$Key.policy must be a non-empty string when present."
+      } elseif ([string]$Value["policy"] -notin @("override", "ifUnset")) {
+        Add-Issue "$Label.$Key.policy must be one of: override, ifUnset."
+      }
     }
   }
 
@@ -409,6 +486,15 @@ function Test-GpManifest {
   if ($launch) {
     Require-String -Parent $launch -Key "entryRelativePath" -Label "launch.entryRelativePath"
     Require-String -Parent $launch -Key "workingDirectory" -Label "launch.workingDirectory"
+    if ($launch.Contains("env")) {
+      if (-not ($launch["env"] -is [System.Collections.IDictionary])) {
+        Add-Issue "launch.env must be an object when present."
+      } else {
+        foreach ($key in $launch["env"].Keys) {
+          Test-LaunchEnvEntry -Key ([string]$key) -Value $launch["env"][$key] -Label "launch.env"
+        }
+      }
+    }
   }
 
   $outputs = Require-Object -Parent $Manifest -Key "outputs" -Label "outputs"
@@ -440,6 +526,14 @@ function Test-GpManifest {
       if ($msi.Contains("enabled") -and $msi["enabled"]) {
         Require-String -Parent $msi -Key "upgradeCode" -Label "backends.msi.upgradeCode"
         Require-String -Parent $msi -Key "artifactNamePattern" -Label "backends.msi.artifactNamePattern"
+
+        if ($msi.Contains("unresolvedDependencyPolicy")) {
+          if (-not (Test-StringValue $msi["unresolvedDependencyPolicy"])) {
+            Add-Issue "backends.msi.unresolvedDependencyPolicy must be a non-empty string when present."
+          } elseif ([string]$msi["unresolvedDependencyPolicy"] -notin @("fail", "warn")) {
+            Add-Issue "backends.msi.unresolvedDependencyPolicy must be one of: fail, warn."
+          }
+        }
       }
     }
 
@@ -477,6 +571,21 @@ function Test-GpManifest {
               $startupSecondsValue = 0
               if (-not [int]::TryParse([string]$appimageSmoke["startupSeconds"], [ref]$startupSecondsValue) -or ($startupSecondsValue -lt 1)) {
                 Add-Issue "backends.appimage.smoke.startupSeconds must be an integer greater than or equal to 1."
+              }
+            }
+          }
+        }
+
+        if ($appimage.Contains("validation")) {
+          if (-not ($appimage["validation"] -is [System.Collections.IDictionary])) {
+            Add-Issue "backends.appimage.validation must be an object when present."
+          } else {
+            $appimageValidation = $appimage["validation"]
+            if ($appimageValidation.Contains("runtimeClosure")) {
+              if (-not (Test-StringValue $appimageValidation["runtimeClosure"])) {
+                Add-Issue "backends.appimage.validation.runtimeClosure must be a non-empty string when present."
+              } elseif ([string]$appimageValidation["runtimeClosure"] -notin @("strict", "off")) {
+                Add-Issue "backends.appimage.validation.runtimeClosure must be one of: strict, off."
               }
             }
           }
@@ -910,7 +1019,7 @@ function Get-GpLaunchContract {
     PathPrependPaths      = [string[]]$nativePathPrepend
     ResourceRoots         = [string[]]$combinedResourceRoots
     ResourceRootPaths     = [string[]]$nativeResourceRoots
-    Environment           = [hashtable](Copy-GpValue -Value $launch["env"])
+    Environment           = [hashtable](Get-GpNormalizedLaunchEnvironment -Environment $launch["env"])
     WindowsEntryPath      = Convert-GpNativePathToWindows -Path $entryPath
     PosixEntryPath        = Convert-GpNativePathToPosix -Path $entryPath
   }

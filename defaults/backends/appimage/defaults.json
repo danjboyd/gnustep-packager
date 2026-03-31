@@ -9,6 +9,11 @@
       "toolRoot": "tools/appimage",
       "downloadUrl": "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage",
       "skipAppStreamValidation": true,
+      "validation": {
+        "runtimeClosure": "strict",
+        "allowedSystemLibraries": [],
+        "allowedExternalRunpaths": []
+      },
       "smoke": {
         "mode": "launch-only",
         "arguments": [],

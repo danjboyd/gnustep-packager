@@ -10,6 +10,7 @@ It answers:
 - what path entries should be prepended
 - which resource roots matter at startup
 - which environment variables must be set
+- whether an environment value is unconditional or only a default
 
 ## Inputs
 The current launch contract is built from:
@@ -32,8 +33,17 @@ The normalized launch contract includes:
 - working directory path
 - native path-prepend entries
 - native resource-root entries
-- startup environment variables
+- startup environment variables normalized to `{ value, policy }`
 - backend-formatted path variants
+
+Plain string `launch.env` entries normalize to `policy: override`.
+
+Current assignment policies:
+- `override`
+  Always set the variable in the backend launcher.
+- `ifUnset`
+  Set the variable only when the variable is not already defined in the
+  process environment.
 
 ## Runtime Tokens
 Backend renderers may expand these tokens inside launch-environment values:

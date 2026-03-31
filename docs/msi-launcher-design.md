@@ -28,6 +28,7 @@ The launcher config is derived from:
 - `payload.runtimeRoot`
 - `payload.metadataRoot`
 - `backends.msi.fallbackRuntimeRoot`
+- `backends.msi.unresolvedDependencyPolicy`
 
 ## Runtime Tokens
 Environment values may use these runtime-resolved tokens:
@@ -48,9 +49,13 @@ At runtime the launcher:
 - prefers the bundled runtime root
 - optionally falls back to `backends.msi.fallbackRuntimeRoot`
 - prepends configured runtime paths to `PATH`
-- sets configured environment variables
+- sets configured environment variables according to their assignment policy
 - configures fontconfig when `runtime\etc\fonts\fonts.conf` exists
 - forwards command-line arguments to the inner app
+
+Launch-environment entries can either always override or only apply when the
+target variable is unset. That lets a package ship defaults such as
+`GSTheme=WinUXTheme` without preventing users from setting their own theme.
 
 ## Why Config-Driven
 This keeps the backend reusable:

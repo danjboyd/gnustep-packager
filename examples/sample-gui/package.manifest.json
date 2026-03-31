@@ -45,7 +45,10 @@
     "workingDirectory": ".",
     "arguments": [],
     "env": {
-      "GSTheme": "WinUXTheme"
+      "GSTheme": {
+        "value": "WinUXTheme",
+        "policy": "ifUnset"
+      }
     }
   },
   "outputs": {

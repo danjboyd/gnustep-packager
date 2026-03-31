@@ -99,6 +99,14 @@ Describe "MSI backend" {
       Assert-GpEqual -Actual $context.Manifest["launch"]["env"]["GNUSTEP_PATHPREFIX_LIST"] -Expected "{@runtimeRoot}" -Message "GUI profile should provide the common GNUstep runtime root token."
       Assert-GpEqual -Actual @($context.Manifest["payload"]["runtimeSeedPaths"]) -Expected @("runtime/bin/defaults.exe") -Message "The Windows fixture manifest should declare its runtime seed paths."
     }
+
+    It "normalizes launch environment policies for backend rendering" {
+      $launch = Get-GpLaunchContract -Context $script:transformContext
+
+      Assert-GpEqual -Actual $launch.Environment["GSTheme"]["value"] -Expected "WinUXTheme" -Message "Launch contract should preserve environment values."
+      Assert-GpEqual -Actual $launch.Environment["GSTheme"]["policy"] -Expected "ifUnset" -Message "Launch contract should preserve conditional environment policies."
+      Assert-GpEqual -Actual $launch.Environment["GNUSTEP_PATHPREFIX_LIST"]["policy"] -Expected "override" -Message "Plain string launch environment entries should normalize to override."
+    }
   }
 
   Context "Versioning and transform" {
@@ -140,6 +148,7 @@ Describe "MSI backend" {
       Assert-GpMatch -Actual $configText -Pattern "entryRelativePath=app/SampleGNUstepApp.app/SampleGNUstepApp.exe" -Message "Launcher config should contain the entry path."
       Assert-GpMatch -Actual $configText -Pattern "pathPrepend=runtime/bin" -Message "Launcher config should contain runtime PATH additions."
       Assert-GpMatch -Actual $configText -Pattern "env=GNUSTEP_PATHPREFIX_LIST=\{@runtimeRoot\}" -Message "Launcher config should preserve runtime token expansion."
+      Assert-GpMatch -Actual $configText -Pattern "env=ifUnset\|GSTheme=WinUXTheme" -Message "Launcher config should preserve conditional environment defaults."
     }
 
     It "writes a bundled notice report from compliance entries" {
@@ -195,6 +204,35 @@ Describe "MSI backend" {
           -DryRun | Out-Null
       } catch {
         throw "Dry-run pipeline wrapper should not throw. Error: $($_.Exception.Message)"
+      }
+    }
+  }
+
+  Context "Runtime closure policy" {
+    It "fails by default on unresolved non-system dependencies after ignore filtering" {
+      $config = [pscustomobject]@{
+        UnresolvedDependencyPolicy = "fail"
+      }
+      $runtimeClosure = Resolve-GpMsiRuntimeClosureResult `
+        -UnresolvedDependencies @("Missing.dll", "Optional.dll") `
+        -IgnoredDependencies @("Optional.dll")
+      $logPath = Join-Path $env:TEMP ("gp-msi-runtime-closure-" + [guid]::NewGuid().ToString("N") + ".log")
+      $threw = $false
+
+      try {
+        Assert-GpEqual -Actual @($runtimeClosure.UnresolvedDependencies) -Expected @("Missing.dll") -Message "Ignored runtime dependencies should be filtered from the effective unresolved set."
+        Assert-GpEqual -Actual @($runtimeClosure.IgnoredDependencies) -Expected @("Optional.dll") -Message "Ignored runtime dependencies should still be reported separately."
+        try {
+          Assert-GpMsiRuntimeClosurePolicy -Config $config -RuntimeClosure $runtimeClosure -LogPath $logPath
+        } catch {
+          $threw = $true
+          Assert-GpMatch -Actual $_.Exception.Message -Pattern "Unresolved non-system runtime dependencies" -Message "The default MSI runtime policy should fail when unresolved DLLs remain."
+        }
+        Assert-GpTrue -Condition $threw -Message "The default MSI runtime policy should stop packaging when unresolved DLLs remain."
+      } finally {
+        if (Test-Path $logPath) {
+          Remove-Item -Force $logPath
+        }
       }
     }
   }

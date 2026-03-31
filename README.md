@@ -90,8 +90,10 @@ hardening pass:
 - built-in manifest profiles for common GNUstep GUI app shapes
 - backend-specific runtime and transform docs for AppImage
 - a real AppImage backend that emits AppDir-based `.AppImage` artifacts
-- automated AppImage extractability, desktop-entry, and configurable smoke validation
+- automated AppImage extractability, strict runtime-closure validation, desktop-entry validation, and configurable smoke validation
 - backend-aware reusable GitHub Actions workflows for Windows and Linux with caller-selected runners, preflight hooks, and additive prerequisite inputs
+- fail-by-default MSI runtime-closure enforcement with explicit `warn` and ignore overrides for known optional DLL imports
+- launch-environment assignment policies so packaged defaults such as `GSTheme` can use `ifUnset` instead of always overriding the user
 - MSI and AppImage release-gate documentation
 
 Current sample verification covers:

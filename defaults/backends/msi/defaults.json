@@ -11,6 +11,8 @@
       "artifactNamePattern": "{name}-{version}-win64.msi",
       "portableArtifactNamePattern": "{name}-{version}-win64-portable.zip",
       "fallbackRuntimeRoot": "C:\\clang64",
+      "unresolvedDependencyPolicy": "fail",
+      "ignoredRuntimeDependencies": [],
       "runtimeSearchRoots": [
         "C:\\msys64\\clang64\\bin",
         "C:\\msys64\\clang64\\lib",

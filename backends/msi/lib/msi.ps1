@@ -176,6 +176,8 @@ function Get-GpMsiConfig {
     IconRelativePath = $iconRelativePath
     FallbackRuntimeRoot = [string]$backend["fallbackRuntimeRoot"]
     RuntimeSearchRoots = [string[]]@($backend["runtimeSearchRoots"])
+    UnresolvedDependencyPolicy = [string]$backend["unresolvedDependencyPolicy"]
+    IgnoredRuntimeDependencies = [string[]]@($backend["ignoredRuntimeDependencies"])
     ArtifactPlan = $artifactPlan
     PortablePlan = $portablePlan
     OutputPaths = $outputPaths
@@ -415,7 +417,10 @@ function Write-GpMsiArtifactMetadata {
     runtime = [ordered]@{
       fallbackRuntimeRoot = $Config.FallbackRuntimeRoot
       runtimeSearchRoots = [string[]]@($Config.RuntimeSearchRoots)
+      unresolvedDependencyPolicy = $Config.UnresolvedDependencyPolicy
+      ignoredRuntimeDependencies = [string[]]@($Config.IgnoredRuntimeDependencies)
       unresolvedDependencies = [string[]]@($InstallTree.UnresolvedDependencies)
+      ignoredUnresolvedDependencies = [string[]]@($InstallTree.IgnoredRuntimeDependencies)
     }
     tooling = [ordered]@{
       clang = Get-GpPreferredWindowsClang
@@ -749,6 +754,69 @@ function Complete-GpMsiRuntimeClosure {
   return [string[]]@($unresolved.Keys | Sort-Object)
 }
 
+function Resolve-GpMsiRuntimeClosureResult {
+  param(
+    [AllowEmptyCollection()]
+    [string[]]$UnresolvedDependencies,
+    [AllowEmptyCollection()]
+    [string[]]$IgnoredDependencies
+  )
+
+  $ignoredSet = New-GpCaseInsensitiveSet
+  foreach ($name in @($IgnoredDependencies)) {
+    if (-not [string]::IsNullOrWhiteSpace($name)) {
+      $ignoredSet[[string]$name] = $true
+    }
+  }
+
+  $effective = [System.Collections.Generic.List[string]]::new()
+  $ignored = [System.Collections.Generic.List[string]]::new()
+  foreach ($name in @($UnresolvedDependencies | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)) {
+    if ($ignoredSet.ContainsKey([string]$name)) {
+      $ignored.Add([string]$name) | Out-Null
+    } else {
+      $effective.Add([string]$name) | Out-Null
+    }
+  }
+
+  return [pscustomobject]@{
+    UnresolvedDependencies = [string[]]@($effective.ToArray())
+    IgnoredDependencies = [string[]]@($ignored.ToArray())
+  }
+}
+
+function Assert-GpMsiRuntimeClosurePolicy {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [psobject]$RuntimeClosure,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  if (@($RuntimeClosure.IgnoredDependencies).Count -gt 0) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Ignored unresolved runtime dependencies: {0}" -f ([string]::Join(", ", @($RuntimeClosure.IgnoredDependencies))))
+  }
+
+  if (@($RuntimeClosure.UnresolvedDependencies).Count -eq 0) {
+    return
+  }
+
+  $message = "Unresolved non-system runtime dependencies remain after MSI closure analysis: {0}" -f ([string]::Join(", ", @($RuntimeClosure.UnresolvedDependencies)))
+  Write-GpMsiLogLine -LogPath $LogPath -Message $message
+
+  switch ($Config.UnresolvedDependencyPolicy) {
+    "warn" {
+      Write-GpMsiLogLine -LogPath $LogPath -Message "Continuing because backends.msi.unresolvedDependencyPolicy=warn."
+    }
+
+    default {
+      throw "$message Packaging stops by default. Set backends.msi.unresolvedDependencyPolicy=warn only for an explicit compatibility override or use backends.msi.ignoredRuntimeDependencies for known optional imports."
+    }
+  }
+}
+
 function Get-GpPreferredWindowsClang {
   $candidates = @(
     "C:\msys64\clang64\bin\clang.exe",
@@ -1034,7 +1102,7 @@ function Get-GpLaunchEnvironmentForMsi {
   $launch = Get-GpLaunchContract -Context $Context
   $environment = [hashtable](Copy-GpValue -Value $launch.Environment)
   if (-not $environment.ContainsKey("GNUSTEP_PATHPREFIX_LIST")) {
-    $environment["GNUSTEP_PATHPREFIX_LIST"] = "{@runtimeRoot}"
+    $environment["GNUSTEP_PATHPREFIX_LIST"] = New-GpLaunchEnvironmentEntry -Value "{@runtimeRoot}" -Policy "override"
   }
   return $environment
 }
@@ -1075,7 +1143,19 @@ function Write-GpMsiLauncherConfig {
   }
 
   foreach ($key in ($environment.Keys | Sort-Object)) {
-    $lines.Add(("env={0}={1}" -f $key, [string]$environment[$key])) | Out-Null
+    $entry = $environment[$key]
+    $value = if (($entry -is [System.Collections.IDictionary]) -and $entry.Contains("value")) { [string]$entry["value"] } else { [string]$entry }
+    $policy = if (($entry -is [System.Collections.IDictionary]) -and $entry.Contains("policy") -and -not [string]::IsNullOrWhiteSpace([string]$entry["policy"])) {
+      [string]$entry["policy"]
+    } else {
+      "override"
+    }
+
+    if ($policy -eq "override") {
+      $lines.Add(("env={0}={1}" -f $key, $value)) | Out-Null
+    } else {
+      $lines.Add(("env={0}|{1}={2}" -f $policy, $key, $value)) | Out-Null
+    }
   }
 
   Set-Content -Path $configPath -Value $lines
@@ -1112,16 +1192,11 @@ function Prepare-GpMsiInstallTree {
   $launcherConfigPath = Write-GpMsiLauncherConfig -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Generated launcher config: {0}" -f $launcherConfigPath)
 
-  [string[]]$unresolved = @()
-  $unresolvedRaw = Complete-GpMsiRuntimeClosure -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot -LogPath $LogPath
-  if ($null -ne $unresolvedRaw) {
-    $unresolved = [string[]]@($unresolvedRaw)
-  }
-  if ($unresolved.Count -gt 0) {
-    Write-GpMsiLogLine -LogPath $LogPath -Message ("Unresolved runtime dependencies: {0}" -f ([string]::Join(", ", $unresolved)))
-  }
-
   $noticeReport = Write-GpMsiNoticeReport -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot -LogPath $LogPath
+  $runtimeClosure = Resolve-GpMsiRuntimeClosureResult `
+    -UnresolvedDependencies @(Complete-GpMsiRuntimeClosure -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot -LogPath $LogPath) `
+    -IgnoredDependencies @($Config.IgnoredRuntimeDependencies)
+  Assert-GpMsiRuntimeClosurePolicy -Config $Config -RuntimeClosure $runtimeClosure -LogPath $LogPath
 
   return [pscustomobject]@{
     InstallRoot = $WorkPaths.InstallRoot
@@ -1129,7 +1204,8 @@ function Prepare-GpMsiInstallTree {
     LauncherConfigPath = $launcherConfigPath
     NoticeReportPath = $noticeReport.ReportPath
     RuntimeNotices = @($noticeReport.Entries)
-    UnresolvedDependencies = $unresolved
+    UnresolvedDependencies = [string[]]@($runtimeClosure.UnresolvedDependencies)
+    IgnoredRuntimeDependencies = [string[]]@($runtimeClosure.IgnoredDependencies)
   }
 }
 

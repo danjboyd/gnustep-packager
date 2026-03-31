@@ -97,6 +97,7 @@ Describe "AppImage backend" {
 
       Assert-GpEqual -Actual $launch.EntryRelativePath -Expected "app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp" -Message "Launch contract should describe the staged entry path."
       Assert-GpEqual -Actual @($launch.PathPrepend) -Expected @("runtime/bin") -Message "GUI profile should still feed the shared PATH contract on Linux."
+      Assert-GpEqual -Actual $launch.Environment["GSTheme"]["policy"] -Expected "ifUnset" -Message "Launch contract should preserve conditional environment defaults on Linux too."
     }
   }
 
@@ -116,6 +117,13 @@ Describe "AppImage backend" {
       Assert-GpTrue -Condition (Test-Path $script:packageResult.NoticeReportPath) -Message "Notice report should be generated inside the AppDir."
     }
 
+    It "renders conditional launch defaults into AppRun" {
+      $appRunText = Get-Content -Raw -Path $script:packageResult.AppRunPath
+
+      Assert-GpMatch -Actual $appRunText -Pattern 'if \[ -z "\$\{GSTheme\+x\}" \]; then' -Message "AppRun should only seed GSTheme when the user has not already set it."
+      Assert-GpMatch -Actual $appRunText -Pattern 'export GSTheme="Adwaita"' -Message "AppRun should preserve the configured default theme value."
+    }
+
     It "renders desktop metadata and generated MIME types" {
       $desktopText = Get-Content -Raw -Path $script:packageResult.DesktopEntryPath
       $mimeText = Get-Content -Raw -Path $script:packageResult.MimePackagePath
@@ -132,6 +140,8 @@ Describe "AppImage backend" {
       Assert-GpTrue -Condition (Test-Path $script:validationResult.ExpandedRoot) -Message "Validation should extract the AppImage contents."
       Assert-GpTrue -Condition (Test-Path (Join-Path $script:validationResult.ExpandedRoot "AppRun")) -Message "Extracted AppImage should contain AppRun."
       Assert-GpTrue -Condition (Test-Path (Join-Path $script:validationResult.ExpandedRoot "sample-gnustep-linux.desktop")) -Message "Extracted AppImage should contain the desktop entry."
+      Assert-GpEqual -Actual $script:validationResult.RuntimeClosureMode -Expected "strict" -Message "AppImage validation should enable strict runtime-closure checks by default."
+      Assert-GpTrue -Condition (Test-Path $script:validationResult.RuntimeClosureLog) -Message "AppImage validation should emit a runtime-closure log."
     }
 
     It "runs the launch-only smoke path through the packaged AppImage" {
@@ -239,6 +249,43 @@ Describe "AppImage backend" {
       } finally {
         if (Test-Path $manifestPath) {
           Remove-Item -Force $manifestPath
+        }
+      }
+    }
+  }
+
+  Context "Runtime closure validation" {
+    It "can fail strict validation when host-resolved libraries are outside the allowlist" {
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-runtime-" + [guid]::NewGuid().ToString("N"))
+      $expandedRoot = Join-Path $tempRoot "squashfs-root"
+      $binRoot = Join-Path $expandedRoot "usr/bin"
+      $logPath = Join-Path $tempRoot "runtime-closure.log"
+
+      New-Item -ItemType Directory -Force -Path $binRoot | Out-Null
+      Copy-Item -Force "/bin/ls" (Join-Path $binRoot "fixture-ls")
+
+      $config = [pscustomobject]@{
+        Validation = [pscustomobject]@{
+          RuntimeClosure = "strict"
+          AllowedSystemLibraries = @("libc.so.6")
+          AllowedExternalRunpaths = @()
+        }
+      }
+
+      $threw = $false
+      try {
+        try {
+          Invoke-GpAppImageRuntimeClosureValidation -Config $config -ExpandedRoot $expandedRoot -LogPath $logPath | Out-Null
+        } catch {
+          $threw = $true
+          Assert-GpMatch -Actual $_.Exception.Message -Pattern "runtime-closure validation failed" -Message "Strict runtime validation should fail when external host libraries are not allowlisted."
+        }
+
+        Assert-GpTrue -Condition $threw -Message "Strict runtime validation should reject non-allowlisted host libraries."
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $logPath) -Pattern "external host library not allowlisted" -Message "Runtime validation logs should explain which host dependency caused the failure."
+      } finally {
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
         }
       }
     }

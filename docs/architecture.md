@@ -65,7 +65,7 @@ GNUstep apps often need launch-time environment setup such as:
 - runtime search paths
 - GNUstep path prefix variables
 - fontconfig or resource roots
-- default theme selection
+- default theme selection that should often apply only when unset
 
 Those requirements must be represented once in the shared launch contract and
 then rendered by each backend:

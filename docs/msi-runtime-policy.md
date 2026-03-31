@@ -40,7 +40,7 @@ It excludes packaging-only directories such as stage logs unless the manifest
 explicitly points to them.
 
 ## Dependency Closure
-The backend performs best-effort DLL closure for:
+The backend performs DLL closure for:
 
 - the launch entry executable
 - files listed in `payload.runtimeSeedPaths`
@@ -48,6 +48,17 @@ The backend performs best-effort DLL closure for:
 
 Missing non-system DLLs are searched under `backends.msi.runtimeSearchRoots`
 and copied into `runtime/bin` when found.
+
+If unresolved non-system DLLs remain after closure analysis, packaging fails by
+default.
+
+The manifest may opt into an explicit compatibility override:
+
+- `backends.msi.unresolvedDependencyPolicy: warn`
+  Continue packaging but keep logging unresolved imports.
+- `backends.msi.ignoredRuntimeDependencies[]`
+  Suppress known optional imports from the effective failure set while still
+  keeping the closure logic explicit.
 
 ## Support Assets
 GNUstep support assets such as themes, bundles, and fontconfig data should

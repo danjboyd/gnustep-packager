@@ -17,7 +17,13 @@
 typedef struct GPEnvEntry {
     wchar_t key[GP_MAX_KEY];
     wchar_t value[GP_MAX_PATH];
+    int policy;
 } GPEnvEntry;
+
+enum {
+    GP_ENV_OVERRIDE = 0,
+    GP_ENV_IF_UNSET = 1
+};
 
 typedef struct GPLauncherConfig {
     wchar_t displayName[GP_MAX_TITLE];
@@ -236,6 +242,9 @@ static BOOL GPAddBaseArgument(GPLauncherConfig *config, const char *value)
 static BOOL GPAddEnvEntry(GPLauncherConfig *config, const char *value)
 {
     char buffer[GP_MAX_LINE];
+    char *policyText = NULL;
+    char *policySeparator = NULL;
+    char *equalsSeparator = NULL;
     char *key = NULL;
     char *entryValue = NULL;
 
@@ -245,7 +254,17 @@ static BOOL GPAddEnvEntry(GPLauncherConfig *config, const char *value)
 
     strncpy(buffer, value, sizeof(buffer) - 1);
     buffer[sizeof(buffer) - 1] = '\0';
-    if (!GPParseKeyValue(buffer, &key, &entryValue)) {
+    policyText = buffer;
+    equalsSeparator = strchr(buffer, '=');
+    policySeparator = strchr(buffer, '|');
+    if (policySeparator != NULL && equalsSeparator != NULL && policySeparator < equalsSeparator) {
+        *policySeparator = '\0';
+        key = policySeparator + 1;
+    } else {
+        key = buffer;
+    }
+
+    if (!GPParseKeyValue(key, &key, &entryValue)) {
         return FALSE;
     }
 
@@ -253,6 +272,13 @@ static BOOL GPAddEnvEntry(GPLauncherConfig *config, const char *value)
         return FALSE;
     }
     if (!GPUtf8ToWide(entryValue, config->env[config->envCount].value, GP_MAX_PATH)) {
+        return FALSE;
+    }
+    if (strcmp(policyText, "override") == 0 || policySeparator == NULL) {
+        config->env[config->envCount].policy = GP_ENV_OVERRIDE;
+    } else if (strcmp(policyText, "ifUnset") == 0) {
+        config->env[config->envCount].policy = GP_ENV_IF_UNSET;
+    } else {
         return FALSE;
     }
     config->envCount++;
@@ -476,6 +502,20 @@ static BOOL GPConfigureFontconfig(const wchar_t *runtimeRoot)
     return TRUE;
 }
 
+static BOOL GPEnvironmentVariableExists(const wchar_t *key)
+{
+    wchar_t scratch[2];
+    DWORD result = 0;
+
+    SetLastError(ERROR_SUCCESS);
+    result = GetEnvironmentVariableW(key, scratch, 2);
+    if (result == 0 && GetLastError() == ERROR_ENVVAR_NOT_FOUND) {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
 static BOOL GPBuildChildCommandLine(wchar_t *dest,
                                     size_t destCount,
                                     const wchar_t *appPath,
@@ -557,6 +597,10 @@ static BOOL GPApplyEnvironment(const GPLauncherConfig *config,
                             runtimeRoot,
                             metadataRoot)) {
             return FALSE;
+        }
+        if (config->env[i].policy == GP_ENV_IF_UNSET &&
+            GPEnvironmentVariableExists(config->env[i].key)) {
+            continue;
         }
         if (!SetEnvironmentVariableW(config->env[i].key, expanded)) {
             return FALSE;

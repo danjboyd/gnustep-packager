@@ -28,12 +28,14 @@ First checks:
 
 ### Runtime Closure
 Symptoms:
-- unresolved dependency list in the package log
+- package stops with an unresolved dependency failure
 - smoke launch starts but app process never appears
 
 First checks:
 - inspect `UnresolvedDependencies` in `<artifact-base>.metadata.json`
 - confirm `runtimeSearchRoots` covers the intended GNUstep runtime tree
+- use `ignoredRuntimeDependencies` only for genuinely optional imports
+- use `unresolvedDependencyPolicy=warn` only as an explicit compatibility escape hatch
 
 ### WiX Bootstrap or Build
 Symptoms:

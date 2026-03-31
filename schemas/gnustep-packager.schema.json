@@ -253,7 +253,30 @@
         "env": {
           "type": "object",
           "additionalProperties": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  },
+                  "policy": {
+                    "type": "string",
+                    "enum": [
+                      "override",
+                      "ifUnset"
+                    ]
+                  }
+                }
+              }
+            ]
           }
         }
       }
@@ -480,6 +503,20 @@
                 "minLength": 1
               }
             },
+            "unresolvedDependencyPolicy": {
+              "type": "string",
+              "enum": [
+                "fail",
+                "warn"
+              ]
+            },
+            "ignoredRuntimeDependencies": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
             "wix": {
               "type": "object",
               "additionalProperties": false,
@@ -564,6 +601,33 @@
             },
             "skipAppStreamValidation": {
               "type": "boolean"
+            },
+            "validation": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "runtimeClosure": {
+                  "type": "string",
+                  "enum": [
+                    "strict",
+                    "off"
+                  ]
+                },
+                "allowedSystemLibraries": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "allowedExternalRunpaths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
             },
             "smoke": {
               "type": "object",

@@ -49,6 +49,7 @@ The temporary AppDir is built under `dist/tmp/appimage/<timestamp>/`.
 ## Validation
 Backend validation checks:
 - AppImage extractability
+- strict ELF runtime-closure validation by default
 - required AppDir structure
 - desktop entry rendering
 - optional `desktop-file-validate` output when available
@@ -63,7 +64,7 @@ Supported smoke modes:
 
 ## Known Limitations
 - current artifact generation targets x86_64 only
-- the staged Linux payload must already include its runtime closure
+- the staged Linux payload must still include its runtime closure; the backend validates that closure but does not harvest missing libraries for you
 - the backend does not currently drive `linuxdeploy` or distro-specific helpers
 
 ## CI Usage

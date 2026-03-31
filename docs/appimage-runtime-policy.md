@@ -11,7 +11,8 @@ The generated `AppRun`:
 - maps shared roots into `APP_ROOT`, `RUNTIME_ROOT`, and `METADATA_ROOT`
 - resolves the shared launch entry path and working directory
 - prepends `launch.pathPrepend` entries to `PATH`
-- exports `launch.env` values after token expansion
+- exports `launch.env` values after token expansion and respects assignment
+  policy such as `ifUnset`
 - forwards manifest launch arguments before user-provided arguments
 - executes the staged app entry point
 
@@ -35,5 +36,12 @@ exports:
 
 ## Current Boundary
 The backend does not attempt dynamic Linux dependency harvesting. The consumer
-must stage the runtime tree and any required native dependencies before
+must still stage the runtime tree and any required native dependencies before
 packaging.
+
+Validation now checks that extracted packaged ELF files:
+
+- do not carry host-escaping `RUNPATH` or `RPATH` entries unless explicitly
+  allowlisted
+- do not retain unresolved dependencies under the packaged library search path
+- optionally stay within an explicit host-system library allowlist

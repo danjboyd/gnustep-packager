@@ -214,6 +214,11 @@ function Get-GpAppImageConfig {
   } else {
     @{}
   }
+  $validation = if ($backend.Contains("validation") -and ($backend["validation"] -is [System.Collections.IDictionary])) {
+    $backend["validation"]
+  } else {
+    @{}
+  }
 
   $downloadUrl = [string]$backend["downloadUrl"]
   $downloadLeaf = Split-Path -Leaf $downloadUrl
@@ -254,6 +259,11 @@ function Get-GpAppImageConfig {
     AppImageToolDownloadUrl = $downloadUrl
     AppImageToolFileName = $downloadLeaf
     SkipAppStreamValidation = [bool]$backend["skipAppStreamValidation"]
+    Validation = [pscustomobject]@{
+      RuntimeClosure = [string]$validation["runtimeClosure"]
+      AllowedSystemLibraries = [string[]]@($validation["allowedSystemLibraries"])
+      AllowedExternalRunpaths = [string[]]@($validation["allowedExternalRunpaths"])
+    }
     Smoke = [pscustomobject]@{
       Mode = [string]$smoke["mode"]
       Arguments = [string[]]@($smoke["arguments"])
@@ -492,7 +502,7 @@ function Get-GpLaunchEnvironmentForAppImage {
   $launch = Get-GpLaunchContract -Context $Context
   $environment = [hashtable](Copy-GpValue -Value $launch.Environment)
   if (-not $environment.ContainsKey("GNUSTEP_PATHPREFIX_LIST")) {
-    $environment["GNUSTEP_PATHPREFIX_LIST"] = "{@runtimeRoot}"
+    $environment["GNUSTEP_PATHPREFIX_LIST"] = New-GpLaunchEnvironmentEntry -Value "{@runtimeRoot}" -Policy "override"
   }
 
   Assert-GpAppImageEnvironmentKeys -Environment $environment -Label "AppImage launch"
@@ -834,7 +844,30 @@ function Write-GpAppImageAppRun {
   $lines.Add('export PATH') | Out-Null
 
   foreach ($key in ($environment.Keys | Sort-Object)) {
-    $lines.Add(("export {0}={1}" -f $key, (Convert-GpAppImageValueToShellExpression -Value ([string]$environment[$key])))) | Out-Null
+    $entry = $environment[$key]
+    $value = if (($entry -is [System.Collections.IDictionary]) -and $entry.Contains("value")) { [string]$entry["value"] } else { [string]$entry }
+    $policy = if (($entry -is [System.Collections.IDictionary]) -and $entry.Contains("policy") -and -not [string]::IsNullOrWhiteSpace([string]$entry["policy"])) {
+      [string]$entry["policy"]
+    } else {
+      "override"
+    }
+    $valueExpression = Convert-GpAppImageValueToShellExpression -Value $value
+
+    switch ($policy) {
+      "override" {
+        $lines.Add(("export {0}={1}" -f $key, $valueExpression)) | Out-Null
+      }
+
+      "ifUnset" {
+        $lines.Add(('if [ -z "${' + $key + '+x}" ]; then')) | Out-Null
+        $lines.Add(("  export {0}={1}" -f $key, $valueExpression)) | Out-Null
+        $lines.Add("fi") | Out-Null
+      }
+
+      default {
+        throw "Unsupported AppImage launch environment policy '$policy' for key '$key'."
+      }
+    }
   }
 
   if (@($launch.Arguments).Count -gt 0) {
@@ -1031,6 +1064,11 @@ function Write-GpAppImageArtifactMetadata {
         documentStageRelativePath = $Config.Smoke.DocumentStageRelativePath
         startupSeconds = [int]$Config.Smoke.StartupSeconds
       }
+      runtimeClosure = [ordered]@{
+        mode = $Config.Validation.RuntimeClosure
+        allowedSystemLibraries = [string[]]@($Config.Validation.AllowedSystemLibraries)
+        allowedExternalRunpaths = [string[]]@($Config.Validation.AllowedExternalRunpaths)
+      }
     }
     compliance = [ordered]@{
       noticeReportPath = $AppDir.NoticeReportPath
@@ -1094,6 +1132,7 @@ function Write-GpAppImageDiagnosticsSummary {
   $lines.Add(("AppDir: {0}" -f $AppDir.AppDirRoot)) | Out-Null
   $lines.Add(("Desktop entry: {0}" -f $AppDir.DesktopEntryPath)) | Out-Null
   $lines.Add(("Smoke mode: {0}" -f $Config.Smoke.Mode)) | Out-Null
+  $lines.Add(("Runtime closure mode: {0}" -f $Config.Validation.RuntimeClosure)) | Out-Null
   $lines.Add(("Triage guide: {0}" -f (Get-GpAppImageDiagnosticsDocPath))) | Out-Null
   $lines.Add("") | Out-Null
   $lines.Add("Reproduction commands:") | Out-Null
@@ -1237,6 +1276,413 @@ function Expand-GpAppImageArtifact {
   }
 
   return $expandedPath
+}
+
+function Test-GpElfFile {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $stream = $null
+  try {
+    $stream = [System.IO.File]::OpenRead($Path)
+    if ($stream.Length -lt 4) {
+      return $false
+    }
+
+    $buffer = New-Object byte[] 4
+    $read = $stream.Read($buffer, 0, $buffer.Length)
+    return ($read -eq 4) -and ($buffer[0] -eq 0x7F) -and ($buffer[1] -eq 0x45) -and ($buffer[2] -eq 0x4C) -and ($buffer[3] -eq 0x46)
+  } catch {
+    return $false
+  } finally {
+    if ($null -ne $stream) {
+      $stream.Dispose()
+    }
+  }
+}
+
+function Invoke-GpAppImageCapturedTool {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$FilePath,
+    [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
+    [string[]]$ArgumentList,
+    [hashtable]$Environment = @{}
+  )
+
+  $previousValues = @{}
+  foreach ($key in $Environment.Keys) {
+    $previousValues[$key] = [System.Environment]::GetEnvironmentVariable($key, "Process")
+    [System.Environment]::SetEnvironmentVariable($key, [string]$Environment[$key], "Process")
+  }
+
+  try {
+    $global:LASTEXITCODE = 0
+    $output = & $FilePath @ArgumentList 2>&1
+    $exitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+  } finally {
+    foreach ($key in $previousValues.Keys) {
+      [System.Environment]::SetEnvironmentVariable($key, $previousValues[$key], "Process")
+    }
+  }
+
+  $lines = @(
+    foreach ($line in @($output)) {
+      [string]$line
+    }
+  )
+
+  return [pscustomobject]@{
+    ExitCode = $exitCode
+    Lines = [string[]]@($lines)
+    Text = [string]::Join([System.Environment]::NewLine, @($lines))
+  }
+}
+
+function Get-GpAppImageElfFiles {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Root
+  )
+
+  $files = [System.Collections.Generic.List[string]]::new()
+  foreach ($item in Get-ChildItem -Path $Root -Recurse -File -ErrorAction SilentlyContinue) {
+    if (Test-GpElfFile -Path $item.FullName) {
+      $files.Add($item.FullName) | Out-Null
+    }
+  }
+
+  return [string[]]@($files.ToArray() | Sort-Object -Unique)
+}
+
+function Get-GpAppImageRuntimeLibrarySearchPaths {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ExpandedRoot,
+    [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
+    [string[]]$ElfFiles
+  )
+
+  $paths = [System.Collections.Generic.List[string]]::new()
+  $seen = @{}
+
+  function Add-Path([string]$PathValue) {
+    if ([string]::IsNullOrWhiteSpace($PathValue) -or -not (Test-Path $PathValue) -or $seen.ContainsKey($PathValue)) {
+      return
+    }
+    $seen[$PathValue] = $true
+    $paths.Add($PathValue) | Out-Null
+  }
+
+  $usrRoot = Join-Path $ExpandedRoot "usr"
+  Add-Path $usrRoot
+  Add-Path (Join-Path $usrRoot "lib")
+  Add-Path (Join-Path $usrRoot "lib64")
+
+  foreach ($file in @($ElfFiles)) {
+    Add-Path (Split-Path -Parent $file)
+  }
+
+  return [string[]]@($paths.ToArray())
+}
+
+function Get-GpAppImageReadElfDynamicInfo {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $readelf = Get-Command readelf -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $readelf) {
+    throw "AppImage runtime validation requires readelf on PATH."
+  }
+
+  $result = Invoke-GpAppImageCapturedTool -FilePath $readelf.Source -ArgumentList @("-d", $Path)
+  $needed = [System.Collections.Generic.List[string]]::new()
+  $runpaths = [System.Collections.Generic.List[string]]::new()
+  $hasDynamicSection = $false
+  $missingDynamicSection = $false
+
+  foreach ($line in @($result.Lines)) {
+    if ($line -match "There is no dynamic section in this file") {
+      $missingDynamicSection = $true
+      continue
+    }
+    if ($line -match "Shared library: \[(.+)\]") {
+      $hasDynamicSection = $true
+      $needed.Add([string]$Matches[1]) | Out-Null
+      continue
+    }
+    if ($line -match "(RUNPATH|RPATH).*\[(.*)\]") {
+      $hasDynamicSection = $true
+      foreach ($entry in @(([string]$Matches[2]) -split ":")) {
+        if (-not [string]::IsNullOrWhiteSpace($entry)) {
+          $runpaths.Add($entry) | Out-Null
+        }
+      }
+    }
+  }
+
+  if ($result.ExitCode -ne 0 -and -not $missingDynamicSection) {
+    throw "readelf failed for $Path"
+  }
+
+  return [pscustomobject]@{
+    HasDynamicSection = [bool]($hasDynamicSection -and -not $missingDynamicSection)
+    NeededLibraries = [string[]]@($needed.ToArray() | Sort-Object -Unique)
+    Runpaths = [string[]]@($runpaths.ToArray() | Sort-Object -Unique)
+    RawOutput = $result.Text
+  }
+}
+
+function Get-GpAppImageRunpathIssues {
+  param(
+    [AllowEmptyCollection()]
+    [string[]]$Runpaths,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpandedRoot,
+    [AllowEmptyCollection()]
+    [string[]]$AllowedExternalRunpaths
+  )
+
+  $allowed = @{}
+  foreach ($entry in @($AllowedExternalRunpaths)) {
+    if (-not [string]::IsNullOrWhiteSpace($entry)) {
+      $allowed[[string]$entry] = $true
+    }
+  }
+
+  $issues = [System.Collections.Generic.List[string]]::new()
+  foreach ($entry in @($Runpaths)) {
+    if ([string]::IsNullOrWhiteSpace($entry)) {
+      continue
+    }
+
+    if ($allowed.ContainsKey([string]$entry)) {
+      continue
+    }
+
+    if ($entry.StartsWith('$ORIGIN', [System.StringComparison]::Ordinal) -or
+        $entry.StartsWith('${ORIGIN}', [System.StringComparison]::Ordinal) -or
+        $entry.StartsWith($ExpandedRoot, [System.StringComparison]::Ordinal)) {
+      continue
+    }
+
+    $issues.Add([string]$entry) | Out-Null
+  }
+
+  return [string[]]@($issues.ToArray())
+}
+
+function Get-GpAppImageLddDependencies {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [Parameter(Mandatory = $true)]
+    [hashtable]$Environment,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpandedRoot
+  )
+
+  $ldd = Get-Command ldd -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $ldd) {
+    throw "AppImage runtime validation requires ldd on PATH."
+  }
+
+  $result = Invoke-GpAppImageCapturedTool -FilePath $ldd.Source -ArgumentList @($Path) -Environment $Environment
+  $dependencies = [System.Collections.Generic.List[psobject]]::new()
+  $isDynamic = $true
+
+  foreach ($line in @($result.Lines)) {
+    if ($line -match "statically linked" -or $line -match "not a dynamic executable") {
+      $isDynamic = $false
+      continue
+    }
+
+    if ($line -match '^\s*(\S+)\s+=>\s+not found') {
+      $dependencies.Add([pscustomobject]@{
+        Name = [string]$Matches[1]
+        Path = $null
+        Status = "not-found"
+      }) | Out-Null
+      continue
+    }
+
+    if ($line -match '^\s*(\S+)\s+=>\s+(\S+)\s+\(') {
+      $resolvedPath = [string]$Matches[2]
+      $dependencies.Add([pscustomobject]@{
+        Name = [string]$Matches[1]
+        Path = $resolvedPath
+        Status = $(if ($resolvedPath.StartsWith($ExpandedRoot, [System.StringComparison]::Ordinal)) { "bundled" } else { "external" })
+      }) | Out-Null
+      continue
+    }
+
+    if ($line -match '^\s*(/[^ ]+)\s+\(') {
+      $resolvedPath = [string]$Matches[1]
+      $dependencies.Add([pscustomobject]@{
+        Name = [System.IO.Path]::GetFileName($resolvedPath)
+        Path = $resolvedPath
+        Status = $(if ($resolvedPath.StartsWith($ExpandedRoot, [System.StringComparison]::Ordinal)) { "bundled" } else { "external" })
+      }) | Out-Null
+      continue
+    }
+
+    if ($line -match '^\s*(linux-vdso\.so\.\d+)\s+\(') {
+      $dependencies.Add([pscustomobject]@{
+        Name = [string]$Matches[1]
+        Path = $null
+        Status = "special"
+      }) | Out-Null
+    }
+  }
+
+  $hasMissingDependencies = @($dependencies | Where-Object { $_.Status -eq "not-found" }).Count -gt 0
+  if ($result.ExitCode -ne 0 -and $isDynamic -and -not $hasMissingDependencies) {
+    throw "ldd failed for $Path"
+  }
+
+  return [pscustomobject]@{
+    IsDynamic = [bool]$isDynamic
+    Dependencies = @($dependencies.ToArray())
+    RawOutput = $result.Text
+  }
+}
+
+function Test-GpAppImageAllowedSystemLibrary {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Dependency,
+    [AllowEmptyCollection()]
+    [string[]]$AllowedSystemLibraries
+  )
+
+  foreach ($allowed in @($AllowedSystemLibraries)) {
+    if ([string]::IsNullOrWhiteSpace($allowed)) {
+      continue
+    }
+
+    if ([string]::Equals([string]$Dependency.Name, [string]$allowed, [System.StringComparison]::OrdinalIgnoreCase)) {
+      return $true
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace([string]$Dependency.Path)) {
+      $leaf = [System.IO.Path]::GetFileName([string]$Dependency.Path)
+      if ([string]::Equals($leaf, [string]$allowed, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+      }
+    }
+  }
+
+  return $false
+}
+
+function Invoke-GpAppImageRuntimeClosureValidation {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpandedRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  Set-Content -Path $LogPath -Value ("[{0}] AppImage runtime-closure validation" -f (Get-Date).ToString("o"))
+
+  if ($Config.Validation.RuntimeClosure -ne "strict") {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("Runtime closure validation mode: {0}" -f $Config.Validation.RuntimeClosure)
+    return [pscustomobject]@{
+      Mode = [string]$Config.Validation.RuntimeClosure
+      CheckedFileCount = 0
+      DynamicFileCount = 0
+      LibrarySearchPaths = @()
+      LogPath = $LogPath
+    }
+  }
+
+  $elfFiles = @(Get-GpAppImageElfFiles -Root $ExpandedRoot)
+  Write-GpAppImageLogLine -LogPath $LogPath -Message ("Found ELF files: {0}" -f $elfFiles.Count)
+  if ($elfFiles.Count -eq 0) {
+    return [pscustomobject]@{
+      Mode = "strict"
+      CheckedFileCount = 0
+      DynamicFileCount = 0
+      LibrarySearchPaths = @()
+      LogPath = $LogPath
+    }
+  }
+
+  $librarySearchPaths = @(Get-GpAppImageRuntimeLibrarySearchPaths -ExpandedRoot $ExpandedRoot -ElfFiles $elfFiles)
+  if ($librarySearchPaths.Count -gt 0) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("Packaged library search paths: {0}" -f ([string]::Join(":", $librarySearchPaths)))
+  }
+
+  $ldEnvironment = @{}
+  if ($librarySearchPaths.Count -gt 0) {
+    $ldEnvironment["LD_LIBRARY_PATH"] = [string]::Join(":", $librarySearchPaths)
+  }
+
+  $issues = [System.Collections.Generic.List[string]]::new()
+  $dynamicFileCount = 0
+  foreach ($file in @($elfFiles)) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("Inspecting ELF: {0}" -f $file)
+    $dynamicInfo = Get-GpAppImageReadElfDynamicInfo -Path $file
+    foreach ($entry in @(Get-GpAppImageRunpathIssues -Runpaths $dynamicInfo.Runpaths -ExpandedRoot $ExpandedRoot -AllowedExternalRunpaths @($Config.Validation.AllowedExternalRunpaths))) {
+      $issues.Add(("Packaged ELF escaped the AppDir via RUNPATH/RPATH: {0} -> {1}" -f $file, $entry)) | Out-Null
+    }
+
+    if (-not $dynamicInfo.HasDynamicSection) {
+      Write-GpAppImageLogLine -LogPath $LogPath -Message "No dynamic section found; skipping dependency resolution."
+      continue
+    }
+
+    $dynamicFileCount += 1
+    $lddInfo = Get-GpAppImageLddDependencies -Path $file -Environment $ldEnvironment -ExpandedRoot $ExpandedRoot
+    if (-not $lddInfo.IsDynamic) {
+      Write-GpAppImageLogLine -LogPath $LogPath -Message "ldd reported a non-dynamic executable."
+      continue
+    }
+
+    foreach ($dependency in @($lddInfo.Dependencies)) {
+      switch ($dependency.Status) {
+        "not-found" {
+          $issues.Add(("Packaged ELF has unresolved dependency under packaged LD_LIBRARY_PATH: {0} -> {1}" -f $file, $dependency.Name)) | Out-Null
+        }
+
+        "external" {
+          if (@($Config.Validation.AllowedSystemLibraries).Count -gt 0) {
+            if (Test-GpAppImageAllowedSystemLibrary -Dependency $dependency -AllowedSystemLibraries @($Config.Validation.AllowedSystemLibraries)) {
+              Write-GpAppImageLogLine -LogPath $LogPath -Message ("Allowed host-resolved dependency: {0} -> {1}" -f $dependency.Name, $dependency.Path)
+            } else {
+              $issues.Add(("Packaged ELF resolved an external host library not allowlisted: {0} -> {1}" -f $file, $dependency.Path)) | Out-Null
+            }
+          } else {
+            Write-GpAppImageLogLine -LogPath $LogPath -Message ("Observed host-resolved dependency outside the packaged AppDir: {0} -> {1}" -f $dependency.Name, $dependency.Path)
+          }
+        }
+      }
+    }
+  }
+
+  if ($issues.Count -gt 0) {
+    foreach ($issue in @($issues)) {
+      Write-GpAppImageLogLine -LogPath $LogPath -Message $issue
+    }
+    throw "AppImage runtime-closure validation failed. See $LogPath."
+  }
+
+  Write-GpAppImageLogLine -LogPath $LogPath -Message ("Runtime closure validation succeeded for {0} dynamic ELF file(s)." -f $dynamicFileCount)
+  return [pscustomobject]@{
+    Mode = "strict"
+    CheckedFileCount = $elfFiles.Count
+    DynamicFileCount = $dynamicFileCount
+    LibrarySearchPaths = [string[]]@($librarySearchPaths)
+    LogPath = $LogPath
+  }
 }
 
 function Start-GpAppImageSmokeProcess {
@@ -1487,6 +1933,7 @@ function Invoke-GpAppImageValidation {
       HostSupported = [bool]$backendSupport.Supported
       RunSmoke = [bool]$RunSmoke
       SmokeMode = $config.Smoke.Mode
+      RuntimeClosureMode = $config.Validation.RuntimeClosure
       TimeoutSeconds = $validationPlan.TimeoutSeconds
       LogPath = $LogPath
     }
@@ -1504,6 +1951,7 @@ function Invoke-GpAppImageValidation {
   $validationRoot = Split-Path -Parent $LogPath
   $extractLog = Join-Path $validationRoot "extract.log"
   $smokeLog = Join-Path $validationRoot "smoke.log"
+  $runtimeClosureLog = Join-Path $validationRoot "runtime-closure.log"
   $expandedRoot = Expand-GpAppImageArtifact -ArtifactPath $config.ArtifactPlan.ArtifactPath -ExtractRoot $workPaths.ExtractRoot -LogPath $extractLog
 
   $requiredPaths = @(
@@ -1535,6 +1983,7 @@ function Invoke-GpAppImageValidation {
     Invoke-GpAppImageExternalTool -FilePath $desktopFileValidate.Source -ArgumentList @((Join-Path $expandedRoot $config.DesktopEntryName)) -LogPath $LogPath
   }
 
+  $runtimeClosureResult = Invoke-GpAppImageRuntimeClosureValidation -Config $config -ExpandedRoot $expandedRoot -LogPath $runtimeClosureLog
   $smokeResult = $null
   if ($RunSmoke -or $validationPlan.Enabled) {
     $smokeResult = Invoke-GpAppImageSmoke -Context $Context -Config $config -ValidationPlan $validationPlan -ValidationRoot $validationRoot -SmokeLog $smokeLog
@@ -1547,6 +1996,10 @@ function Invoke-GpAppImageValidation {
     ArtifactPath = $config.ArtifactPlan.ArtifactPath
     ExpandedRoot = $expandedRoot
     ExtractLog = $extractLog
+    RuntimeClosureLog = $runtimeClosureLog
+    RuntimeClosureMode = $(if ($runtimeClosureResult) { $runtimeClosureResult.Mode } else { $null })
+    RuntimeClosureFilesChecked = $(if ($runtimeClosureResult) { $runtimeClosureResult.CheckedFileCount } else { 0 })
+    RuntimeClosureDynamicFiles = $(if ($runtimeClosureResult) { $runtimeClosureResult.DynamicFileCount } else { 0 })
     SmokeLog = $smokeLog
     SmokeMode = $(if ($smokeResult) { $smokeResult.Mode } else { $null })
     SmokeOutcome = $(if ($smokeResult) { $smokeResult.Outcome } else { $null })

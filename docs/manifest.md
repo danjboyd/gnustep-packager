@@ -72,6 +72,16 @@ Important fields:
 - `resourceRoots`
 - `env`
 
+`launch.env` entries may be either:
+- a plain string, which means `policy: override`
+- an object with `value` plus optional `policy`
+
+Current launch environment policies:
+- `override`
+  Always set the variable in the generated launcher.
+- `ifUnset`
+  Set the variable only when the user has not already defined it.
+
 ## `outputs`
 Declares shared output roots for logs, packages, temporary files, and validation
 artifacts.
@@ -135,6 +145,8 @@ Important fields:
 - `portableArtifactNamePattern`
 - `fallbackRuntimeRoot`
 - `runtimeSearchRoots`
+- `unresolvedDependencyPolicy`
+- `ignoredRuntimeDependencies`
 - `wix.version`
 - `wix.downloadUrl`
 - `wix.toolRoot`
@@ -156,6 +168,9 @@ Important fields:
 - `toolRoot`
 - `downloadUrl`
 - `skipAppStreamValidation`
+- `validation.runtimeClosure`
+- `validation.allowedSystemLibraries`
+- `validation.allowedExternalRunpaths`
 - `smoke.mode`
 - `smoke.arguments`
 - `smoke.environment`
@@ -178,6 +193,16 @@ Supported AppImage smoke modes:
 - `marker-file`
   Launch the packaged app with a marker-file compatibility argument and the
   same path exported as `GP_APPIMAGE_SMOKE_MARKER_PATH`.
+
+AppImage runtime-closure validation modes:
+
+- `strict`
+  Extract the packaged AppImage, scan bundled ELF files, reject host-escaping
+  `RUNPATH` or `RPATH` entries, and fail on unresolved dependencies under the
+  packaged library search path. If `validation.allowedSystemLibraries` is set,
+  host-resolved libraries outside the AppDir must appear in that allowlist.
+- `off`
+  Skip backend ELF closure checks.
 
 ## Resolution
 The CLI resolves manifests through layered defaults before validation and
