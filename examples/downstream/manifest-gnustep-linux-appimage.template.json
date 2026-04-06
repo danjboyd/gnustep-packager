@@ -64,6 +64,19 @@
     "shortcutName": "My GNUstep Linux App",
     "fileAssociations": []
   },
+  "updates": {
+    "enabled": true,
+    "provider": "github-release-feed",
+    "channel": "stable",
+    "minimumCheckIntervalHours": 24,
+    "startupDelaySeconds": 15,
+    "github": {
+      "owner": "example-org",
+      "repo": "my-gnustep-linux-app",
+      "tagPattern": "v{version}",
+      "releaseNotesUrlPattern": "https://github.com/{owner}/{repo}/releases/tag/{tag}"
+    }
+  },
   "compliance": {
     "runtimeNotices": [
       {
@@ -81,6 +94,11 @@
       "enabled": true,
       "desktopEntryName": "my-gnustep-linux-app.desktop",
       "iconRelativePath": "metadata/icons/app.png",
+      "updates": {
+        "feedUrl": "https://example-org.github.io/my-gnustep-linux-app/updates/linux/stable.json",
+        "embedUpdateInformation": true,
+        "releaseSelector": "latest"
+      },
       "smoke": {
         "mode": "launch-only"
       }

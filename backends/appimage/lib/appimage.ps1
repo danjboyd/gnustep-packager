@@ -187,6 +187,24 @@ function Get-GpAppImageDesktopMimeTypes {
   return [string[]]@($MimeEntries | ForEach-Object { $_.MimeType } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
 }
 
+function Resolve-GpAppImageArtifactNamePattern {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Pattern,
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Package,
+    [Parameter(Mandatory = $true)]
+    [string]$VersionToken
+  )
+
+  return (Resolve-GpPatternTokens -Pattern $Pattern -Tokens @{
+    name = [string]$Package["name"]
+    version = $VersionToken
+    packageId = [string]$Package["id"]
+    backend = "appimage"
+  })
+}
+
 function Get-GpAppImageConfig {
   param(
     [Parameter(Mandatory = $true)]
@@ -199,6 +217,7 @@ function Get-GpAppImageConfig {
   $backend = $manifest["backends"]["appimage"]
   $artifactPlan = Get-GpArtifactPlan -Context $Context -Backend "appimage"
   $outputPaths = Get-GpOutputPaths -Context $Context
+  $updateSettings = Get-GpUpdateSettings -Context $Context -Backend "appimage"
   $displayName = if ($package.Contains("displayName") -and -not [string]::IsNullOrWhiteSpace([string]$package["displayName"])) {
     [string]$package["displayName"]
   } else {
@@ -219,6 +238,11 @@ function Get-GpAppImageConfig {
   } else {
     @{}
   }
+  $backendUpdates = if ($backend.Contains("updates") -and ($backend["updates"] -is [System.Collections.IDictionary])) {
+    $backend["updates"]
+  } else {
+    @{}
+  }
 
   $downloadUrl = [string]$backend["downloadUrl"]
   $downloadLeaf = Split-Path -Leaf $downloadUrl
@@ -230,6 +254,30 @@ function Get-GpAppImageConfig {
     version = $package["version"]
     packageId = $package["id"]
     backend = "appimage"
+  }
+  $zsyncArtifactPattern = if ($backendUpdates.Contains("zsyncArtifactNamePattern") -and -not [string]::IsNullOrWhiteSpace([string]$backendUpdates["zsyncArtifactNamePattern"])) {
+    [string]$backendUpdates["zsyncArtifactNamePattern"]
+  } else {
+    "{name}-{version}-x86_64.AppImage.zsync"
+  }
+  $zsyncArtifactName = Resolve-GpAppImageArtifactNamePattern -Pattern $zsyncArtifactPattern -Package $package -VersionToken ([string]$package["version"])
+  $zsyncLookupPattern = Resolve-GpAppImageArtifactNamePattern -Pattern $zsyncArtifactPattern -Package $package -VersionToken "*"
+  $releaseSelector = if ($backendUpdates.Contains("releaseSelector") -and -not [string]::IsNullOrWhiteSpace([string]$backendUpdates["releaseSelector"])) {
+    [string]$backendUpdates["releaseSelector"]
+  } else {
+    "latest"
+  }
+  $embedUpdateInformation = [bool]($backendUpdates.Contains("embedUpdateInformation") -and $backendUpdates["embedUpdateInformation"])
+  $updateInformation = if ($backendUpdates.Contains("updateInformation") -and -not [string]::IsNullOrWhiteSpace([string]$backendUpdates["updateInformation"])) {
+    [string]$backendUpdates["updateInformation"]
+  } elseif ($updateSettings.Enabled -and $embedUpdateInformation) {
+    if ([string]::IsNullOrWhiteSpace([string]$updateSettings.GitHub.Owner) -or [string]::IsNullOrWhiteSpace([string]$updateSettings.GitHub.Repo)) {
+      throw "AppImage updates require updates.github.owner and updates.github.repo when backends.appimage.updates.embedUpdateInformation is enabled."
+    }
+
+    "gh-releases-zsync|{0}|{1}|{2}|{3}" -f [string]$updateSettings.GitHub.Owner, [string]$updateSettings.GitHub.Repo, $releaseSelector, $zsyncLookupPattern
+  } else {
+    $null
   }
 
   return [pscustomobject]@{
@@ -263,6 +311,20 @@ function Get-GpAppImageConfig {
       RuntimeClosure = [string]$validation["runtimeClosure"]
       AllowedSystemLibraries = [string[]]@($validation["allowedSystemLibraries"])
       AllowedExternalRunpaths = [string[]]@($validation["allowedExternalRunpaths"])
+    }
+    Updates = [pscustomobject]@{
+      Enabled = [bool]$updateSettings.Enabled
+      FeedUrl = $updateSettings.FeedUrl
+      Channel = $updateSettings.Channel
+      ReleaseTag = $updateSettings.GitHub.Tag
+      ReleaseNotesUrl = $updateSettings.GitHub.ReleaseNotesUrl
+      RuntimeConfigRelativePath = $updateSettings.RuntimeConfigRelativePath
+      EmbedUpdateInformation = [bool]$embedUpdateInformation
+      ReleaseSelector = $releaseSelector
+      UpdateInformation = $updateInformation
+      ZsyncArtifactName = $zsyncArtifactName
+      ZsyncArtifactPath = Join-Path $outputPaths.PackageRoot $zsyncArtifactName
+      ZsyncLookupPattern = $zsyncLookupPattern
     }
     Smoke = [pscustomobject]@{
       Mode = [string]$smoke["mode"]
@@ -917,6 +979,11 @@ function Prepare-GpAppDir {
   $iconAssets = Copy-GpAppImageIconAssets -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
   $appRunPath = Write-GpAppImageAppRun -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
   $noticeReport = Write-GpAppImageNoticeReport -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
+  $metadataRoot = Ensure-GpDirectory -Path (Join-Path (Join-Path $WorkPaths.AppDirRoot "usr") ($Config.MetadataRootRelative -replace "/", [System.IO.Path]::DirectorySeparatorChar))
+  $updateRuntimeConfigPath = Write-GpUpdateRuntimeConfig -Context $Context -Backend "appimage" -MetadataRoot $metadataRoot
+  if (-not [string]::IsNullOrWhiteSpace($updateRuntimeConfigPath)) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("Generated updater runtime config: {0}" -f $updateRuntimeConfigPath)
+  }
 
   return [pscustomobject]@{
     AppDirRoot = $WorkPaths.AppDirRoot
@@ -927,6 +994,7 @@ function Prepare-GpAppDir {
     MimeTypes = [string[]]$desktopEntry.MimeTypes
     MimePackagePath = $mimePackagePath
     NoticeReportPath = $noticeReport.ReportPath
+    UpdateRuntimeConfigPath = $updateRuntimeConfigPath
     RuntimeNotices = @($noticeReport.Entries)
   }
 }
@@ -961,6 +1029,10 @@ function Build-GpAppImageArtifact {
   if ($Config.SkipAppStreamValidation) {
     $arguments.Add("-n") | Out-Null
   }
+  if ($Config.Updates.EmbedUpdateInformation -and -not [string]::IsNullOrWhiteSpace($Config.Updates.UpdateInformation)) {
+    $arguments.Add("-u") | Out-Null
+    $arguments.Add($Config.Updates.UpdateInformation) | Out-Null
+  }
   if (-not [string]::IsNullOrWhiteSpace($runtimeFile)) {
     $arguments.Add("--runtime-file") | Out-Null
     $arguments.Add($runtimeFile) | Out-Null
@@ -972,9 +1044,67 @@ function Build-GpAppImageArtifact {
   Set-GpUnixExecutable -Path $Config.ArtifactPlan.ArtifactPath
   Write-GpAppImageLogLine -LogPath $LogPath -Message ("Created AppImage artifact: {0}" -f $Config.ArtifactPlan.ArtifactPath)
 
+  $zsyncArtifactPath = $null
+  if ($Config.Updates.EmbedUpdateInformation -and -not [string]::IsNullOrWhiteSpace($Config.Updates.UpdateInformation)) {
+    if (Test-Path $Config.Updates.ZsyncArtifactPath) {
+      $zsyncArtifactPath = $Config.Updates.ZsyncArtifactPath
+      Write-GpAppImageLogLine -LogPath $LogPath -Message ("Created AppImage zsync sidecar: {0}" -f $zsyncArtifactPath)
+    } else {
+      $workingDirectoryZsyncPath = Join-Path (Get-Location).Path $Config.Updates.ZsyncArtifactName
+      if (Test-Path $workingDirectoryZsyncPath) {
+        Ensure-GpDirectory -Path (Split-Path -Parent $Config.Updates.ZsyncArtifactPath) | Out-Null
+        Move-Item -Force $workingDirectoryZsyncPath $Config.Updates.ZsyncArtifactPath
+        $zsyncArtifactPath = $Config.Updates.ZsyncArtifactPath
+        Write-GpAppImageLogLine -LogPath $LogPath -Message ("Moved AppImage zsync sidecar from working directory to artifact output root: {0}" -f $zsyncArtifactPath)
+      } else {
+        Write-GpAppImageLogLine -LogPath $LogPath -Message ("AppImage update information was embedded, but no .zsync sidecar was found at the expected path: {0}" -f $Config.Updates.ZsyncArtifactPath)
+      }
+    }
+  }
+
   return [pscustomobject]@{
     ArtifactPath = $Config.ArtifactPlan.ArtifactPath
+    ZsyncArtifactPath = $zsyncArtifactPath
   }
+}
+
+function New-GpAppImageUpdateAssetEntry {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Artifacts
+  )
+
+  $updateSettings = Get-GpUpdateSettings -Context $Context -Backend "appimage"
+  if (-not $updateSettings.Enabled) {
+    return $null
+  }
+
+  $asset = [ordered]@{
+    backend = "appimage"
+    platform = $updateSettings.Platform
+    kind = "appimage"
+    name = $Config.ArtifactPlan.ArtifactName
+    url = Get-GpGitHubReleaseAssetUrl -UpdateSettings $updateSettings -AssetName $Config.ArtifactPlan.ArtifactName
+    sha256 = Get-GpFileSha256 -Path $Artifacts.ArtifactPath
+    sizeBytes = (Get-Item $Artifacts.ArtifactPath).Length
+    updateInformation = $Config.Updates.UpdateInformation
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($Artifacts.ZsyncArtifactPath) -and (Test-Path $Artifacts.ZsyncArtifactPath)) {
+    $zsyncName = Split-Path -Leaf $Artifacts.ZsyncArtifactPath
+    $asset["zsync"] = [ordered]@{
+      name = $zsyncName
+      url = Get-GpGitHubReleaseAssetUrl -UpdateSettings $updateSettings -AssetName $zsyncName
+      sha256 = Get-GpFileSha256 -Path $Artifacts.ZsyncArtifactPath
+      sizeBytes = (Get-Item $Artifacts.ZsyncArtifactPath).Length
+    }
+  }
+
+  return $asset
 }
 
 function Write-GpAppImageArtifactMetadata {
@@ -991,6 +1121,7 @@ function Write-GpAppImageArtifactMetadata {
     [psobject]$Artifacts,
     [Parameter(Mandatory = $true)]
     [string]$ToolPath,
+    [string]$UpdateFeedPath,
     [Parameter(Mandatory = $true)]
     [string]$LogPath
   )
@@ -1000,6 +1131,7 @@ function Write-GpAppImageArtifactMetadata {
   $profiles = @(Get-GpRequestedProfiles -Manifest $Context.Manifest)
   $sidecars = Get-GpAppImageSidecarPaths -Config $Config
   $mimeEntries = @(Get-GpAppImageMimeEntries -Context $Context -Config $Config)
+  $updateSettings = Get-GpUpdateSettings -Context $Context -Backend "appimage"
   $metadata = [ordered]@{
     generatedAt = (Get-Date).ToString("o")
     backend = "appimage"
@@ -1020,9 +1152,27 @@ function Write-GpAppImageArtifactMetadata {
         sha256 = Get-GpFileSha256 -Path $Artifacts.ArtifactPath
         sizeBytes = (Get-Item $Artifacts.ArtifactPath).Length
       }
+      zsync = $(if (-not [string]::IsNullOrWhiteSpace($Artifacts.ZsyncArtifactPath) -and (Test-Path $Artifacts.ZsyncArtifactPath)) {
+        [ordered]@{
+          path = $Artifacts.ZsyncArtifactPath
+          sha256 = Get-GpFileSha256 -Path $Artifacts.ZsyncArtifactPath
+          sizeBytes = (Get-Item $Artifacts.ZsyncArtifactPath).Length
+        }
+      } else {
+        $null
+      })
       metadata = [ordered]@{
         path = $sidecars.MetadataPath
       }
+      updateFeed = $(if (-not [string]::IsNullOrWhiteSpace($UpdateFeedPath) -and (Test-Path $UpdateFeedPath)) {
+        [ordered]@{
+          path = $UpdateFeedPath
+          sha256 = Get-GpFileSha256 -Path $UpdateFeedPath
+          sizeBytes = (Get-Item $UpdateFeedPath).Length
+        }
+      } else {
+        $null
+      })
       diagnostics = [ordered]@{
         path = $sidecars.DiagnosticsPath
       }
@@ -1036,6 +1186,7 @@ function Write-GpAppImageArtifactMetadata {
       dirIconPath = $AppDir.IconPaths.DirIconPath
       mimePackagePath = $AppDir.MimePackagePath
       noticeReportPath = $AppDir.NoticeReportPath
+      updateRuntimeConfigPath = $AppDir.UpdateRuntimeConfigPath
     }
     launch = [ordered]@{
       entryRelativePath = $launch.EntryRelativePath
@@ -1086,6 +1237,20 @@ function Write-GpAppImageArtifactMetadata {
         }
       )
     }
+    updates = [ordered]@{
+      enabled = [bool]$updateSettings.Enabled
+      channel = $updateSettings.Channel
+      feedUrl = $updateSettings.FeedUrl
+      runtimeConfigRelativePath = $updateSettings.RuntimeConfigRelativePath
+      releaseTag = $updateSettings.GitHub.Tag
+      releaseNotesUrl = $updateSettings.GitHub.ReleaseNotesUrl
+      appimage = [ordered]@{
+        embedUpdateInformation = [bool]$Config.Updates.EmbedUpdateInformation
+        releaseSelector = $Config.Updates.ReleaseSelector
+        updateInformation = $Config.Updates.UpdateInformation
+        zsyncArtifactName = $Config.Updates.ZsyncArtifactName
+      }
+    }
     tooling = [ordered]@{
       appimagetool = $ToolPath
       desktopFileValidate = $(Get-Command desktop-file-validate -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { $_.Source })
@@ -1131,6 +1296,18 @@ function Write-GpAppImageDiagnosticsSummary {
   $lines.Add(("Package log: {0}" -f $LogPath)) | Out-Null
   $lines.Add(("AppDir: {0}" -f $AppDir.AppDirRoot)) | Out-Null
   $lines.Add(("Desktop entry: {0}" -f $AppDir.DesktopEntryPath)) | Out-Null
+  if (-not [string]::IsNullOrWhiteSpace($AppDir.UpdateRuntimeConfigPath)) {
+    $lines.Add(("Updater runtime config: {0}" -f $AppDir.UpdateRuntimeConfigPath)) | Out-Null
+  }
+  if ($Config.Updates.Enabled) {
+    $lines.Add(("Update channel: {0}" -f $Config.Updates.Channel)) | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($Config.Updates.FeedUrl)) {
+      $lines.Add(("Update feed URL: {0}" -f $Config.Updates.FeedUrl)) | Out-Null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Config.Updates.UpdateInformation)) {
+      $lines.Add(("Embedded AppImage update info: {0}" -f $Config.Updates.UpdateInformation)) | Out-Null
+    }
+  }
   $lines.Add(("Smoke mode: {0}" -f $Config.Smoke.Mode)) | Out-Null
   $lines.Add(("Runtime closure mode: {0}" -f $Config.Validation.RuntimeClosure)) | Out-Null
   $lines.Add(("Triage guide: {0}" -f (Get-GpAppImageDiagnosticsDocPath))) | Out-Null
@@ -1186,14 +1363,24 @@ function Invoke-GpAppImagePackage {
   $appDir = Prepare-GpAppDir -Context $Context -Config $config -WorkPaths $workPaths -LogPath $LogPath
   $toolPath = Ensure-GpAppImageTool -Config $config -WorkPaths $workPaths -LogPath $LogPath
   $artifacts = Build-GpAppImageArtifact -Config $config -WorkPaths $workPaths -ToolPath $toolPath -LogPath $LogPath
-  $metadataPath = Write-GpAppImageArtifactMetadata -Context $Context -Config $config -WorkPaths $workPaths -AppDir $appDir -Artifacts $artifacts -ToolPath $toolPath -LogPath $LogPath
+  $updateFeedPath = $null
+  $updateAssetEntry = New-GpAppImageUpdateAssetEntry -Context $Context -Config $config -Artifacts $artifacts
+  if ($null -ne $updateAssetEntry) {
+    $updateFeedPath = Write-GpUpdateFeedDocument -Context $Context -Backend "appimage" -ArtifactPath $artifacts.ArtifactPath -Assets @($updateAssetEntry)
+    if (-not [string]::IsNullOrWhiteSpace($updateFeedPath)) {
+      Write-GpAppImageLogLine -LogPath $LogPath -Message ("Wrote update feed sidecar: {0}" -f $updateFeedPath)
+    }
+  }
+  $metadataPath = Write-GpAppImageArtifactMetadata -Context $Context -Config $config -WorkPaths $workPaths -AppDir $appDir -Artifacts $artifacts -ToolPath $toolPath -UpdateFeedPath $updateFeedPath -LogPath $LogPath
   $diagnosticsPath = Write-GpAppImageDiagnosticsSummary -Context $Context -Config $config -AppDir $appDir -MetadataPath $metadataPath -LogPath $LogPath
 
   return [pscustomobject]@{
     Backend = "appimage"
     ManifestPath = $Context.ManifestPath
     ArtifactPath = $artifacts.ArtifactPath
+    ZsyncArtifactPath = $artifacts.ZsyncArtifactPath
     MetadataPath = $metadataPath
+    UpdateFeedPath = $updateFeedPath
     DiagnosticsPath = $diagnosticsPath
     AppDirRoot = $appDir.AppDirRoot
     AppRunPath = $appDir.AppRunPath
@@ -1203,6 +1390,7 @@ function Invoke-GpAppImagePackage {
     DirIconPath = $appDir.IconPaths.DirIconPath
     MimePackagePath = $appDir.MimePackagePath
     NoticeReportPath = $appDir.NoticeReportPath
+    UpdateRuntimeConfigPath = $appDir.UpdateRuntimeConfigPath
     LogPath = $LogPath
   }
 }

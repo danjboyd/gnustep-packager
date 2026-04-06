@@ -58,6 +58,21 @@ Describe "MSI backend" {
       }
     }
 
+    function New-GpSiblingManifest {
+      param(
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Customize
+      )
+
+      $manifest = Get-GpJsonFile -Path $script:manifestPath
+      & $Customize $manifest
+
+      $manifestDirectory = Split-Path -Parent $script:manifestPath
+      $tempManifestPath = Join-Path $manifestDirectory ("pester-msi-" + [guid]::NewGuid().ToString("N") + ".json")
+      $manifest | ConvertTo-Json -Depth 20 | Set-Content -Path $tempManifestPath -Encoding utf8
+      return $tempManifestPath
+    }
+
     $script:repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\\.."))
     $script:manifestPath = Join-Path $script:repoRoot "examples\\sample-gui\\package.manifest.json"
     $script:toolScript = Join-Path $script:repoRoot "scripts\\gnustep-packager.ps1"
@@ -165,6 +180,46 @@ Describe "MSI backend" {
 
       Assert-GpMatch -Actual $templateText -Pattern '<DirectoryRef Id="ProgramMenuFolder">' -Message "Shortcut template should write directly to the Start Menu root."
       Assert-GpFalse -Condition ($templateText -match 'ApplicationProgramsFolder') -Message "Shortcut template should not create an extra Start Menu folder."
+    }
+
+    It "writes bundled updater metadata into the MSI install tree when enabled" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["updates"] = @{
+          enabled = $true
+          provider = "github-release-feed"
+          channel = "stable"
+          github = @{
+            owner = "example-org"
+            repo = "sample-gnustep-app"
+            tagPattern = "v{version}"
+          }
+        }
+        $manifest["backends"]["msi"]["updates"] = @{
+          feedUrl = "https://example.invalid/updates/windows/stable.json"
+        }
+      }
+      $workPaths = $null
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $config = Get-GpMsiConfig -Context $context
+        $workPaths = Get-GpMsiWorkPaths -Context $context
+        $logPath = Join-Path $config.OutputPaths.LogRoot "pester-msi-transform-updates.log"
+        $result = Prepare-GpMsiInstallTree -Context $context -Config $config -WorkPaths $workPaths -LogPath $logPath
+        $updaterConfig = Get-GpJsonFile -Path $result.UpdateRuntimeConfigPath
+
+        Assert-GpTrue -Condition (Test-Path $result.UpdateRuntimeConfigPath) -Message "Update-enabled MSI transforms should bundle a runtime updater config."
+        Assert-GpEqual -Actual $updaterConfig["package"]["backend"] -Expected "msi" -Message "The bundled updater config should record the MSI backend."
+        Assert-GpEqual -Actual $updaterConfig["updates"]["feedUrl"] -Expected "https://example.invalid/updates/windows/stable.json" -Message "The bundled updater config should preserve the resolved MSI feed URL."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+        if ($null -ne $workPaths -and (Test-Path $workPaths.Root)) {
+          Remove-Item -Recurse -Force $workPaths.Root
+        }
+      }
     }
   }
 

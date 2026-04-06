@@ -60,6 +60,19 @@
     "shortcutName": "My GNUstep App",
     "fileAssociations": []
   },
+  "updates": {
+    "enabled": true,
+    "provider": "github-release-feed",
+    "channel": "stable",
+    "minimumCheckIntervalHours": 24,
+    "startupDelaySeconds": 15,
+    "github": {
+      "owner": "example-org",
+      "repo": "my-gnustep-app",
+      "tagPattern": "v{version}",
+      "releaseNotesUrlPattern": "https://github.com/{owner}/{repo}/releases/tag/{tag}"
+    }
+  },
   "compliance": {
     "runtimeNotices": [
       {
@@ -72,7 +85,10 @@
   "backends": {
     "msi": {
       "enabled": true,
-      "upgradeCode": "00000000-0000-0000-0000-000000000000"
+      "upgradeCode": "00000000-0000-0000-0000-000000000000",
+      "updates": {
+        "feedUrl": "https://example-org.github.io/my-gnustep-app/updates/windows/stable.json"
+      }
     },
     "appimage": {
       "enabled": false,

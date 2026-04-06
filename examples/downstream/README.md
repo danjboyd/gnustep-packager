@@ -15,16 +15,26 @@ Contents:
   Example GitHub Actions workflow that targets a self-hosted GNUstep Linux
   runner and uses a caller-provided preflight script
 - `manifest-gnustep-gui.template.json`
-  Minimal manifest starting point for a typical GNUstep GUI app
+  Minimal manifest starting point for a typical GNUstep GUI app, including a
+  GitHub release-feed update block for MSI publishing
 - `manifest-gnustep-document-viewer.template.json`
   Slightly more opinionated starting point for a document-viewer style app
 - `manifest-gnustep-linux-appimage.template.json`
-  Linux-oriented manifest starting point for AppImage packaging
+  Linux-oriented manifest starting point for AppImage packaging, including
+  AppImage-native update metadata settings
+- `package-release-with-updates.yml`
+  End-to-end downstream GitHub Actions example that packages Windows and Linux,
+  publishes release assets, and deploys stable update feeds to GitHub Pages
+- `objc/AppDelegate+Updates.m`
+  Minimal Objective-C snippet that wires `GPStandardUpdaterController` into an
+  app delegate
 
 Recommended adoption order:
 
 1. Start from the closest manifest template.
 2. Fill in the app-specific package identity and stage paths.
-3. Add real `compliance.runtimeNotices` entries for shipped runtime contents.
-4. Run `scripts/run-packaging-pipeline.ps1 -Backend <msi|appimage> -RunSmoke`
+3. Replace the placeholder `updates.github.*` and backend `updates.feedUrl`
+   values with your real repo and feed URLs.
+4. Add real `compliance.runtimeNotices` entries for shipped runtime contents.
+5. Run `scripts/run-packaging-pipeline.ps1 -Backend <msi|appimage> -RunSmoke`
    locally.

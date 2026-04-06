@@ -8,6 +8,9 @@
       "installDirectoryName": "",
       "launcherFileName": "",
       "iconRelativePath": "",
+      "updates": {
+        "feedUrl": ""
+      },
       "artifactNamePattern": "{name}-{version}-win64.msi",
       "portableArtifactNamePattern": "{name}-{version}-win64-portable.zip",
       "fallbackRuntimeRoot": "C:\\clang64",

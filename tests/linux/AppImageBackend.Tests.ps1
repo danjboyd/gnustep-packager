@@ -133,6 +133,44 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $desktopText -Pattern "MimeType=application/x-samplegnusteplinuxapp-samplelinux;" -Message "Desktop entry should include the generated MIME type."
       Assert-GpMatch -Actual $mimeText -Pattern "glob pattern='\*\.samplelinux'" -Message "Generated MIME package should describe the staged extension association."
     }
+
+    It "can emit updater metadata and a feed sidecar when updates are enabled" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["updates"] = @{
+          enabled = $true
+          provider = "github-release-feed"
+          channel = "stable"
+          github = @{
+            owner = "example-org"
+            repo = "sample-gnustep-linux-app"
+            tagPattern = "v{version}"
+          }
+        }
+        $manifest["backends"]["appimage"]["updates"] = @{
+          feedUrl = "https://example.invalid/updates/linux/stable.json"
+          embedUpdateInformation = $true
+          releaseSelector = "latest"
+        }
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $logPath = Join-Path $script:packageConfig.OutputPaths.LogRoot "pester-appimage-package-updates.log"
+        $result = Invoke-GpAppImagePackage -Context $context -LogPath $logPath
+        $metadata = Get-GpJsonFile -Path $result.MetadataPath
+
+        Assert-GpTrue -Condition (Test-Path $result.UpdateRuntimeConfigPath) -Message "Update-enabled AppImage packaging should bundle a runtime updater config."
+        Assert-GpTrue -Condition (Test-Path $result.UpdateFeedPath) -Message "Update-enabled AppImage packaging should emit an update feed sidecar."
+        Assert-GpMatch -Actual $metadata["updates"]["appimage"]["updateInformation"] -Pattern "^gh-releases-zsync\|" -Message "AppImage metadata should record the embedded AppImage update information."
+        Assert-GpEqual -Actual $metadata["updates"]["feedUrl"] -Expected "https://example.invalid/updates/linux/stable.json" -Message "AppImage metadata should record the resolved feed URL."
+        Assert-GpEqual -Actual $metadata["updates"]["appimage"]["zsyncArtifactName"] -Expected "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage.zsync" -Message "AppImage metadata should preserve the configured zsync artifact name even when the active appimagetool build omits the sidecar."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
+    }
   }
 
   Context "Validation" {

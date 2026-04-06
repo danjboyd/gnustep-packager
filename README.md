@@ -21,6 +21,8 @@ AppImage without rewriting the entire packaging system.
 - A Linux AppImage backend built on the same core packaging model
 - Reusable local scripts and reusable GitHub Actions workflows
 - Clean validation paths for package smoke testing
+- A companion updater foundation for apps that publish MSI and AppImage
+  releases to GitHub
 
 ## Design Principles
 - Stage first. Packaging starts from a self-contained staged payload.
@@ -96,6 +98,19 @@ hardening pass:
 - launch-environment assignment policies so packaged defaults such as `GSTheme` can use `ifUnset` instead of always overriding the user
 - MSI and AppImage release-gate documentation
 
+This repo also includes the full phase 10 updater path:
+
+- a documented update architecture and trust model
+- manifest-level update feed and GitHub release settings
+- packaging-time updater runtime config emission inside MSI and AppImage payloads
+- package-side update-feed sidecars for downstream release publishing
+- AppImage embedded update information and `.zsync` sidecar integration support
+- a Foundation-only Objective-C updater core under `updater/`
+- an optional AppKit updater UI layer
+- a separate update helper executable contract and implementation
+- consumer docs and downstream release-publishing examples
+- dedicated updater contract and packaging regression coverage
+
 Current sample verification covers:
 - `build`
 - `stage`
@@ -111,6 +126,7 @@ Current sample verification covers:
 - `Roadmap.md`
 - `schemas/`
 - `scripts/`
+- `updater/`
 - `backends/msi/`
 - `backends/appimage/`
 - `examples/`
@@ -164,6 +180,11 @@ Release and consumer docs:
 - [docs/consumer-setup.md](docs/consumer-setup.md)
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md)
 - [docs/compliance-notices.md](docs/compliance-notices.md)
+- [docs/update-architecture.md](docs/update-architecture.md)
+- [docs/update-feed-contract.md](docs/update-feed-contract.md)
+- [docs/updater-consumer-guide.md](docs/updater-consumer-guide.md)
+- [docs/updater-release-publishing.md](docs/updater-release-publishing.md)
+- [docs/updater-helper-contract.md](docs/updater-helper-contract.md)
 - [docs/windows-msi-triage.md](docs/windows-msi-triage.md)
 - [backends/appimage/README.md](backends/appimage/README.md)
 - [docs/appimage-extension-path.md](docs/appimage-extension-path.md)

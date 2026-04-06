@@ -22,6 +22,9 @@
 | Install scope | MSI perUser | Supported | Used by sample fixture for local and CI validation |
 | Diagnostics | MSI metadata and diagnostics sidecars | Supported | Package step emits `.metadata.json` and `.diagnostics.txt` next to the MSI |
 | Diagnostics | AppImage metadata and diagnostics sidecars | Supported | Package step emits `.metadata.json` and `.diagnostics.txt` next to the `.AppImage` |
+| Updates | Packaged updater runtime config | Supported | Emitted under `metadata/updates/` when manifest updates are enabled |
+| Updates | MSI update-feed sidecar | Supported | Package step emits `.update-feed.json` next to the MSI when updates are enabled |
+| Updates | AppImage update-feed and native update metadata | Supported | Package step emits `.update-feed.json` and passes native update info into `appimagetool` when updates are enabled |
 | Compliance | MSI notice report generation | Supported | Built from `compliance.runtimeNotices` into the installed metadata tree |
 | Compliance | AppImage notice report generation | Supported | Built from `compliance.runtimeNotices` into the AppDir metadata tree |
 

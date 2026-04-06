@@ -337,6 +337,34 @@ function Write-GpMsiNoticeReport {
   }
 }
 
+function New-GpMsiUpdateAssetEntry {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Artifacts
+  )
+
+  $updateSettings = Get-GpUpdateSettings -Context $Context -Backend "msi"
+  if (-not $updateSettings.Enabled) {
+    return $null
+  }
+
+  return [ordered]@{
+    backend = "msi"
+    platform = $updateSettings.Platform
+    kind = "msi"
+    name = $Config.ArtifactPlan.ArtifactName
+    url = Get-GpGitHubReleaseAssetUrl -UpdateSettings $updateSettings -AssetName $Config.ArtifactPlan.ArtifactName
+    sha256 = Get-GpFileSha256 -Path $Artifacts.ArtifactPath
+    sizeBytes = (Get-Item $Artifacts.ArtifactPath).Length
+    installScope = $Config.InstallScope
+    msiVersion = $Config.MsiVersion
+  }
+}
+
 function Write-GpMsiArtifactMetadata {
   param(
     [Parameter(Mandatory = $true)]
@@ -353,6 +381,7 @@ function Write-GpMsiArtifactMetadata {
     [psobject]$Artifacts,
     [Parameter(Mandatory = $true)]
     [psobject]$NoticeReport,
+    [string]$UpdateFeedPath,
     [Parameter(Mandatory = $true)]
     [string]$LogPath
   )
@@ -363,6 +392,7 @@ function Write-GpMsiArtifactMetadata {
   $sidecars = Get-GpMsiSidecarPaths -Config $Config
   $signing = Get-GpMsiSigningSettings -Config $Config
   $hostEnvironment = Get-GpHostEnvironment
+  $updateSettings = Get-GpUpdateSettings -Context $Context -Backend "msi"
 
   $metadata = [ordered]@{
     generatedAt = (Get-Date).ToString("o")
@@ -391,6 +421,15 @@ function Write-GpMsiArtifactMetadata {
         sha256 = Get-GpFileSha256 -Path $Artifacts.PortableArtifactPath
         sizeBytes = (Get-Item $Artifacts.PortableArtifactPath).Length
       }
+      updateFeed = $(if (-not [string]::IsNullOrWhiteSpace($UpdateFeedPath) -and (Test-Path $UpdateFeedPath)) {
+        [ordered]@{
+          path = $UpdateFeedPath
+          sha256 = Get-GpFileSha256 -Path $UpdateFeedPath
+          sizeBytes = (Get-Item $UpdateFeedPath).Length
+        }
+      } else {
+        $null
+      })
       metadata = [ordered]@{
         path = $sidecars.MetadataPath
       }
@@ -405,6 +444,7 @@ function Write-GpMsiArtifactMetadata {
       launcherConfigName = $Config.LauncherConfigName
       installTreeRoot = $InstallTree.InstallRoot
       noticeReportPath = $NoticeReport.ReportPath
+      updateRuntimeConfigPath = $InstallTree.UpdateRuntimeConfigPath
     }
     launch = [ordered]@{
       entryRelativePath = $launch.EntryRelativePath
@@ -454,6 +494,18 @@ function Write-GpMsiArtifactMetadata {
         }
       )
     }
+    updates = [ordered]@{
+      enabled = [bool]$updateSettings.Enabled
+      channel = $updateSettings.Channel
+      feedUrl = $updateSettings.FeedUrl
+      runtimeConfigRelativePath = $updateSettings.RuntimeConfigRelativePath
+      releaseTag = $updateSettings.GitHub.Tag
+      releaseNotesUrl = $updateSettings.GitHub.ReleaseNotesUrl
+      msi = [ordered]@{
+        installScope = $Config.InstallScope
+        msiVersion = $Config.MsiVersion
+      }
+    }
     outputs = [ordered]@{
       logPath = $LogPath
       workRoot = $WorkPaths.Root
@@ -496,6 +548,16 @@ function Write-GpMsiDiagnosticsSummary {
   $lines.Add(("Metadata: {0}" -f $MetadataPath)) | Out-Null
   $lines.Add(("Package log: {0}" -f $LogPath)) | Out-Null
   $lines.Add(("Triage guide: {0}" -f (Get-GpMsiDiagnosticsDocPath))) | Out-Null
+  if (-not [string]::IsNullOrWhiteSpace($InstallTree.UpdateRuntimeConfigPath)) {
+    $lines.Add(("Updater runtime config: {0}" -f $InstallTree.UpdateRuntimeConfigPath)) | Out-Null
+  }
+  $updateSettings = Get-GpUpdateSettings -Context $Context -Backend "msi"
+  if ($updateSettings.Enabled) {
+    $lines.Add(("Update channel: {0}" -f $updateSettings.Channel)) | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($updateSettings.FeedUrl)) {
+      $lines.Add(("Update feed URL: {0}" -f $updateSettings.FeedUrl)) | Out-Null
+    }
+  }
   if (-not [string]::IsNullOrWhiteSpace($InstallTree.NoticeReportPath)) {
     $lines.Add(("Notice report: {0}" -f $InstallTree.NoticeReportPath)) | Out-Null
   }
@@ -1193,6 +1255,11 @@ function Prepare-GpMsiInstallTree {
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Generated launcher config: {0}" -f $launcherConfigPath)
 
   $noticeReport = Write-GpMsiNoticeReport -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot -LogPath $LogPath
+  $metadataRoot = Ensure-GpDirectory -Path (Resolve-GpPathRelativeToBase -BasePath $WorkPaths.InstallRoot -Path $Config.MetadataRootRelative)
+  $updateRuntimeConfigPath = Write-GpUpdateRuntimeConfig -Context $Context -Backend "msi" -MetadataRoot $metadataRoot
+  if (-not [string]::IsNullOrWhiteSpace($updateRuntimeConfigPath)) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Generated updater runtime config: {0}" -f $updateRuntimeConfigPath)
+  }
   $runtimeClosure = Resolve-GpMsiRuntimeClosureResult `
     -UnresolvedDependencies @(Complete-GpMsiRuntimeClosure -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot -LogPath $LogPath) `
     -IgnoredDependencies @($Config.IgnoredRuntimeDependencies)
@@ -1203,6 +1270,7 @@ function Prepare-GpMsiInstallTree {
     LauncherPath = $launcherOutputPath
     LauncherConfigPath = $launcherConfigPath
     NoticeReportPath = $noticeReport.ReportPath
+    UpdateRuntimeConfigPath = $updateRuntimeConfigPath
     RuntimeNotices = @($noticeReport.Entries)
     UnresolvedDependencies = [string[]]@($runtimeClosure.UnresolvedDependencies)
     IgnoredRuntimeDependencies = [string[]]@($runtimeClosure.IgnoredDependencies)
@@ -1475,7 +1543,15 @@ function Invoke-GpMsiPackage {
   $wixTools = Ensure-GpWixTools -Config $config -WorkPaths $workPaths -LogPath $LogPath
   $sources = Write-GpMsiSources -Context $Context -Config $config -WorkPaths $workPaths -WixTools $wixTools -LogPath $LogPath
   $artifacts = Build-GpMsiArtifacts -Context $Context -Config $config -WorkPaths $workPaths -WixTools $wixTools -Sources $sources -LogPath $LogPath
-  $metadataPath = Write-GpMsiArtifactMetadata -Context $Context -Config $config -WorkPaths $workPaths -WixTools $wixTools -InstallTree $installTree -Artifacts $artifacts -NoticeReport ([pscustomobject]@{ ReportPath = $installTree.NoticeReportPath; Entries = @($installTree.RuntimeNotices) }) -LogPath $LogPath
+  $updateFeedPath = $null
+  $updateAssetEntry = New-GpMsiUpdateAssetEntry -Context $Context -Config $config -Artifacts $artifacts
+  if ($null -ne $updateAssetEntry) {
+    $updateFeedPath = Write-GpUpdateFeedDocument -Context $Context -Backend "msi" -ArtifactPath $artifacts.ArtifactPath -Assets @($updateAssetEntry)
+    if (-not [string]::IsNullOrWhiteSpace($updateFeedPath)) {
+      Write-GpMsiLogLine -LogPath $LogPath -Message ("Wrote update feed sidecar: {0}" -f $updateFeedPath)
+    }
+  }
+  $metadataPath = Write-GpMsiArtifactMetadata -Context $Context -Config $config -WorkPaths $workPaths -WixTools $wixTools -InstallTree $installTree -Artifacts $artifacts -NoticeReport ([pscustomobject]@{ ReportPath = $installTree.NoticeReportPath; Entries = @($installTree.RuntimeNotices) }) -UpdateFeedPath $updateFeedPath -LogPath $LogPath
   $diagnosticsPath = Write-GpMsiDiagnosticsSummary -Context $Context -Config $config -InstallTree $installTree -MetadataPath $metadataPath -LogPath $LogPath
 
   return [pscustomobject]@{
@@ -1485,11 +1561,13 @@ function Invoke-GpMsiPackage {
     ArtifactPath = $artifacts.ArtifactPath
     PortableArtifactPath = $artifacts.PortableArtifactPath
     MetadataPath = $metadataPath
+    UpdateFeedPath = $updateFeedPath
     DiagnosticsPath = $diagnosticsPath
     InstallRoot = $installTree.InstallRoot
     LauncherPath = $installTree.LauncherPath
     LauncherConfigPath = $installTree.LauncherConfigPath
     NoticeReportPath = $installTree.NoticeReportPath
+    UpdateRuntimeConfigPath = $installTree.UpdateRuntimeConfigPath
     UnresolvedDependencies = $installTree.UnresolvedDependencies
     LogPath = $LogPath
   }

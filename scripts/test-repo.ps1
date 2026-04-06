@@ -32,6 +32,7 @@ function Install-GpPester {
 
 function Get-GpDefaultTestPaths {
   $paths = [System.Collections.Generic.List[string]]::new()
+  $paths.Add((Join-Path $repoRoot "tests\\shared")) | Out-Null
   if ($IsWindows) {
     $paths.Add((Join-Path $repoRoot "tests\\windows")) | Out-Null
   } elseif ($IsLinux) {

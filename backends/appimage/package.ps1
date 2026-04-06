@@ -22,9 +22,18 @@ if ($DryRun) {
 }
 
 Write-Host "AppImage created: $($result.ArtifactPath)"
+if (-not [string]::IsNullOrWhiteSpace($result.ZsyncArtifactPath)) {
+  Write-Host "Zsync sidecar: $($result.ZsyncArtifactPath)"
+}
 Write-Host "Artifact metadata: $($result.MetadataPath)"
+if (-not [string]::IsNullOrWhiteSpace($result.UpdateFeedPath)) {
+  Write-Host "Update feed: $($result.UpdateFeedPath)"
+}
 Write-Host "Diagnostics summary: $($result.DiagnosticsPath)"
 Write-Host "AppDir: $($result.AppDirRoot)"
 Write-Host "AppRun: $($result.AppRunPath)"
 Write-Host "Desktop entry: $($result.DesktopEntryPath)"
 Write-Host "Notice report: $($result.NoticeReportPath)"
+if (-not [string]::IsNullOrWhiteSpace($result.UpdateRuntimeConfigPath)) {
+  Write-Host "Updater runtime config: $($result.UpdateRuntimeConfigPath)"
+}

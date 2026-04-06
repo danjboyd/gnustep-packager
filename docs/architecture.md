@@ -31,6 +31,11 @@ The shared model is built around these concepts:
 - `validation`
   Backend-neutral smoke validation for the staged payload and launch contract
 
+- `updates`
+  Shared release-discovery and update-feed settings that downstream apps can
+  consume through a runtime updater library without embedding backend-specific
+  installer behavior in the app process
+
 - `integrations`
   Logical desktop integration requests such as shortcuts, categories, and file
   associations
@@ -97,6 +102,9 @@ in shared code.
 
 - `scripts/`
   Shared entry points and helper libraries
+
+- `updater/`
+  Runtime updater libraries and related helper code
 
 - `backends/msi/`
   Windows MSI backend

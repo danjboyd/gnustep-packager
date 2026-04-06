@@ -32,6 +32,8 @@ The backend now implements:
 - WiX bootstrap, harvest, compile, and link steps
 - MSI plus portable ZIP artifact emission
 - package metadata and diagnostics sidecar outputs
+- optional updater runtime config and update-feed sidecar outputs when updates
+  are enabled
 - bundled third-party notice report generation from manifest compliance entries
 - backend validation for install, launch, and uninstall smoke paths
 

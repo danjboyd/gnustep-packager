@@ -1,0 +1,38 @@
+{
+  "formatVersion": 1,
+  "package": {
+    "id": "com.example.MyGNUstepApp",
+    "name": "MyGNUstepApp",
+    "displayName": "My GNUstep App",
+    "currentVersion": "1.2.2",
+    "backend": "appimage",
+    "channel": "stable"
+  },
+  "release": {
+    "version": "1.2.3",
+    "tag": "v1.2.3",
+    "releaseNotesUrl": "https://github.com/example-org/my-gnustep-app/releases/tag/v1.2.3"
+  },
+  "asset": {
+    "backend": "appimage",
+    "platform": "linux-x64",
+    "kind": "appimage",
+    "name": "MyGNUstepApp-1.2.3-x86_64.AppImage",
+    "url": "https://github.com/example-org/my-gnustep-app/releases/download/v1.2.3/MyGNUstepApp-1.2.3-x86_64.AppImage",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sizeBytes": 12345678,
+    "updateInformation": "gh-releases-zsync|example-org|my-gnustep-app|latest|MyGNUstepApp-*x86_64.AppImage.zsync",
+    "zsync": {
+      "url": "https://github.com/example-org/my-gnustep-app/releases/download/v1.2.3/MyGNUstepApp-1.2.3-x86_64.AppImage.zsync"
+    }
+  },
+  "currentExecutablePath": "/home/user/Applications/MyGNUstepApp.AppImage",
+  "execution": {
+    "stateFile": "/tmp/gnustep-packager-updater/com.example.MyGNUstepApp/update-state.json",
+    "workingRoot": "/tmp/gnustep-packager-updater/com.example.MyGNUstepApp",
+    "relaunchExecutablePath": "/home/user/Applications/MyGNUstepApp.AppImage",
+    "linux": {
+      "currentAppImagePath": "/home/user/Applications/MyGNUstepApp.AppImage"
+    }
+  }
+}

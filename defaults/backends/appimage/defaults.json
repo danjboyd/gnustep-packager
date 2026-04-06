@@ -5,6 +5,13 @@
       "appDirName": "{name}.AppDir",
       "desktopEntryName": "{name}.desktop",
       "iconRelativePath": "",
+      "updates": {
+        "feedUrl": "",
+        "embedUpdateInformation": true,
+        "updateInformation": "",
+        "releaseSelector": "latest",
+        "zsyncArtifactNamePattern": "{name}-{version}-x86_64.AppImage.zsync"
+      },
       "artifactNamePattern": "{name}-{version}-x86_64.AppImage",
       "toolRoot": "tools/appimage",
       "downloadUrl": "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage",

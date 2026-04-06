@@ -80,6 +80,10 @@ Primary inputs:
 - `sign-artifacts`
 - `sign-timestamp-url`
 
+The reusable workflow uploads package outputs exactly as the backend produced
+them. When updates are enabled, that includes the generated `.update-feed.json`
+sidecars and any AppImage `.zsync` outputs under the `-packages` artifact.
+
 ## Secrets
 Optional signing secrets:
 
@@ -143,3 +147,19 @@ That means the consumer manifest and build outputs stay in the caller repo while
 the packaging logic stays centralized here. Caller preflight commands run in
 that checked-out workspace before the workflow resolves outputs or invokes the
 shared packaging pipeline.
+
+## Release Publishing Follow-On
+The reusable workflow stops at packaging, validation, and artifact upload.
+
+For updater-enabled apps, add a downstream release job that:
+
+1. downloads the `-packages` artifacts
+2. publishes `.msi`, `.AppImage`, and `.zsync` outputs to GitHub Releases
+3. copies the generated `.update-feed.json` files to stable feed URLs such as
+   `updates/windows/stable.json` and `updates/linux/stable.json`
+4. deploys those feed URLs through GitHub Pages or another static host
+
+See:
+
+- [updater-release-publishing.md](updater-release-publishing.md)
+- `examples/downstream/package-release-with-updates.yml`

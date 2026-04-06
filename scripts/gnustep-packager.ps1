@@ -82,6 +82,11 @@ switch ($Command) {
     Write-Host "Package root: $($summary.PackageRoot)"
     Write-Host "Log root: $($summary.LogRoot)"
     Write-Host "Validation kind: $($summary.ValidationKind)"
+    if ($summary.UpdatesEnabled) {
+      Write-Host "Updates: enabled ($($summary.UpdateChannel))"
+    } else {
+      Write-Host "Updates: disabled"
+    }
     Write-Host "Enabled backends: $enabledBackendText"
     break
   }

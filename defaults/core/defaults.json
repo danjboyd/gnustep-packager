@@ -35,9 +35,22 @@
       "retainOnSuccess": true
     }
   },
+  "updates": {
+    "enabled": false,
+    "provider": "github-release-feed",
+    "channel": "stable",
+    "feedUrl": "",
+    "minimumCheckIntervalHours": 24,
+    "startupDelaySeconds": 15,
+    "github": {
+      "owner": "",
+      "repo": "",
+      "tagPattern": "v{version}",
+      "releaseNotesUrlPattern": "https://github.com/{owner}/{repo}/releases/tag/{tag}"
+    }
+  },
   "integrations": {
     "categories": [],
     "fileAssociations": []
   }
 }
-

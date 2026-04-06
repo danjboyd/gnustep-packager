@@ -1,0 +1,82 @@
+name: package-release-with-updates
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  package-windows:
+    uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
+    with:
+      manifest-path: packaging/package.manifest.json
+      backend: msi
+      package-version: ${{ github.ref_name }}
+      msys2-packages: >-
+        mingw-w64-clang-x86_64-cmark
+      run-validation: true
+      run-smoke: true
+      artifact-name: my-gnustep-app-windows
+      sign-artifacts: true
+    secrets:
+      sign_pfx_base64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
+      sign_pfx_password: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
+
+  package-linux:
+    uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
+    with:
+      manifest-path: packaging/package.manifest.json
+      backend: appimage
+      package-version: ${{ github.ref_name }}
+      run-validation: true
+      run-smoke: true
+      artifact-name: my-gnustep-app-linux
+
+  publish:
+    needs:
+      - package-windows
+      - package-linux
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - name: Download Windows Package Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: my-gnustep-app-windows-packages
+          path: dist/windows
+
+      - name: Download Linux Package Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: my-gnustep-app-linux-packages
+          path: dist/linux
+
+      - name: Stage Release Assets And Feeds
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets site/updates/windows site/updates/linux
+          cp dist/windows/* release-assets/
+          cp dist/linux/* release-assets/
+          cp dist/windows/*.update-feed.json site/updates/windows/stable.json
+          cp dist/linux/*.update-feed.json site/updates/linux/stable.json
+
+      - name: Publish GitHub Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy Pages
+        uses: actions/deploy-pages@v4

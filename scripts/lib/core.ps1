@@ -426,6 +426,17 @@ function Test-GpManifest {
     }
   }
 
+  function Test-IntegerAtLeast {
+    param(
+      [AllowNull()]
+      [object]$Value,
+      [int]$Minimum
+    )
+
+    $parsedValue = 0
+    return [int]::TryParse([string]$Value, [ref]$parsedValue) -and ($parsedValue -ge $Minimum)
+  }
+
   if (-not $Manifest.Contains("schemaVersion")) {
     Add-Issue "Missing required value: schemaVersion"
   } elseif ($Manifest["schemaVersion"] -ne 1) {
@@ -518,6 +529,55 @@ function Test-GpManifest {
     }
   }
 
+  if ($Manifest.Contains("updates")) {
+    if (-not ($Manifest["updates"] -is [System.Collections.IDictionary])) {
+      Add-Issue "updates must be an object when present."
+    } else {
+      $updates = $Manifest["updates"]
+
+      if ($updates.Contains("enabled") -and -not ($updates["enabled"] -is [bool])) {
+        Add-Issue "updates.enabled must be a boolean when present."
+      }
+
+      if ($updates.Contains("provider")) {
+        if (-not (Test-StringValue $updates["provider"])) {
+          Add-Issue "updates.provider must be a non-empty string when present."
+        } elseif ([string]$updates["provider"] -ne "github-release-feed") {
+          Add-Issue "updates.provider must be 'github-release-feed' when present."
+        }
+      }
+
+      if ($updates.Contains("channel") -and -not (Test-StringValue $updates["channel"])) {
+        Add-Issue "updates.channel must be a non-empty string when present."
+      }
+
+      if ($updates.Contains("feedUrl") -and ($updates["feedUrl"] -ne $null) -and (-not ($updates["feedUrl"] -is [string]))) {
+        Add-Issue "updates.feedUrl must be a string when present."
+      }
+
+      if ($updates.Contains("minimumCheckIntervalHours") -and (-not (Test-IntegerAtLeast -Value $updates["minimumCheckIntervalHours"] -Minimum 1))) {
+        Add-Issue "updates.minimumCheckIntervalHours must be an integer greater than or equal to 1."
+      }
+
+      if ($updates.Contains("startupDelaySeconds") -and (-not (Test-IntegerAtLeast -Value $updates["startupDelaySeconds"] -Minimum 0))) {
+        Add-Issue "updates.startupDelaySeconds must be an integer greater than or equal to 0."
+      }
+
+      if ($updates.Contains("github")) {
+        if (-not ($updates["github"] -is [System.Collections.IDictionary])) {
+          Add-Issue "updates.github must be an object when present."
+        } else {
+          $github = $updates["github"]
+          foreach ($optionalKey in @("owner", "repo", "tagPattern", "releaseNotesUrlPattern")) {
+            if ($github.Contains($optionalKey) -and ($github[$optionalKey] -ne $null) -and (-not ($github[$optionalKey] -is [string]))) {
+              Add-Issue "updates.github.$optionalKey must be a string when present."
+            }
+          }
+        }
+      }
+    }
+  }
+
   if ($Manifest.Contains("backends") -and ($Manifest["backends"] -is [System.Collections.IDictionary])) {
     $backends = $Manifest["backends"]
 
@@ -532,6 +592,17 @@ function Test-GpManifest {
             Add-Issue "backends.msi.unresolvedDependencyPolicy must be a non-empty string when present."
           } elseif ([string]$msi["unresolvedDependencyPolicy"] -notin @("fail", "warn")) {
             Add-Issue "backends.msi.unresolvedDependencyPolicy must be one of: fail, warn."
+          }
+        }
+
+        if ($msi.Contains("updates")) {
+          if (-not ($msi["updates"] -is [System.Collections.IDictionary])) {
+            Add-Issue "backends.msi.updates must be an object when present."
+          } else {
+            $msiUpdates = $msi["updates"]
+            if ($msiUpdates.Contains("feedUrl") -and ($msiUpdates["feedUrl"] -ne $null) -and (-not ($msiUpdates["feedUrl"] -is [string]))) {
+              Add-Issue "backends.msi.updates.feedUrl must be a string when present."
+            }
           }
         }
       }
@@ -589,6 +660,62 @@ function Test-GpManifest {
               }
             }
           }
+        }
+
+        if ($appimage.Contains("updates")) {
+          if (-not ($appimage["updates"] -is [System.Collections.IDictionary])) {
+            Add-Issue "backends.appimage.updates must be an object when present."
+          } else {
+            $appimageUpdates = $appimage["updates"]
+
+            if ($appimageUpdates.Contains("feedUrl") -and ($appimageUpdates["feedUrl"] -ne $null) -and (-not ($appimageUpdates["feedUrl"] -is [string]))) {
+              Add-Issue "backends.appimage.updates.feedUrl must be a string when present."
+            }
+
+            if ($appimageUpdates.Contains("embedUpdateInformation") -and -not ($appimageUpdates["embedUpdateInformation"] -is [bool])) {
+              Add-Issue "backends.appimage.updates.embedUpdateInformation must be a boolean when present."
+            }
+
+            foreach ($optionalKey in @("updateInformation", "releaseSelector", "zsyncArtifactNamePattern")) {
+              if ($appimageUpdates.Contains($optionalKey) -and ($appimageUpdates[$optionalKey] -ne $null) -and (-not ($appimageUpdates[$optionalKey] -is [string]))) {
+                Add-Issue "backends.appimage.updates.$optionalKey must be a string when present."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if ($Manifest.Contains("updates") -and ($Manifest["updates"] -is [System.Collections.IDictionary])) {
+    $updates = $Manifest["updates"]
+    if ($updates.Contains("enabled") -and $updates["enabled"]) {
+      $github = if ($updates.Contains("github") -and ($updates["github"] -is [System.Collections.IDictionary])) { $updates["github"] } else { $null }
+      if ($null -eq $github) {
+        Add-Issue "updates.github must be an object when updates.enabled is true."
+      } else {
+        foreach ($requiredKey in @("owner", "repo", "tagPattern")) {
+          if (-not $github.Contains($requiredKey) -or -not (Test-StringValue $github[$requiredKey])) {
+            Add-Issue "Missing required string: updates.github.$requiredKey"
+          }
+        }
+      }
+
+      $sharedFeedUrl = if ($updates.Contains("feedUrl") -and (Test-StringValue $updates["feedUrl"])) { [string]$updates["feedUrl"] } else { $null }
+      foreach ($backendName in @(Get-GpEnabledBackends -Manifest $Manifest)) {
+        $backendFeedUrl = $null
+        if ($Manifest["backends"].Contains($backendName)) {
+          $backendConfig = $Manifest["backends"][$backendName]
+          if (($backendConfig -is [System.Collections.IDictionary]) -and $backendConfig.Contains("updates") -and ($backendConfig["updates"] -is [System.Collections.IDictionary])) {
+            $backendUpdates = $backendConfig["updates"]
+            if ($backendUpdates.Contains("feedUrl") -and (Test-StringValue $backendUpdates["feedUrl"])) {
+              $backendFeedUrl = [string]$backendUpdates["feedUrl"]
+            }
+          }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($backendFeedUrl) -and [string]::IsNullOrWhiteSpace($sharedFeedUrl)) {
+          Add-Issue "A feed URL is required for backend '$backendName' when updates.enabled is true. Set updates.feedUrl or backends.$backendName.updates.feedUrl."
         }
       }
     }
@@ -781,6 +908,20 @@ function Get-GpFileSha256 {
   return (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
 }
 
+function Get-GpPackageDisplayName {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest
+  )
+
+  $package = $Manifest["package"]
+  if ($package.Contains("displayName") -and -not [string]::IsNullOrWhiteSpace([string]$package["displayName"])) {
+    return [string]$package["displayName"]
+  }
+
+  return [string]$package["name"]
+}
+
 function Get-GpArtifactSidecarPath {
   param(
     [Parameter(Mandatory = $true)]
@@ -792,6 +933,289 @@ function Get-GpArtifactSidecarPath {
   $artifactDirectory = Split-Path -Parent $ArtifactPath
   $artifactBaseName = [System.IO.Path]::GetFileNameWithoutExtension($ArtifactPath)
   return (Join-Path $artifactDirectory ("{0}.{1}" -f $artifactBaseName, $Suffix))
+}
+
+function Get-GpUpdateProviderKind {
+  return "github-release-feed"
+}
+
+function Get-GpUpdatePlatform {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Backend
+  )
+
+  switch ($Backend) {
+    "msi" { return "windows-x64" }
+    "appimage" { return "linux-x64" }
+    default { return $Backend }
+  }
+}
+
+function Get-GpUpdateRuntimeConfigRelativePath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$MetadataRootRelative
+  )
+
+  return (Join-Path (Join-Path $MetadataRootRelative "updates") "gnustep-packager-update.json")
+}
+
+function Get-GpUpdateFeedSidecarPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ArtifactPath
+  )
+
+  return (Get-GpArtifactSidecarPath -ArtifactPath $ArtifactPath -Suffix "update-feed.json")
+}
+
+function Get-GpUpdateSettings {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [string]$Backend
+  )
+
+  $manifest = $Context.Manifest
+  $package = $manifest["package"]
+  $payload = $manifest["payload"]
+  $updates = if ($manifest.Contains("updates") -and ($manifest["updates"] -is [System.Collections.IDictionary])) {
+    $manifest["updates"]
+  } else {
+    @{}
+  }
+  $backendConfig = if ($manifest.Contains("backends") -and ($manifest["backends"] -is [System.Collections.IDictionary]) -and $manifest["backends"].Contains($Backend) -and ($manifest["backends"][$Backend] -is [System.Collections.IDictionary])) {
+    $manifest["backends"][$Backend]
+  } else {
+    @{}
+  }
+  $backendUpdates = if ($backendConfig.Contains("updates") -and ($backendConfig["updates"] -is [System.Collections.IDictionary])) {
+    $backendConfig["updates"]
+  } else {
+    @{}
+  }
+  $github = if ($updates.Contains("github") -and ($updates["github"] -is [System.Collections.IDictionary])) {
+    $updates["github"]
+  } else {
+    @{}
+  }
+
+  $provider = if ($updates.Contains("provider") -and -not [string]::IsNullOrWhiteSpace([string]$updates["provider"])) {
+    [string]$updates["provider"]
+  } else {
+    Get-GpUpdateProviderKind
+  }
+  $channel = if ($updates.Contains("channel") -and -not [string]::IsNullOrWhiteSpace([string]$updates["channel"])) {
+    [string]$updates["channel"]
+  } else {
+    "stable"
+  }
+  $githubOwner = if ($github.Contains("owner")) { [string]$github["owner"] } else { $null }
+  $githubRepo = if ($github.Contains("repo")) { [string]$github["repo"] } else { $null }
+  $tagPattern = if ($github.Contains("tagPattern") -and -not [string]::IsNullOrWhiteSpace([string]$github["tagPattern"])) {
+    [string]$github["tagPattern"]
+  } else {
+    "v{version}"
+  }
+  $tokenMap = @{
+    name = [string]$package["name"]
+    version = [string]$package["version"]
+    packageId = [string]$package["id"]
+    backend = $Backend
+    channel = $channel
+    owner = $(if ($null -ne $githubOwner) { $githubOwner } else { "" })
+    repo = $(if ($null -ne $githubRepo) { $githubRepo } else { "" })
+  }
+  $resolvedTag = Resolve-GpPatternTokens -Pattern $tagPattern -Tokens $tokenMap
+  $releaseNotesUrlPattern = if ($github.Contains("releaseNotesUrlPattern") -and -not [string]::IsNullOrWhiteSpace([string]$github["releaseNotesUrlPattern"])) {
+    [string]$github["releaseNotesUrlPattern"]
+  } elseif (-not [string]::IsNullOrWhiteSpace($githubOwner) -and -not [string]::IsNullOrWhiteSpace($githubRepo)) {
+    "https://github.com/{owner}/{repo}/releases/tag/{tag}"
+  } else {
+    $null
+  }
+  $releaseNotesUrl = if (-not [string]::IsNullOrWhiteSpace($releaseNotesUrlPattern)) {
+    Resolve-GpPatternTokens -Pattern $releaseNotesUrlPattern -Tokens (@{
+      owner = $(if ($null -ne $githubOwner) { $githubOwner } else { "" })
+      repo = $(if ($null -ne $githubRepo) { $githubRepo } else { "" })
+      tag = $resolvedTag
+      version = [string]$package["version"]
+      name = [string]$package["name"]
+      packageId = [string]$package["id"]
+      backend = $Backend
+      channel = $channel
+    })
+  } else {
+    $null
+  }
+  $feedUrl = if ($backendUpdates.Contains("feedUrl") -and -not [string]::IsNullOrWhiteSpace([string]$backendUpdates["feedUrl"])) {
+    [string]$backendUpdates["feedUrl"]
+  } elseif ($updates.Contains("feedUrl") -and -not [string]::IsNullOrWhiteSpace([string]$updates["feedUrl"])) {
+    [string]$updates["feedUrl"]
+  } else {
+    $null
+  }
+
+  return [pscustomobject]@{
+    Enabled = [bool]($updates.Contains("enabled") -and $updates["enabled"])
+    Provider = $provider
+    Channel = $channel
+    FeedUrl = $feedUrl
+    MinimumCheckIntervalHours = $(if ($updates.Contains("minimumCheckIntervalHours")) { [int]$updates["minimumCheckIntervalHours"] } else { 24 })
+    StartupDelaySeconds = $(if ($updates.Contains("startupDelaySeconds")) { [int]$updates["startupDelaySeconds"] } else { 15 })
+    Backend = $Backend
+    Platform = Get-GpUpdatePlatform -Backend $Backend
+    RuntimeConfigRelativePath = Get-GpUpdateRuntimeConfigRelativePath -MetadataRootRelative ([string]$payload["metadataRoot"])
+    GitHub = [pscustomobject]@{
+      Owner = $githubOwner
+      Repo = $githubRepo
+      TagPattern = $tagPattern
+      Tag = $resolvedTag
+      ReleaseNotesUrlPattern = $releaseNotesUrlPattern
+      ReleaseNotesUrl = $releaseNotesUrl
+    }
+    BackendSettings = [hashtable](Copy-GpValue -Value $backendUpdates)
+  }
+}
+
+function Get-GpGitHubReleaseAssetUrl {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$UpdateSettings,
+    [Parameter(Mandatory = $true)]
+    [string]$AssetName
+  )
+
+  if ([string]::IsNullOrWhiteSpace([string]$UpdateSettings.GitHub.Owner) -or
+      [string]::IsNullOrWhiteSpace([string]$UpdateSettings.GitHub.Repo) -or
+      [string]::IsNullOrWhiteSpace([string]$UpdateSettings.GitHub.Tag)) {
+    return $null
+  }
+
+  return ("https://github.com/{0}/{1}/releases/download/{2}/{3}" -f
+    [string]$UpdateSettings.GitHub.Owner,
+    [string]$UpdateSettings.GitHub.Repo,
+    [System.Uri]::EscapeDataString([string]$UpdateSettings.GitHub.Tag),
+    [System.Uri]::EscapeDataString($AssetName))
+}
+
+function Write-GpUpdateRuntimeConfig {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [string]$Backend,
+    [Parameter(Mandatory = $true)]
+    [string]$MetadataRoot
+  )
+
+  $settings = Get-GpUpdateSettings -Context $Context -Backend $Backend
+  if (-not $settings.Enabled) {
+    return $null
+  }
+
+  $package = $Context.Manifest["package"]
+  $configRoot = Ensure-GpDirectory -Path (Join-Path $MetadataRoot "updates")
+  $configPath = Join-Path $configRoot "gnustep-packager-update.json"
+  $document = [ordered]@{
+    formatVersion = 1
+    package = [ordered]@{
+      id = [string]$package["id"]
+      name = [string]$package["name"]
+      displayName = Get-GpPackageDisplayName -Manifest $Context.Manifest
+      version = [string]$package["version"]
+      manufacturer = [string]$package["manufacturer"]
+      backend = $Backend
+      platform = $settings.Platform
+    }
+    updates = [ordered]@{
+      enabled = [bool]$settings.Enabled
+      provider = $settings.Provider
+      channel = $settings.Channel
+      feedUrl = $settings.FeedUrl
+      minimumCheckIntervalHours = [int]$settings.MinimumCheckIntervalHours
+      startupDelaySeconds = [int]$settings.StartupDelaySeconds
+      releaseNotesUrl = $settings.GitHub.ReleaseNotesUrl
+      github = [ordered]@{
+        owner = $settings.GitHub.Owner
+        repo = $settings.GitHub.Repo
+        tag = $settings.GitHub.Tag
+      }
+    }
+  }
+
+  $document | ConvertTo-Json -Depth 20 | Set-Content -Path $configPath -Encoding utf8
+  return $configPath
+}
+
+function New-GpUpdateFeedDocument {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [string]$Backend,
+    [Parameter(Mandatory = $true)]
+    [object[]]$Assets
+  )
+
+  $settings = Get-GpUpdateSettings -Context $Context -Backend $Backend
+  if (-not $settings.Enabled) {
+    return $null
+  }
+
+  $package = $Context.Manifest["package"]
+  return [ordered]@{
+    formatVersion = 1
+    provider = $settings.Provider
+    generatedAt = (Get-Date).ToString("o")
+    channel = $settings.Channel
+    feedUrl = $settings.FeedUrl
+    package = [ordered]@{
+      id = [string]$package["id"]
+      name = [string]$package["name"]
+      displayName = Get-GpPackageDisplayName -Manifest $Context.Manifest
+      version = [string]$package["version"]
+      manufacturer = [string]$package["manufacturer"]
+    }
+    source = [ordered]@{
+      github = [ordered]@{
+        owner = $settings.GitHub.Owner
+        repo = $settings.GitHub.Repo
+      }
+    }
+    releases = @(
+      [ordered]@{
+        version = [string]$package["version"]
+        tag = $settings.GitHub.Tag
+        releaseNotesUrl = $settings.GitHub.ReleaseNotesUrl
+        assets = @($Assets)
+      }
+    )
+  }
+}
+
+function Write-GpUpdateFeedDocument {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [string]$Backend,
+    [Parameter(Mandatory = $true)]
+    [string]$ArtifactPath,
+    [Parameter(Mandatory = $true)]
+    [object[]]$Assets
+  )
+
+  $document = New-GpUpdateFeedDocument -Context $Context -Backend $Backend -Assets $Assets
+  if ($null -eq $document) {
+    return $null
+  }
+
+  $feedPath = Get-GpUpdateFeedSidecarPath -ArtifactPath $ArtifactPath
+  $document | ConvertTo-Json -Depth 20 | Set-Content -Path $feedPath -Encoding utf8
+  return $feedPath
 }
 
 function Escape-GpPwshLiteral {
@@ -1270,6 +1694,11 @@ function Get-GpManifestSummary {
   $launch = $Manifest["launch"]
   $outputs = $Manifest["outputs"]
   $validation = $Manifest["validation"]
+  $updates = if ($Manifest.Contains("updates") -and ($Manifest["updates"] -is [System.Collections.IDictionary])) {
+    $Manifest["updates"]
+  } else {
+    @{}
+  }
 
   return [pscustomobject]@{
     PackageId       = $package["id"]
@@ -1285,6 +1714,8 @@ function Get-GpManifestSummary {
     LogRoot         = $outputs["logRoot"]
     PackageRoot     = $outputs["packageRoot"]
     ValidationKind  = $validation["smoke"]["kind"]
+    UpdatesEnabled  = [bool]($updates.Contains("enabled") -and $updates["enabled"])
+    UpdateChannel   = $(if ($updates.Contains("channel")) { [string]$updates["channel"] } else { $null })
     ComplianceNoticeCount = @(Get-GpComplianceEntries -Manifest $Manifest).Count
     EnabledBackends = [string[]](Get-GpEnabledBackends -Manifest $Manifest)
   }

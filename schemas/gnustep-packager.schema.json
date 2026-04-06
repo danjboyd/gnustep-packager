@@ -368,6 +368,54 @@
         }
       }
     },
+    "updates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "github-release-feed"
+          ]
+        },
+        "channel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "feedUrl": {
+          "type": "string"
+        },
+        "minimumCheckIntervalHours": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "startupDelaySeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "github": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "tagPattern": {
+              "type": "string"
+            },
+            "releaseNotesUrlPattern": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
     "integrations": {
       "type": "object",
       "additionalProperties": false,
@@ -487,6 +535,15 @@
             "iconRelativePath": {
               "type": "string"
             },
+            "updates": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "feedUrl": {
+                  "type": "string"
+                }
+              }
+            },
             "artifactNamePattern": {
               "type": "string"
             },
@@ -589,6 +646,27 @@
             },
             "iconRelativePath": {
               "type": "string"
+            },
+            "updates": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "feedUrl": {
+                  "type": "string"
+                },
+                "embedUpdateInformation": {
+                  "type": "boolean"
+                },
+                "updateInformation": {
+                  "type": "string"
+                },
+                "releaseSelector": {
+                  "type": "string"
+                },
+                "zsyncArtifactNamePattern": {
+                  "type": "string"
+                }
+              }
             },
             "artifactNamePattern": {
               "type": "string"

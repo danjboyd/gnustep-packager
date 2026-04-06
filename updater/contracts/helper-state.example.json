@@ -1,0 +1,16 @@
+{
+  "formatVersion": 1,
+  "status": "readyToApply",
+  "message": "Restart to finish applying the new AppImage.",
+  "updatedAt": "2026-04-06T18:45:00Z",
+  "downloadedPath": "/tmp/gnustep-packager-updater/com.example.MyGNUstepApp/downloads/MyGNUstepApp-1.2.3-x86_64.AppImage",
+  "apply": {
+    "mode": "appimage-replace",
+    "currentAppImagePath": "/home/user/Applications/MyGNUstepApp.AppImage"
+  },
+  "progress": {
+    "fractionCompleted": 1.0,
+    "bytesReceived": 12345678,
+    "bytesExpected": 12345678
+  }
+}

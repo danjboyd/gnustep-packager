@@ -24,9 +24,15 @@ if ($DryRun) {
 Write-Host "MSI created: $($result.ArtifactPath)"
 Write-Host "Portable ZIP created: $($result.PortableArtifactPath)"
 Write-Host "Artifact metadata: $($result.MetadataPath)"
+if (-not [string]::IsNullOrWhiteSpace($result.UpdateFeedPath)) {
+  Write-Host "Update feed: $($result.UpdateFeedPath)"
+}
 Write-Host "Diagnostics summary: $($result.DiagnosticsPath)"
 Write-Host "Launcher: $($result.LauncherPath)"
 Write-Host "Notice report: $($result.NoticeReportPath)"
+if (-not [string]::IsNullOrWhiteSpace($result.UpdateRuntimeConfigPath)) {
+  Write-Host "Updater runtime config: $($result.UpdateRuntimeConfigPath)"
+}
 if ($result.UnresolvedDependencies.Count -gt 0) {
   Write-Host "Unresolved runtime dependencies: $([string]::Join(', ', $result.UnresolvedDependencies))"
 }

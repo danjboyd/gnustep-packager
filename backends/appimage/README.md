@@ -20,6 +20,10 @@ AppImage using the shared stage-first packaging model.
 - render desktop metadata and icons
 - generate MIME metadata from extension associations
 - emit notice, metadata, and diagnostics sidecars
+- emit optional updater runtime config and update-feed sidecars when updates are
+  enabled
+- pass native AppImage update information to `appimagetool` and surface `.zsync`
+  sidecars when the active toolchain emits them
 - emit AppImage artifacts and validation logs
 
 ## Host Requirements
@@ -41,7 +45,10 @@ AppImage using the shared stage-first packaging model.
 ## Artifact Layout
 The package step emits:
 - `<name>-<version>-x86_64.AppImage`
+- `<name>-<version>-x86_64.AppImage.zsync` when the active `appimagetool` build
+  emits a zsync sidecar for update-enabled packaging
 - `<artifact-base>.metadata.json`
+- `<artifact-base>.update-feed.json` when updates are enabled
 - `<artifact-base>.diagnostics.txt`
 
 The temporary AppDir is built under `dist/tmp/appimage/<timestamp>/`.

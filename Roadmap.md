@@ -388,6 +388,121 @@ Status: implemented for the current Windows MSI and Linux AppImage scope.
   - repo can be tagged and presented as a reusable toolkit rather than an
     internal experiment
 
+## Phase 10: Application Update Integration
+Goal: add a simple, backend-aware update path that downstream GNUstep apps can
+adopt without embedding packaging or installer logic into the app process.
+Status: phase 10 implemented in the current repo baseline.
+
+This phase introduces a companion updater integration path for apps that publish
+signed MSI and AppImage artifacts to GitHub. The design should keep
+`gnustep-packager` responsible for packaging-time metadata and release
+conventions, while app-facing runtime behavior lives in a separate updater
+library and helper.
+
+- `Phase 10A`: Update architecture and trust model
+  Deliverables:
+  - documented split between packaging-time metadata generation, app-facing
+    update API, and out-of-process update helper responsibilities
+  - decision on the downstream integration surface, including an Objective-C
+    API for GNUstep apps and a separate helper executable for applying updates
+  - documented trust model for release discovery, signature verification,
+    integrity checks, and channel handling
+  Exit criteria:
+  - the updater architecture is backend-neutral in shared concepts and does not
+    collapse MSI and AppImage behavior into one platform-specific design
+  - downstream apps can integrate update checks without owning installer
+    semantics directly
+
+- `Phase 10B`: Manifest and feed contract
+  Deliverables:
+  - manifest schema additions for update channels, release metadata, and
+    backend-specific update configuration
+  - a documented machine-readable feed contract for GitHub-hosted releases and
+    channel selection
+  - explicit rules for mapping the shared package version to update comparisons
+    across MSI and AppImage outputs
+  Exit criteria:
+  - update discovery is driven by stable declarative inputs rather than release
+    title parsing or backend-specific asset guessing
+  - prerelease, stable, and future channel behavior is documented and testable
+
+- `Phase 10C`: Packaging-time update metadata emission
+  Deliverables:
+  - shared pipeline support for generating and staging updater configuration
+    consumed by downstream apps
+  - AppImage backend support for standard embedded update information and
+    `.zsync` sidecar publication inputs
+  - MSI backend support for emitting release metadata suitable for full-package
+    upgrade handoff while preserving existing signing and versioning rules
+  Exit criteria:
+  - a downstream release pipeline can publish updater-consumable metadata
+    without custom per-app release scripting
+  - package outputs contain or reference the metadata needed by the updater
+    runtime for both supported backends
+
+- `Phase 10D`: Objective-C updater core
+  Deliverables:
+  - a Foundation-level Objective-C library for update configuration, scheduled
+    checks, version comparison, channel selection, and persisted user choices
+  - a small downstream integration surface for startup checks and manual
+    `Check for Updates` actions
+  Exit criteria:
+  - a GNUstep GUI app can adopt update discovery with minimal app-specific code
+  - the core library stays free of backend packaging internals and GUI policy
+    that belongs in higher layers
+
+- `Phase 10E`: Optional standard update UI
+  Deliverables:
+  - an AppKit-oriented UI layer that can present update available, download
+    progress, restart-to-update, and failure states
+  - customization hooks so downstream apps can override strings, release-note
+    presentation, and check timing without replacing the core update logic
+  Exit criteria:
+  - apps that want a default update UX can adopt one without writing their own
+    dialogs from scratch
+  - apps that want custom presentation can still use the same updater core
+
+- `Phase 10F`: Update helper and backend application path
+  Deliverables:
+  - a separate helper executable that downloads, verifies, applies, and
+    relaunches updates after the app exits
+  - MSI handoff flow that uses signed installer upgrades rather than in-process
+    binary replacement
+  - AppImage flow that prefers standard tools such as `AppImageUpdate` when
+    available and falls back cleanly when optional managers are absent
+  Exit criteria:
+  - update application does not require the running app to replace its own
+    executable or own backend-specific install mechanics
+  - Linux behavior plays well with AppImageLauncher, AppImageUpdate, and Gear
+    without depending on them
+
+- `Phase 10G`: Consumer documentation and examples
+  Deliverables:
+  - app-facing documentation for integrating the updater library and helper into
+    a GNUstep app
+  - release-publishing documentation for downstream repos that publish MSI and
+    AppImage artifacts to GitHub
+  - example manifests, staged config outputs, and minimal app code snippets for
+    startup checks and manual update actions
+  Exit criteria:
+  - a downstream app can adopt the updater path without source spelunking or
+    reverse-engineering repo tests
+  - documentation covers local development, CI release publishing, runtime UX,
+    and known platform-specific limitations
+
+- `Phase 10H`: Validation and regression coverage
+  Deliverables:
+  - tests for manifest validation, feed rendering, version comparison, and
+    helper decision logic
+  - repo or fixture coverage that exercises both MSI and AppImage update
+    metadata outputs
+  - failure-path coverage for unsupported install locations, missing optional
+    Linux update tools, and signature or integrity failures
+  Exit criteria:
+  - updater behavior is testable without requiring live GitHub release edits
+  - release metadata regressions and unsafe update-handling changes are caught
+    before downstream users discover them manually
+
 ## Suggested Early Execution Order
 Prioritize these subphases first:
 

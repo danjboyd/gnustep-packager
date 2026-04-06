@@ -75,6 +75,22 @@ Recommended AppImage smoke modes:
 The backend bootstraps `appimagetool` automatically when it is not already on
 `PATH`.
 
+## Updater Onboarding
+Once packaging works locally, an app can opt into the updater companion path:
+
+1. enable the manifest `updates` block
+2. configure stable backend feed URLs
+3. ship `GPUpdaterCore`
+4. optionally ship `GPUpdaterUI` and `gp-update-helper`
+5. publish the generated `.update-feed.json` sidecars to stable feed URLs
+
+Recommended updater docs:
+
+- [update-architecture.md](update-architecture.md)
+- [update-feed-contract.md](update-feed-contract.md)
+- [updater-consumer-guide.md](updater-consumer-guide.md)
+- [updater-release-publishing.md](updater-release-publishing.md)
+
 ## Recommended Manifest Baseline
 
 ```json
@@ -121,3 +137,4 @@ Related docs:
 - [compliance-notices.md](compliance-notices.md)
 - [windows-msi-triage.md](windows-msi-triage.md)
 - [../backends/appimage/README.md](../backends/appimage/README.md)
+- [updater-consumer-guide.md](updater-consumer-guide.md)

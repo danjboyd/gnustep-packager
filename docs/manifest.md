@@ -17,6 +17,7 @@ The package manifest tells `gnustep-packager`:
 - `launch`
 - `outputs`
 - `validation`
+- `updates`
 - `integrations`
 - `compliance`
 - `backends`
@@ -106,6 +107,27 @@ Important fields:
 Current shared smoke behavior only covers staged-layout validation. Backend
 artifact smoke strategies stay under backend-specific configuration.
 
+## `updates`
+Declares shared release-discovery settings for packaged apps.
+
+Important fields:
+- `enabled`
+- `provider`
+- `channel`
+- `feedUrl`
+- `minimumCheckIntervalHours`
+- `startupDelaySeconds`
+- `github.owner`
+- `github.repo`
+- `github.tagPattern`
+- `github.releaseNotesUrlPattern`
+
+Current provider value:
+- `github-release-feed`
+
+When `updates.enabled` is `true`, each enabled backend must resolve a feed URL
+either from `updates.feedUrl` or from its backend-specific override.
+
 ## `integrations`
 Logical desktop integrations that backends may map differently.
 
@@ -158,12 +180,18 @@ Important fields:
 - `signing.certificateSha1`
 - `signing.description`
 - `signing.additionalArguments`
+- `updates.feedUrl`
 
 ### `backends.appimage`
 Important fields:
 - `appDirName`
 - `desktopEntryName`
 - `iconRelativePath`
+- `updates.feedUrl`
+- `updates.embedUpdateInformation`
+- `updates.updateInformation`
+- `updates.releaseSelector`
+- `updates.zsyncArtifactNamePattern`
 - `artifactNamePattern`
 - `toolRoot`
 - `downloadUrl`
@@ -194,6 +222,18 @@ Supported AppImage smoke modes:
   Launch the packaged app with a marker-file compatibility argument and the
   same path exported as `GP_APPIMAGE_SMOKE_MARKER_PATH`.
 
+AppImage update settings:
+
+- `embedUpdateInformation`
+  When `true`, the backend emits standard AppImage update metadata into the
+  generated `.AppImage`.
+- `updateInformation`
+  Optional explicit update-information string override.
+- `releaseSelector`
+  Selector segment used when deriving `gh-releases-zsync` metadata.
+- `zsyncArtifactNamePattern`
+  Pattern for the generated `.zsync` sidecar artifact name.
+
 AppImage runtime-closure validation modes:
 
 - `strict`
@@ -223,3 +263,5 @@ See [configuration-layering.md](configuration-layering.md).
 See also:
 - [consumer-setup.md](consumer-setup.md)
 - [compliance-notices.md](compliance-notices.md)
+- [update-architecture.md](update-architecture.md)
+- [update-feed-contract.md](update-feed-contract.md)
