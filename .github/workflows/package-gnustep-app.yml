@@ -193,18 +193,18 @@ jobs:
         run: |
           $toolRoot = Join-Path $env:GITHUB_WORKSPACE ".gnustep-packager-toolkit"
           $manifestPath = [System.IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '${{ inputs.manifest-path }}'))
-          $args = @(
-            '-Command', 'resolve-manifest',
-            '-Manifest', $manifestPath
-          )
+          $parameters = @{
+            Command = 'resolve-manifest'
+            Manifest = $manifestPath
+          }
           if (-not [string]::IsNullOrWhiteSpace('${{ inputs.package-version }}')) {
-            $args += @('-PackageVersion', '${{ inputs.package-version }}')
+            $parameters['PackageVersion'] = '${{ inputs.package-version }}'
           }
           $packagerScript = [System.IO.Path]::GetFullPath((Join-Path $toolRoot 'scripts\gnustep-packager.ps1'))
           if (-not (Test-Path -LiteralPath $packagerScript)) {
             throw "gnustep-packager entrypoint not found at $packagerScript"
           }
-          $manifestJson = & $packagerScript @args
+          $manifestJson = & $packagerScript @parameters
           $manifest = $manifestJson | ConvertFrom-Json -AsHashtable
           $manifestRoot = Split-Path -Parent $manifestPath
 
@@ -246,24 +246,24 @@ jobs:
         run: |
           $toolRoot = Join-Path $env:GITHUB_WORKSPACE ".gnustep-packager-toolkit"
           $manifestPath = [System.IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '${{ inputs.manifest-path }}'))
-          $args = @(
-            '-Manifest', $manifestPath,
-            '-Backend', '${{ inputs.backend }}'
-          )
+          $parameters = @{
+            Manifest = $manifestPath
+            Backend = '${{ inputs.backend }}'
+          }
           if (-not [string]::IsNullOrWhiteSpace('${{ inputs.package-version }}')) {
-            $args += @('-PackageVersion', '${{ inputs.package-version }}')
+            $parameters['PackageVersion'] = '${{ inputs.package-version }}'
           }
           if ('${{ inputs.run-validation }}' -ne 'true') {
-            $args += '-SkipBackendValidation'
+            $parameters['SkipBackendValidation'] = $true
           }
           if ('${{ inputs.run-smoke }}' -eq 'true') {
-            $args += '-RunSmoke'
+            $parameters['RunSmoke'] = $true
           }
           $pipelineScript = [System.IO.Path]::GetFullPath((Join-Path $toolRoot 'scripts\run-packaging-pipeline.ps1'))
           if (-not (Test-Path -LiteralPath $pipelineScript)) {
             throw "packaging pipeline entrypoint not found at $pipelineScript"
           }
-          & $pipelineScript @args
+          & $pipelineScript @parameters
 
       - name: Upload Package Artifacts
         if: ${{ inputs.upload-artifacts }}
