@@ -159,10 +159,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y $packages
 
-      - name: Run Caller Preflight
-        if: ${{ inputs.preflight-command != '' }}
-        shell: ${{ inputs.preflight-shell }}
+      - name: Run Caller Preflight (pwsh)
+        if: ${{ inputs.preflight-command != '' && inputs.preflight-shell == 'pwsh' }}
+        shell: pwsh
         run: |
+          ${{ inputs.preflight-command }}
+
+      - name: Run Caller Preflight (bash)
+        if: ${{ inputs.preflight-command != '' && inputs.preflight-shell == 'bash' }}
+        shell: bash
+        run: |
+          set -euo pipefail
           ${{ inputs.preflight-command }}
 
       - name: Resolve Manifest Outputs
