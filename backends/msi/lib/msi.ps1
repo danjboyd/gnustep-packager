@@ -461,6 +461,15 @@ function Write-GpMsiArtifactMetadata {
       ignoredRuntimeDependencies = [string[]]@($Config.IgnoredRuntimeDependencies)
       unresolvedDependencies = [string[]]@($InstallTree.UnresolvedDependencies)
       ignoredUnresolvedDependencies = [string[]]@($InstallTree.IgnoredRuntimeDependencies)
+      closureMissingGroups = @(
+        foreach ($group in @(Get-GpMsiMissingDependencyGroups -Analysis $InstallTree.RuntimeClosureAnalysis)) {
+          [ordered]@{
+            targetRelativePath = $group.TargetRelativePath
+            targetRole = $group.TargetRole
+            missingDependencies = [string[]]@($group.MissingDependencies)
+          }
+        }
+      )
     }
     tooling = [ordered]@{
       clang = Get-GpPreferredWindowsClang
@@ -570,6 +579,9 @@ function Write-GpMsiDiagnosticsSummary {
     $lines.Add(("Unresolved runtime dependencies: {0}" -f ([string]::Join(", ", $InstallTree.UnresolvedDependencies)))) | Out-Null
   } else {
     $lines.Add("Unresolved runtime dependencies: none") | Out-Null
+  }
+  foreach ($line in @(Get-GpMsiMissingDependencySummaryLines -Analysis $InstallTree.RuntimeClosureAnalysis)) {
+    $lines.Add($line) | Out-Null
   }
   $lines.Add("") | Out-Null
   $lines.Add("Common failure areas: launcher compilation, runtime closure, WiX bootstrap/compile/link, signing, smoke validation.") | Out-Null
@@ -724,6 +736,7 @@ function Test-GpMsiSystemDllName {
 function Build-GpDllIndex {
   param(
     [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
     [string[]]$Roots
   )
 
@@ -741,7 +754,41 @@ function Build-GpDllIndex {
   return $index
 }
 
-function Complete-GpMsiRuntimeClosure {
+function Get-GpMsiRelativePath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Root,
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  return ([System.IO.Path]::GetRelativePath($Root, $Path) -replace "\\", "/")
+}
+
+function Get-GpMsiRuntimeBinaryRole {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RuntimeRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $runtimeRootPath = [System.IO.Path]::GetFullPath($RuntimeRoot)
+  $runtimeBinPath = [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot "bin"))
+  $targetPath = [System.IO.Path]::GetFullPath($Path)
+
+  if ($targetPath.StartsWith($runtimeBinPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    return "runtime-bin"
+  }
+
+  if ($targetPath.StartsWith($runtimeRootPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    return "runtime-extension"
+  }
+
+  return "app-or-launcher"
+}
+
+function Get-GpMsiRuntimeClosureAnalysis {
   param(
     [Parameter(Mandatory = $true)]
     [psobject]$Context,
@@ -749,16 +796,19 @@ function Complete-GpMsiRuntimeClosure {
     [psobject]$Config,
     [Parameter(Mandatory = $true)]
     [string]$InstallRoot,
+    [string[]]$SearchRoots = @(),
+    [switch]$AllowCopy,
     [string]$LogPath
   )
 
   $runtimeRoot = Resolve-GpPathRelativeToBase -BasePath $InstallRoot -Path $Config.RuntimeRootRelative
   $runtimeBin = Ensure-GpDirectory -Path (Join-Path $runtimeRoot "bin")
   $localIndex = Build-GpDllIndex -Roots @($InstallRoot)
-  $searchIndex = Build-GpDllIndex -Roots $Config.RuntimeSearchRoots
+  $searchIndex = Build-GpDllIndex -Roots $SearchRoots
   $queue = [System.Collections.Generic.Queue[string]]::new()
   $seenTargets = New-GpCaseInsensitiveSet
   $unresolved = New-GpCaseInsensitiveSet
+  $records = [System.Collections.Generic.List[psobject]]::new()
 
   $entryPath = Resolve-GpPathRelativeToBase -BasePath $InstallRoot -Path $Context.Manifest["launch"]["entryRelativePath"]
   if (Test-Path $entryPath) {
@@ -786,17 +836,33 @@ function Complete-GpMsiRuntimeClosure {
       continue
     }
     $seenTargets[$target] = $true
+    $targetRelativePath = Get-GpMsiRelativePath -Root $InstallRoot -Path $target
+    $targetRole = Get-GpMsiRuntimeBinaryRole -RuntimeRoot $runtimeRoot -Path $target
 
     foreach ($dllName in Get-GpPeImportedDllNames -Path $target) {
+      $record = [ordered]@{
+        TargetPath = $target
+        TargetRelativePath = $targetRelativePath
+        TargetRole = $targetRole
+        DependencyName = $dllName
+        Status = "present"
+        ResolvedPath = $null
+        SourcePath = $null
+      }
+
       if (Test-GpMsiSystemDllName -Name $dllName) {
+        $record["Status"] = "system"
+        $records.Add([pscustomobject]$record) | Out-Null
         continue
       }
 
       if ($localIndex.ContainsKey($dllName)) {
+        $record["ResolvedPath"] = $localIndex[$dllName]
+        $records.Add([pscustomobject]$record) | Out-Null
         continue
       }
 
-      if ($searchIndex.ContainsKey($dllName)) {
+      if ($AllowCopy -and $searchIndex.ContainsKey($dllName)) {
         $source = $searchIndex[$dllName]
         $destination = Join-Path $runtimeBin $dllName
         if (-not (Test-Path $destination)) {
@@ -805,15 +871,111 @@ function Complete-GpMsiRuntimeClosure {
         }
         $localIndex[$dllName] = $destination
         $queue.Enqueue($destination)
+        $record["Status"] = "copied"
+        $record["ResolvedPath"] = $destination
+        $record["SourcePath"] = $source
+        $records.Add([pscustomobject]$record) | Out-Null
       } else {
         if (-not $unresolved.ContainsKey($dllName)) {
           $unresolved[$dllName] = $true
         }
+        $record["Status"] = "missing"
+        $records.Add([pscustomobject]$record) | Out-Null
       }
     }
   }
 
-  return [string[]]@($unresolved.Keys | Sort-Object)
+  $missingRecords = @($records | Where-Object { $_.Status -eq "missing" })
+  return [pscustomobject]@{
+    Records = @($records.ToArray())
+    MissingRecords = @($missingRecords)
+    MissingDependencyNames = [string[]]@($unresolved.Keys | Sort-Object)
+    SearchRoots = [string[]]@($SearchRoots)
+  }
+}
+
+function Complete-GpMsiRuntimeClosure {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [string]$InstallRoot,
+    [string]$LogPath
+  )
+
+  $analysis = Get-GpMsiRuntimeClosureAnalysis `
+    -Context $Context `
+    -Config $Config `
+    -InstallRoot $InstallRoot `
+    -SearchRoots @($Config.RuntimeSearchRoots) `
+    -AllowCopy `
+    -LogPath $LogPath
+  return [string[]]@($analysis.MissingDependencyNames)
+}
+
+function Get-GpMsiMissingDependencyGroups {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Analysis
+  )
+
+  $groups = [System.Collections.Generic.List[psobject]]::new()
+  foreach ($group in @($Analysis.MissingRecords | Group-Object -Property TargetPath)) {
+    $first = $group.Group | Select-Object -First 1
+    $groups.Add([pscustomobject]@{
+      TargetPath = [string]$first.TargetPath
+      TargetRelativePath = [string]$first.TargetRelativePath
+      TargetRole = [string]$first.TargetRole
+      MissingDependencies = [string[]]@($group.Group.DependencyName | Sort-Object -Unique)
+    }) | Out-Null
+  }
+
+  return @($groups.ToArray() | Sort-Object -Property TargetRelativePath)
+}
+
+function Get-GpMsiMissingDependencySummaryLines {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Analysis
+  )
+
+  $lines = [System.Collections.Generic.List[string]]::new()
+  $groups = @(Get-GpMsiMissingDependencyGroups -Analysis $Analysis)
+
+  if ($groups.Count -eq 0) {
+    $lines.Add("Missing dependency groups: none") | Out-Null
+    return [string[]]@($lines.ToArray())
+  }
+
+  $lines.Add(("Missing dependency groups: {0}" -f $groups.Count)) | Out-Null
+  foreach ($group in $groups) {
+    $lines.Add(("Target [{0}]: {1}" -f $group.TargetRole, $group.TargetRelativePath)) | Out-Null
+    $lines.Add(("Missing dependencies: {0}" -f ([string]::Join(", ", @($group.MissingDependencies))))) | Out-Null
+  }
+
+  if (@($Analysis.SearchRoots).Count -gt 0) {
+    $lines.Add(("Search roots: {0}" -f ([string]::Join(", ", @($Analysis.SearchRoots))))) | Out-Null
+  }
+
+  return [string[]]@($lines.ToArray())
+}
+
+function Get-GpMsiPrimaryMissingDependencyMessage {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Analysis
+  )
+
+  $groups = @(Get-GpMsiMissingDependencyGroups -Analysis $Analysis)
+  if ($groups.Count -eq 0) {
+    return $null
+  }
+
+  $preferred = @($groups | Where-Object { $_.TargetRole -eq "runtime-extension" } | Select-Object -First 1)
+  $group = if ($preferred.Count -gt 0) { $preferred[0] } else { $groups[0] }
+  return ("Target: {0}; Missing dependencies: {1}" -f $group.TargetRelativePath, ([string]::Join(", ", @($group.MissingDependencies))))
 }
 
 function Resolve-GpMsiRuntimeClosureResult {
@@ -1260,10 +1422,20 @@ function Prepare-GpMsiInstallTree {
   if (-not [string]::IsNullOrWhiteSpace($updateRuntimeConfigPath)) {
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Generated updater runtime config: {0}" -f $updateRuntimeConfigPath)
   }
+  $runtimeClosureAnalysis = Get-GpMsiRuntimeClosureAnalysis `
+    -Context $Context `
+    -Config $Config `
+    -InstallRoot $WorkPaths.InstallRoot `
+    -SearchRoots @($Config.RuntimeSearchRoots) `
+    -AllowCopy `
+    -LogPath $LogPath
   $runtimeClosure = Resolve-GpMsiRuntimeClosureResult `
-    -UnresolvedDependencies @(Complete-GpMsiRuntimeClosure -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot -LogPath $LogPath) `
+    -UnresolvedDependencies @($runtimeClosureAnalysis.MissingDependencyNames) `
     -IgnoredDependencies @($Config.IgnoredRuntimeDependencies)
   Assert-GpMsiRuntimeClosurePolicy -Config $Config -RuntimeClosure $runtimeClosure -LogPath $LogPath
+  foreach ($line in @(Get-GpMsiMissingDependencySummaryLines -Analysis $runtimeClosureAnalysis)) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message $line
+  }
 
   return [pscustomobject]@{
     InstallRoot = $WorkPaths.InstallRoot
@@ -1274,6 +1446,7 @@ function Prepare-GpMsiInstallTree {
     RuntimeNotices = @($noticeReport.Entries)
     UnresolvedDependencies = [string[]]@($runtimeClosure.UnresolvedDependencies)
     IgnoredRuntimeDependencies = [string[]]@($runtimeClosure.IgnoredDependencies)
+    RuntimeClosureAnalysis = $runtimeClosureAnalysis
   }
 }
 
@@ -1614,6 +1787,20 @@ function Get-GpMsiProcessesByExecutablePath {
   return @($matches.ToArray())
 }
 
+function Get-GpMsiInstalledRuntimeAuditFailureMessage {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Analysis
+  )
+
+  $primary = Get-GpMsiPrimaryMissingDependencyMessage -Analysis $Analysis
+  if ([string]::IsNullOrWhiteSpace($primary)) {
+    return $null
+  }
+
+  return ("MSI validation failed: installed runtime closure is incomplete. {0}" -f $primary)
+}
+
 function Invoke-GpMsiValidation {
   param(
     [Parameter(Mandatory = $true)]
@@ -1698,6 +1885,20 @@ function Invoke-GpMsiValidation {
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed app path: {0}" -f $appPath)
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed runtime path: {0}" -f $runtimePath)
 
+  $installedRuntimeAudit = Get-GpMsiRuntimeClosureAnalysis `
+    -Context $Context `
+    -Config $config `
+    -InstallRoot $installPath `
+    -SearchRoots @() `
+    -LogPath $LogPath
+  foreach ($line in @(Get-GpMsiMissingDependencySummaryLines -Analysis $installedRuntimeAudit)) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed runtime audit: {0}" -f $line)
+  }
+  if (@($installedRuntimeAudit.MissingRecords).Count -gt 0) {
+    $auditMessage = Get-GpMsiInstalledRuntimeAuditFailureMessage -Analysis $installedRuntimeAudit
+    throw "$auditMessage See $(Get-GpMsiDiagnosticsDocPath)."
+  }
+
   if ($RunSmoke -or $validationPlan.Enabled) {
     $smokeArgument = Join-Path $env:TEMP "gnustep-packager-smoke.txt"
     $probeDeadline = (Get-Date).AddSeconds([Math]::Max($validationPlan.TimeoutSeconds, 1))
@@ -1723,12 +1924,12 @@ function Invoke-GpMsiValidation {
 
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke process exit code: {0}" -f $proc.ExitCode)
     if ($proc.ExitCode -ne 0) {
-      throw "Smoke launcher exited with code $($proc.ExitCode): $launcherPath. See $(Get-GpMsiDiagnosticsDocPath)."
+      throw "MSI smoke failed: launcher exited with code $($proc.ExitCode): $launcherPath. See $(Get-GpMsiDiagnosticsDocPath)."
     }
 
     $childProcesses = @(Get-GpMsiProcessesByExecutablePath -ExecutablePath $appPath)
     if ($childProcesses.Count -eq 0) {
-      throw "Smoke launch did not leave the packaged application running: $appPath. See $(Get-GpMsiDiagnosticsDocPath)."
+      throw "MSI smoke failed: launcher exited successfully but the packaged application was not observed running: $appPath. See $(Get-GpMsiDiagnosticsDocPath)."
     }
 
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke child process count: {0}" -f $childProcesses.Count)

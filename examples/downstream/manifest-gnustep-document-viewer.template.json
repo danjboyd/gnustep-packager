@@ -51,7 +51,8 @@
       "enabled": true,
       "kind": "staged-layout",
       "requiredPaths": [
-        "metadata/icons"
+        "metadata/icons",
+        "runtime/lib/GNUstep/Bundles/libgnustep-back-*.bundle/libgnustep-back-*.dll"
       ],
       "timeoutSeconds": 30
     },

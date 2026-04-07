@@ -33,9 +33,16 @@ Symptoms:
 
 First checks:
 - inspect `UnresolvedDependencies` in `<artifact-base>.metadata.json`
+- inspect `runtime.closureMissingGroups` in `<artifact-base>.metadata.json`
+- inspect grouped target and missing-DLL summaries in
+  `<artifact-base>.diagnostics.txt`
 - confirm `runtimeSearchRoots` covers the intended GNUstep runtime tree
 - use `ignoredRuntimeDependencies` only for genuinely optional imports
 - use `unresolvedDependencyPolicy=warn` only as an explicit compatibility escape hatch
+
+If diagnostics name a target under `runtime/lib/...` rather than `runtime/bin/`,
+the missing dependency is coming from a runtime-extension DLL such as a GNUstep
+bundle, theme, or plugin.
 
 ### WiX Bootstrap or Build
 Symptoms:
@@ -65,11 +72,15 @@ Symptoms:
 - install/uninstall exit code failures
 - smoke timeout
 - packaged app never stays running
+- validation reports an installed runtime-closure audit failure before smoke
+- validation reports a launcher success but no packaged app process observed
 
 First checks:
 - inspect `install.log` and `uninstall.log`
 - compare expected install path, launcher path, and app path in the validation
   log
+- inspect the validation log for `Installed runtime audit:` lines; these now
+  group missing non-system dependencies by the DLL that required them
 
 ## Reproduction Commands
 

@@ -73,6 +73,31 @@ function Resolve-GpPathRelativeToBase {
   return [System.IO.Path]::GetFullPath((Join-Path $BasePath $Path))
 }
 
+function Test-GpWildcardPathPattern {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  return ($Path.IndexOfAny([char[]]@('*', '?', '[')) -ge 0)
+}
+
+function Resolve-GpValidationPathMatches {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ResolvedPath
+  )
+
+  $matches = [System.Collections.Generic.List[string]]::new()
+  foreach ($item in @(Resolve-Path -Path $ResolvedPath -ErrorAction SilentlyContinue)) {
+    if ($null -ne $item -and -not [string]::IsNullOrWhiteSpace([string]$item.Path)) {
+      $matches.Add([string]$item.Path) | Out-Null
+    }
+  }
+
+  return [string[]]@($matches.ToArray() | Sort-Object -Unique)
+}
+
 function Convert-GpNativePathToPosix {
   param(
     [Parameter(Mandatory = $true)]
@@ -1484,9 +1509,13 @@ function Get-GpValidationPlan {
 
   foreach ($path in @($validation["smoke"]["requiredPaths"])) {
     if (-not [string]::IsNullOrWhiteSpace($path)) {
+      $resolvedPath = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $path
+      $isPattern = Test-GpWildcardPathPattern -Path $path
       $requiredPaths.Add([pscustomobject]@{
         Label = "smoke:$path"
-        Path  = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $path
+        Path  = $resolvedPath
+        IsPattern = [bool]$isPattern
+        Pattern = $(if ($isPattern) { $path } else { $null })
       }) | Out-Null
     }
   }
@@ -1660,7 +1689,19 @@ function Invoke-GpSharedValidation {
   $lines.Add(("Validation kind: {0}" -f $plan.Kind)) | Out-Null
 
   foreach ($item in $plan.RequiredPaths) {
-    if (Test-Path $item.Path) {
+    if ($item.PSObject.Properties["IsPattern"] -and [bool]$item.IsPattern) {
+      $matches = @(Resolve-GpValidationPathMatches -ResolvedPath $item.Path)
+      if ($matches.Count -gt 0) {
+        $lines.Add(("OK      {0} -> {1}" -f $item.Label, $item.Pattern)) | Out-Null
+        foreach ($match in $matches) {
+          $lines.Add(("MATCH   {0}" -f $match)) | Out-Null
+        }
+      } else {
+        $message = ("MISSING {0} -> {1}" -f $item.Label, $item.Pattern)
+        $lines.Add($message) | Out-Null
+        $missing.Add($message) | Out-Null
+      }
+    } elseif (Test-Path $item.Path) {
       $lines.Add(("OK      {0} -> {1}" -f $item.Label, $item.Path)) | Out-Null
     } else {
       $message = ("MISSING {0} -> {1}" -f $item.Label, $item.Path)

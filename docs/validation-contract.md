@@ -20,6 +20,31 @@ That mode verifies:
 - declared resource roots exist
 - any extra required smoke paths exist
 
+`validation.smoke.requiredPaths` accepts both literal stage-relative paths and
+glob patterns. Glob entries currently use PowerShell wildcard semantics.
+
+Glob behavior:
+- a literal entry succeeds when the exact resolved path exists
+- a glob entry succeeds when at least one staged path matches
+- a glob entry fails when no staged path matches
+- validation logs preserve the original pattern and list the matched concrete
+  paths
+
+Example:
+
+```json
+{
+  "validation": {
+    "smoke": {
+      "requiredPaths": [
+        "runtime/lib/GNUstep/Bundles/libgnustep-back-*.bundle/libgnustep-back-*.dll",
+        "runtime/lib/GNUstep/Themes/*.theme/*.dll"
+      ]
+    }
+  }
+}
+```
+
 Backend-specific packaged-artifact smoke behavior remains backend-owned. For
 example, AppImage launch strategies are configured under
 `backends.appimage.smoke.*` rather than expanding the shared staged-layout
