@@ -14,6 +14,14 @@ on:
         required: false
         type: string
         default: ""
+      packager-repository:
+        required: false
+        type: string
+        default: ""
+      packager-ref:
+        required: false
+        type: string
+        default: ""
       runs-on-msi:
         required: false
         type: string
@@ -109,9 +117,17 @@ jobs:
       - name: Resolve Packager Checkout
         id: packager
         run: |
+          $repository = '${{ inputs.packager-repository }}'
+          $ref = '${{ inputs.packager-ref }}'
+          if (-not [string]::IsNullOrWhiteSpace($repository) -and -not [string]::IsNullOrWhiteSpace($ref)) {
+            "repository=$repository" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "ref=$ref" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            exit 0
+          }
+
           $workflowRef = '${{ github.workflow_ref }}'
           if ($workflowRef -notmatch '^([^/]+/[^/]+)/\.github/workflows/[^@]+@(.+)$') {
-            throw "Unable to parse github.workflow_ref: $workflowRef"
+            throw "Unable to resolve packager checkout. Provide packager-repository and packager-ref inputs."
           }
           "repository=$($Matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "ref=$($Matches[2])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
