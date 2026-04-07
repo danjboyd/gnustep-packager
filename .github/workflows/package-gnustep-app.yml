@@ -184,7 +184,11 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace('${{ inputs.package-version }}')) {
             $args += @('-PackageVersion', '${{ inputs.package-version }}')
           }
-          $manifestJson = & (Join-Path $toolRoot 'scripts/gnustep-packager.ps1') @args
+          $packagerScript = [System.IO.Path]::GetFullPath((Join-Path $toolRoot 'scripts\gnustep-packager.ps1'))
+          if (-not (Test-Path -LiteralPath $packagerScript)) {
+            throw "gnustep-packager entrypoint not found at $packagerScript"
+          }
+          $manifestJson = & $packagerScript @args
           $manifest = $manifestJson | ConvertFrom-Json -AsHashtable
           $manifestRoot = Split-Path -Parent $manifestPath
 
@@ -239,7 +243,11 @@ jobs:
           if ('${{ inputs.run-smoke }}' -eq 'true') {
             $args += '-RunSmoke'
           }
-          & (Join-Path $toolRoot 'scripts/run-packaging-pipeline.ps1') @args
+          $pipelineScript = [System.IO.Path]::GetFullPath((Join-Path $toolRoot 'scripts\run-packaging-pipeline.ps1'))
+          if (-not (Test-Path -LiteralPath $pipelineScript)) {
+            throw "packaging pipeline entrypoint not found at $pipelineScript"
+          }
+          & $pipelineScript @args
 
       - name: Upload Package Artifacts
         if: ${{ inputs.upload-artifacts }}
