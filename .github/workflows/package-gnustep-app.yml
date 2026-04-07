@@ -113,6 +113,8 @@ jobs:
     steps:
       - name: Checkout Consumer Repo
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Resolve Packager Checkout
         id: packager
