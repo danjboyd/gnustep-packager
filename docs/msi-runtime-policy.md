@@ -49,6 +49,10 @@ The backend performs DLL closure for:
 Missing non-system DLLs are searched under `backends.msi.runtimeSearchRoots`
 and copied into `runtime/bin` when found.
 
+Installed-runtime validation audits only the installed payload tree. Standard
+Windows OS imports are classified centrally as system dependencies and are not
+expected to be bundled under `runtime/`.
+
 If unresolved non-system DLLs remain after closure analysis, packaging fails by
 default.
 

@@ -81,6 +81,10 @@ First checks:
   log
 - inspect the validation log for `Installed runtime audit:` lines; these now
   group missing non-system dependencies by the DLL that required them
+- if the reported import is a standard Windows OS library such as
+  `dwrite.dll`, `gdiplus.dll`, `msimg32.dll`, `opengl32.dll`, `usp10.dll`,
+  `winhttp.dll`, `winspool.drv`, or `wsock32.dll`, treat that as a backend
+  classification gap rather than a consumer staging miss
 
 ## Reproduction Commands
 
