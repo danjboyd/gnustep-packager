@@ -601,6 +601,93 @@ runtime payload contents.
   - repo tests catch drift between manifest declaration, workflow realization,
     and remote-host handling
 
+## Phase 12: Host Dependency Maturity and Validation Depth
+Goal: harden the new host dependency model beyond the initial MSYS2 and apt
+support so it stays maintainable, extensible, and verifiable under broader
+consumer and CI scenarios.
+Status: planned.
+
+Current handoff:
+- last completed checkpoint: `Phase 11` implemented and pushed on `main`
+- last sync point: commit `576a02061aa2` on `2026-04-14T22:27:34Z`
+- recommended next starting point: `Phase 12A`
+- first review target tomorrow:
+  inspect `scripts/lib/core.ps1` host dependency provider functions and decide
+  whether to extract a shared provider contract before adding any new package
+  managers or self-hosted runner behavior
+- guardrail for next work:
+  keep `hostDependencies` manifest shape stable unless a concrete blocker
+  appears; prefer internal provider refactors and stronger tests before
+  expanding the public manifest contract
+
+This phase is follow-on work after the manifest-driven host dependency model is
+in place. It focuses on stronger abstraction, better coverage of self-hosted
+and manifest-only provisioning paths, and improved end-to-end confidence.
+
+- `Phase 12A`: Provider abstraction and package-manager extensibility
+  Deliverables:
+  - a clearer internal provider abstraction for host dependency verification and
+    installation
+  - reduced duplication between MSYS2 and apt provider implementations
+  - extension points for future package-manager providers without reshaping the
+    manifest contract again
+  Exit criteria:
+  - adding a new host package manager does not require rewriting the shared
+    preflight model
+  - current Windows and Linux providers share common execution and diagnostics
+    patterns
+
+- `Phase 12B`: Self-hosted and manifest-only workflow behavior
+  Deliverables:
+  - stronger workflow behavior when `skip-default-host-setup: true`
+  - explicit policy and diagnostics for manifest-driven verification on
+    pre-provisioned runners
+  - reduced reliance on workflow-only additive package inputs in common
+    downstream cases
+  Exit criteria:
+  - self-hosted runners can rely on manifest-declared host dependencies without
+    ambiguous behavior
+  - workflow logs make it clear whether dependencies were installed, verified,
+    or intentionally left to the caller
+
+- `Phase 12C`: End-to-end workflow and host provisioning integration tests
+  Deliverables:
+  - stronger regression coverage that exercises host dependency synthesis
+    through realistic pipeline entry points
+  - repo or fixture tests that cover workflow-driven package list resolution
+    and preflight/install behavior more deeply than surface-string assertions
+  - integration coverage for failure-path diagnostics when declared host
+    dependencies are absent or unavailable
+  Exit criteria:
+  - regressions in manifest-to-workflow host dependency wiring are caught by
+    behavior-focused tests, not only surface checks
+  - host dependency failure messages stay stable and reviewable
+
+- `Phase 12D`: Shared dependency sets and profile reuse
+  Deliverables:
+  - a deliberate way to share common host dependency sets across manifests,
+    profiles, or reference consumer templates
+  - guidance on when to use per-app declarations versus reusable dependency
+    overlays
+  Exit criteria:
+  - downstream repos with multiple manifests can avoid copy-pasting identical
+    host dependency declarations
+  - reuse does not obscure which app-specific host prerequisites are actually
+    required
+
+- `Phase 12E`: Consumer guidance and support-boundary refinement
+  Deliverables:
+  - clearer guidance on supported host package-manager baselines, privilege
+    expectations, and fallback behavior
+  - refined compatibility-matrix and troubleshooting docs for host dependency
+    provisioning
+  - explicit non-goals around automatic dependency inference and unsupported
+    host environments
+  Exit criteria:
+  - consumers can tell which host dependency scenarios are fully supported
+    versus compatibility best-effort
+  - support boundaries stay explicit as more provisioning paths are added
+
 ## Suggested Early Execution Order
 Prioritize these subphases first:
 
