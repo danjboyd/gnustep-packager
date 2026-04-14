@@ -1,10 +1,11 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("manifest-check", "resolve-manifest", "describe", "launch-plan", "backend-list", "build", "stage", "package", "validate")]
+  [ValidateSet("manifest-check", "resolve-manifest", "describe", "launch-plan", "backend-list", "host-preflight", "build", "stage", "package", "validate")]
   [string]$Command = "describe",
   [string]$Manifest = "examples/sample-gui/package.manifest.json",
   [string]$Backend,
   [string]$PackageVersion,
+  [switch]$InstallHostDependencies,
   [switch]$DryRun,
   [switch]$RunSmoke
 )
@@ -82,12 +83,25 @@ switch ($Command) {
     Write-Host "Package root: $($summary.PackageRoot)"
     Write-Host "Log root: $($summary.LogRoot)"
     Write-Host "Validation kind: $($summary.ValidationKind)"
+    $hostDependencies = Get-GpHostDependencies -Context $context
+    Write-Host "Host dependencies (windows/msys2): $(@($hostDependencies.WindowsMsys2Packages).Count)"
+    Write-Host "Host dependencies (linux/apt): $(@($hostDependencies.LinuxAptPackages).Count)"
     if ($summary.UpdatesEnabled) {
       Write-Host "Updates: enabled ($($summary.UpdateChannel))"
     } else {
       Write-Host "Updates: disabled"
     }
     Write-Host "Enabled backends: $enabledBackendText"
+    break
+  }
+
+  "host-preflight" {
+    $result = Invoke-GpHostDependencyPreflight -Context $context -Backend $Backend -InstallMissing:$InstallHostDependencies -DryRun:$DryRun
+    if ($DryRun) {
+      $result | ConvertTo-Json -Depth 20
+    } else {
+      Write-Host "Host dependency preflight completed. Log: $($result.LogPath)"
+    }
     break
   }
 

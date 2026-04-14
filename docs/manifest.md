@@ -16,6 +16,7 @@ The package manifest tells `gnustep-packager`:
 - `payload`
 - `launch`
 - `outputs`
+- `hostDependencies`
 - `validation`
 - `updates`
 - `integrations`
@@ -93,6 +94,18 @@ Important fields:
 - `logRoot`
 - `tempRoot`
 - `validationRoot`
+
+## `hostDependencies`
+Declares app-specific host/build prerequisites that the shared tooling may
+verify or install before build and packaging steps begin.
+
+Important fields:
+- `windows.msys2Packages`
+- `linux.aptPackages`
+
+These declarations are for host-side package managers and build prerequisites,
+not for staged runtime payload contents under `app/`, `runtime/`, or
+`metadata/`.
 
 ## `validation`
 Declares shared smoke validation behavior that is backend-neutral.

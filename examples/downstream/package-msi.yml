@@ -13,8 +13,6 @@ jobs:
       manifest-path: packaging/package.manifest.json
       backend: msi
       package-version: ${{ github.ref_name }}
-      msys2-packages: >-
-        mingw-w64-clang-x86_64-cmark
       run-validation: true
       run-smoke: true
       artifact-name: my-gnustep-app

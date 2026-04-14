@@ -354,6 +354,90 @@ function Apply-GpManifestOverrides {
   return $overridden
 }
 
+function Get-GpHostPlatform {
+  try {
+    $platform = [System.Environment]::OSVersion.Platform
+    if ($platform -eq [System.PlatformID]::Win32NT) {
+      return "windows"
+    }
+
+    if ($platform -eq [System.PlatformID]::Unix) {
+      return "linux"
+    }
+  } catch {
+  }
+
+  if ($env:OS -eq "Windows_NT") {
+    return "windows"
+  }
+
+  return "unknown"
+}
+
+function Get-GpHostDependencies {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context
+  )
+
+  $hostDependencies = if ($Context.Manifest.Contains("hostDependencies") -and ($Context.Manifest["hostDependencies"] -is [System.Collections.IDictionary])) {
+    $Context.Manifest["hostDependencies"]
+  } else {
+    @{}
+  }
+
+  $windows = if ($hostDependencies.Contains("windows") -and ($hostDependencies["windows"] -is [System.Collections.IDictionary])) {
+    $hostDependencies["windows"]
+  } else {
+    @{}
+  }
+  $linux = if ($hostDependencies.Contains("linux") -and ($hostDependencies["linux"] -is [System.Collections.IDictionary])) {
+    $hostDependencies["linux"]
+  } else {
+    @{}
+  }
+
+  return [pscustomobject]@{
+    WindowsMsys2Packages = [string[]]@($windows["msys2Packages"] | Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace([string]$_) })
+    LinuxAptPackages = [string[]]@($linux["aptPackages"] | Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace([string]$_) })
+  }
+}
+
+function Get-GpHostDependencyPlan {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [string]$Backend
+  )
+
+  $platform = Get-GpHostPlatform
+  $dependencies = Get-GpHostDependencies -Context $Context
+  $groups = [System.Collections.Generic.List[psobject]]::new()
+
+  if ($platform -eq "windows" -and @($dependencies.WindowsMsys2Packages).Count -gt 0) {
+    $groups.Add([pscustomobject]@{
+      Platform = "windows"
+      PackageManager = "msys2"
+      Packages = [string[]]@($dependencies.WindowsMsys2Packages)
+      Backend = $(if (-not [string]::IsNullOrWhiteSpace($Backend)) { $Backend } else { $null })
+    }) | Out-Null
+  }
+
+  if ($platform -eq "linux" -and @($dependencies.LinuxAptPackages).Count -gt 0) {
+    $groups.Add([pscustomobject]@{
+      Platform = "linux"
+      PackageManager = "apt"
+      Packages = [string[]]@($dependencies.LinuxAptPackages)
+      Backend = $(if (-not [string]::IsNullOrWhiteSpace($Backend)) { $Backend } else { $null })
+    }) | Out-Null
+  }
+
+  return [pscustomobject]@{
+    HostPlatform = $platform
+    Groups = @($groups.ToArray())
+  }
+}
+
 function Get-GpManifestContext {
   param(
     [Parameter(Mandatory = $true)]
@@ -598,6 +682,34 @@ function Test-GpManifest {
   if ($outputs) {
     foreach ($key in @("root", "packageRoot", "logRoot", "tempRoot", "validationRoot")) {
       Require-String -Parent $outputs -Key $key -Label ("outputs." + $key)
+    }
+  }
+
+  if ($Manifest.Contains("hostDependencies")) {
+    if (-not ($Manifest["hostDependencies"] -is [System.Collections.IDictionary])) {
+      Add-Issue "hostDependencies must be an object when present."
+    } else {
+      $hostDependencies = $Manifest["hostDependencies"]
+      foreach ($platform in @("windows", "linux")) {
+        if (-not $hostDependencies.Contains($platform)) {
+          continue
+        }
+
+        if (-not ($hostDependencies[$platform] -is [System.Collections.IDictionary])) {
+          Add-Issue "hostDependencies.$platform must be an object when present."
+          continue
+        }
+
+        $platformConfig = $hostDependencies[$platform]
+        $listKey = $(if ($platform -eq "windows") { "msys2Packages" } else { "aptPackages" })
+        if ($platformConfig.Contains($listKey)) {
+          foreach ($packageName in @($platformConfig[$listKey])) {
+            if (-not (($packageName -is [string]) -and (-not [string]::IsNullOrWhiteSpace([string]$packageName)))) {
+              Add-Issue "hostDependencies.$platform.$listKey must contain non-empty strings."
+            }
+          }
+        }
+      }
     }
   }
 
@@ -1445,6 +1557,251 @@ function Get-GpShellInvocation {
   }
 
   throw "Unsupported shell kind: $kind"
+}
+
+function Invoke-GpCapturedProcess {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$FilePath,
+    [string[]]$ArgumentList = @(),
+    [string]$WorkingDirectory
+  )
+
+  $tempRoot = [System.IO.Path]::GetTempPath()
+  $streamId = [guid]::NewGuid().ToString("N")
+  $stdoutPath = Join-Path $tempRoot ("gp-process-{0}.stdout.tmp" -f $streamId)
+  $stderrPath = Join-Path $tempRoot ("gp-process-{0}.stderr.tmp" -f $streamId)
+
+  try {
+    $parameters = @{
+      FilePath = $FilePath
+      ArgumentList = @($ArgumentList)
+      Wait = $true
+      PassThru = $true
+      RedirectStandardOutput = $stdoutPath
+      RedirectStandardError = $stderrPath
+    }
+    if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+      $parameters["WorkingDirectory"] = $WorkingDirectory
+    }
+
+    $process = Start-Process @parameters
+    $stdout = if (Test-Path $stdoutPath) { Get-Content -Raw -Path $stdoutPath } else { "" }
+    $stderr = if (Test-Path $stderrPath) { Get-Content -Raw -Path $stderrPath } else { "" }
+
+    return [pscustomobject]@{
+      ExitCode = [int]$process.ExitCode
+      StdOut = [string]$stdout
+      StdErr = [string]$stderr
+    }
+  } finally {
+    foreach ($path in @($stdoutPath, $stderrPath)) {
+      if (Test-Path $path) {
+        Remove-Item -Force $path
+      }
+    }
+  }
+}
+
+function Get-GpMsys2PacmanPath {
+  $candidates = [System.Collections.Generic.List[string]]::new()
+  if (-not [string]::IsNullOrWhiteSpace($env:MSYS2_LOCATION)) {
+    $candidates.Add((Join-Path $env:MSYS2_LOCATION "usr\\bin\\pacman.exe")) | Out-Null
+  }
+  $candidates.Add("C:\\msys64\\usr\\bin\\pacman.exe") | Out-Null
+
+  foreach ($candidate in @($candidates)) {
+    if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path $candidate)) {
+      return $candidate
+    }
+  }
+
+  $command = Get-Command pacman.exe -ErrorAction SilentlyContinue
+  if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace([string]$command.Source)) {
+    return [string]$command.Source
+  }
+
+  return $null
+}
+
+function Get-GpMissingMsys2Packages {
+  param(
+    [string[]]$Packages = @()
+  )
+
+  $pacmanPath = Get-GpMsys2PacmanPath
+  if ([string]::IsNullOrWhiteSpace($pacmanPath)) {
+    throw "MSYS2 pacman.exe was not found. Set MSYS2_LOCATION or install the documented MSYS2 CLANG64 baseline."
+  }
+
+  $missing = [System.Collections.Generic.List[string]]::new()
+  foreach ($packageName in @($Packages)) {
+    $result = Invoke-GpCapturedProcess -FilePath $pacmanPath -ArgumentList @("-Q", "--", $packageName)
+    if ($result.ExitCode -ne 0) {
+      $missing.Add($packageName) | Out-Null
+    }
+  }
+
+  return [string[]]@($missing.ToArray())
+}
+
+function Install-GpMsys2Packages {
+  param(
+    [string[]]$Packages = @()
+  )
+
+  $pacmanPath = Get-GpMsys2PacmanPath
+  if ([string]::IsNullOrWhiteSpace($pacmanPath)) {
+    throw "MSYS2 pacman.exe was not found. Set MSYS2_LOCATION or install the documented MSYS2 CLANG64 baseline."
+  }
+
+  $result = Invoke-GpCapturedProcess -FilePath $pacmanPath -ArgumentList @("-S", "--needed", "--noconfirm", "--") + @($Packages)
+  if ($result.ExitCode -ne 0) {
+    $detail = @($result.StdOut, $result.StdErr) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    throw ("MSYS2 package installation failed for: {0}. {1}" -f ([string]::Join(", ", @($Packages))), ([string]::Join(" ", $detail)).Trim())
+  }
+}
+
+function Get-GpAptProgram {
+  $command = Get-Command apt-get -ErrorAction SilentlyContinue
+  if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace([string]$command.Source)) {
+    return [string]$command.Source
+  }
+  return $null
+}
+
+function Get-GpMissingAptPackages {
+  param(
+    [string[]]$Packages = @()
+  )
+
+  $dpkgQuery = Get-Command dpkg-query -ErrorAction SilentlyContinue
+  if ($null -eq $dpkgQuery -or [string]::IsNullOrWhiteSpace([string]$dpkgQuery.Source)) {
+    throw "dpkg-query was not found. Linux apt host dependency verification requires a Debian/Ubuntu-style host with dpkg-query available."
+  }
+
+  $missing = [System.Collections.Generic.List[string]]::new()
+  foreach ($packageName in @($Packages)) {
+    $result = Invoke-GpCapturedProcess -FilePath ([string]$dpkgQuery.Source) -ArgumentList @("-W", "-f=\${Status}", "--", $packageName)
+    if (($result.ExitCode -ne 0) -or ($result.StdOut -notmatch "install ok installed")) {
+      $missing.Add($packageName) | Out-Null
+    }
+  }
+
+  return [string[]]@($missing.ToArray())
+}
+
+function Install-GpAptPackages {
+  param(
+    [string[]]$Packages = @()
+  )
+
+  $aptGet = Get-GpAptProgram
+  if ([string]::IsNullOrWhiteSpace($aptGet)) {
+    throw "apt-get was not found. Linux apt host dependency installation requires a Debian/Ubuntu-style host with apt-get available."
+  }
+
+  $sudo = Get-Command sudo -ErrorAction SilentlyContinue
+  $prefix = @()
+  if ((Get-Command id -ErrorAction SilentlyContinue) -and ((& id -u) -ne "0")) {
+    if ($null -eq $sudo -or [string]::IsNullOrWhiteSpace([string]$sudo.Source)) {
+      throw "Installing Linux host dependencies requires root or sudo access."
+    }
+    $prefix = @([string]$sudo.Source)
+  }
+
+  foreach ($command in @(
+    @($aptGet, "update"),
+    @($aptGet, "install", "-y", "--no-install-recommends") + @($Packages)
+  )) {
+    $filePath = if ($prefix.Count -gt 0) { $prefix[0] } else { $command[0] }
+    $argumentList = if ($prefix.Count -gt 0) { @($command) } else { @($command | Select-Object -Skip 1) }
+    if ($prefix.Count -eq 0) {
+      $filePath = $command[0]
+    }
+
+    $result = Invoke-GpCapturedProcess -FilePath $filePath -ArgumentList $argumentList
+    if ($result.ExitCode -ne 0) {
+      $detail = @($result.StdOut, $result.StdErr) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+      throw ("apt dependency command failed: {0}. {1}" -f ([string]::Join(" ", @($command))), ([string]::Join(" ", $detail)).Trim())
+    }
+  }
+}
+
+function Invoke-GpHostDependencyPreflight {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [string]$Backend,
+    [string]$LogPath,
+    [switch]$InstallMissing,
+    [switch]$DryRun
+  )
+
+  if ([string]::IsNullOrWhiteSpace($LogPath)) {
+    $LogPath = New-GpCommandLogPath -Context $Context -CommandName "host-preflight"
+  }
+
+  Ensure-GpDirectory -Path (Split-Path -Parent $LogPath) | Out-Null
+  $plan = Get-GpHostDependencyPlan -Context $Context -Backend $Backend
+  $lines = [System.Collections.Generic.List[string]]::new()
+  $lines.Add(("[{0}] host-platform={1}" -f (Get-Date).ToString("o"), $plan.HostPlatform)) | Out-Null
+
+  if (@($plan.Groups).Count -eq 0) {
+    $lines.Add("No manifest-declared host dependencies apply to this host.") | Out-Null
+    Set-Content -Path $LogPath -Value $lines
+    return [pscustomobject]@{
+      HostPlatform = $plan.HostPlatform
+      Groups = @()
+      LogPath = $LogPath
+      InstallMode = [bool]$InstallMissing
+      DryRun = [bool]$DryRun
+    }
+  }
+
+  foreach ($group in @($plan.Groups)) {
+    $lines.Add(("Checking {0} packages: {1}" -f $group.PackageManager, ([string]::Join(", ", @($group.Packages))))) | Out-Null
+    if ($DryRun) {
+      $lines.Add(("DRYRUN  would verify {0} packages" -f $group.PackageManager)) | Out-Null
+      continue
+    }
+
+    $missing = @(
+      switch ($group.PackageManager) {
+      "msys2" { @(Get-GpMissingMsys2Packages -Packages @($group.Packages)) }
+      "apt" { @(Get-GpMissingAptPackages -Packages @($group.Packages)) }
+      default { throw "Unsupported host package manager: $($group.PackageManager)" }
+      }
+    )
+
+    if ($missing.Count -eq 0) {
+      $lines.Add(("OK      all declared {0} packages are already present" -f $group.PackageManager)) | Out-Null
+      continue
+    }
+
+    $lines.Add(("MISSING {0}" -f ([string]::Join(", ", $missing)))) | Out-Null
+    if (-not $InstallMissing) {
+      Set-Content -Path $LogPath -Value $lines
+      throw ("Missing declared {0} host dependencies: {1}. Re-run with -InstallHostDependencies or set GP_INSTALL_HOST_DEPENDENCIES=1. See log: {2}" -f $group.PackageManager, ([string]::Join(", ", $missing)), $LogPath)
+    }
+
+    $lines.Add(("INSTALL {0}" -f ([string]::Join(", ", $missing)))) | Out-Null
+    switch ($group.PackageManager) {
+      "msys2" { Install-GpMsys2Packages -Packages $missing }
+      "apt" { Install-GpAptPackages -Packages $missing }
+      default { throw "Unsupported host package manager: $($group.PackageManager)" }
+    }
+    $lines.Add(("OK      installed missing {0} packages" -f $group.PackageManager)) | Out-Null
+  }
+
+  Set-Content -Path $LogPath -Value $lines
+  return [pscustomobject]@{
+    HostPlatform = $plan.HostPlatform
+    Groups = @($plan.Groups)
+    LogPath = $LogPath
+    InstallMode = [bool]$InstallMissing
+    DryRun = [bool]$DryRun
+  }
 }
 
 function New-GpTimestamp {

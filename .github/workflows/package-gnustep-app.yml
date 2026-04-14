@@ -141,56 +141,7 @@ jobs:
           ref: ${{ steps.packager.outputs.ref }}
           path: .gnustep-packager-toolkit
 
-      - name: Install MSYS2 CLANG64 Prerequisites
-        if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup }}
-        id: msys2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: CLANG64
-          update: true
-          install: >-
-            make
-            mingw-w64-clang-x86_64-gnustep-make
-            mingw-w64-clang-x86_64-gnustep-base
-            mingw-w64-clang-x86_64-gnustep-gui
-            mingw-w64-clang-x86_64-gnustep-back
-            mingw-w64-clang-x86_64-libdispatch
-            mingw-w64-clang-x86_64-libobjc2
-            mingw-w64-clang-x86_64-toolchain
-            ${{ inputs.msys2-packages }}
-
-      - name: Expose MSYS2 Toolchain
-        if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup }}
-        run: |
-          "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          (Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'clang64\bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-
-      - name: Install Linux AppImage Prerequisites
-        if: ${{ inputs.backend == 'appimage' && !inputs.skip-default-host-setup }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          packages='${{ inputs.appimage-apt-packages }}'
-          if [ -z "$packages" ]; then
-            exit 0
-          fi
-          sudo apt-get update
-          sudo apt-get install -y $packages
-
-      - name: Run Caller Preflight (pwsh)
-        if: ${{ inputs.preflight-command != '' && inputs.preflight-shell == 'pwsh' }}
-        shell: pwsh
-        run: |
-          ${{ inputs.preflight-command }}
-
-      - name: Run Caller Preflight (bash)
-        if: ${{ inputs.preflight-command != '' && inputs.preflight-shell == 'bash' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          ${{ inputs.preflight-command }}
-
-      - name: Resolve Manifest Outputs
+      - name: Resolve Manifest Outputs And Host Dependencies
         id: manifest
         run: |
           $toolRoot = Join-Path $env:GITHUB_WORKSPACE ".gnustep-packager-toolkit"
@@ -217,10 +168,90 @@ jobs:
             return [System.IO.Path]::GetFullPath((Join-Path $basePath $value))
           }
 
+          function Join-UniquePackageList([object[]]$Values) {
+            $items = [System.Collections.Generic.List[string]]::new()
+            foreach ($value in @($Values)) {
+              if ($null -eq $value) {
+                continue
+              }
+              foreach ($line in @(([string]$value) -split '\s+')) {
+                $trimmed = $line.Trim()
+                if (-not [string]::IsNullOrWhiteSpace($trimmed) -and -not $items.Contains($trimmed)) {
+                  $items.Add($trimmed) | Out-Null
+                }
+              }
+            }
+            return [string]::Join(' ', @($items))
+          }
+
+          $windowsHostDeps = @()
+          $linuxHostDeps = @()
+          if ($manifest.ContainsKey('hostDependencies') -and ($manifest.hostDependencies -is [System.Collections.IDictionary])) {
+            if ($manifest.hostDependencies.ContainsKey('windows') -and ($manifest.hostDependencies.windows -is [System.Collections.IDictionary])) {
+              $windowsHostDeps = @($manifest.hostDependencies.windows.msys2Packages)
+            }
+            if ($manifest.hostDependencies.ContainsKey('linux') -and ($manifest.hostDependencies.linux -is [System.Collections.IDictionary])) {
+              $linuxHostDeps = @($manifest.hostDependencies.linux.aptPackages)
+            }
+          }
+
           "resolved_version=$($manifest.package.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "package_root=$(Resolve-OutputPath $manifestRoot $manifest.outputs.packageRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "log_root=$(Resolve-OutputPath $manifestRoot $manifest.outputs.logRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "validation_root=$(Resolve-OutputPath $manifestRoot $manifest.outputs.validationRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "manifest_msys2_packages=$(Join-UniquePackageList $windowsHostDeps)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "manifest_apt_packages=$(Join-UniquePackageList $linuxHostDeps)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "resolved_msys2_packages=$(Join-UniquePackageList @('${{ inputs.msys2-packages }}', (Join-UniquePackageList $windowsHostDeps)))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "resolved_apt_packages=$(Join-UniquePackageList @('${{ inputs.appimage-apt-packages }}', (Join-UniquePackageList $linuxHostDeps)))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Install MSYS2 CLANG64 Prerequisites
+        if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup }}
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            make
+            mingw-w64-clang-x86_64-gnustep-make
+            mingw-w64-clang-x86_64-gnustep-base
+            mingw-w64-clang-x86_64-gnustep-gui
+            mingw-w64-clang-x86_64-gnustep-back
+            mingw-w64-clang-x86_64-libdispatch
+            mingw-w64-clang-x86_64-libobjc2
+            mingw-w64-clang-x86_64-toolchain
+            ${{ steps.manifest.outputs.resolved_msys2_packages }}
+
+      - name: Expose MSYS2 Toolchain
+        if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup }}
+        run: |
+          "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          (Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'clang64\bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Install Linux AppImage Prerequisites
+        if: ${{ inputs.backend == 'appimage' && !inputs.skip-default-host-setup }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages='${{ steps.manifest.outputs.resolved_apt_packages }}'
+          if [ -z "$packages" ]; then
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y $packages
+
+      - name: Run Caller Preflight (pwsh)
+        if: ${{ inputs.preflight-command != '' && inputs.preflight-shell == 'pwsh' }}
+        shell: pwsh
+        run: |
+          ${{ inputs.preflight-command }}
+
+      - name: Run Caller Preflight (bash)
+        if: ${{ inputs.preflight-command != '' && inputs.preflight-shell == 'bash' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ${{ inputs.preflight-command }}
 
       - name: Configure Signing Environment
         if: ${{ inputs.sign-artifacts && inputs.backend == 'msi' }}
@@ -260,6 +291,9 @@ jobs:
           }
           if ('${{ inputs.run-smoke }}' -eq 'true') {
             $parameters['RunSmoke'] = $true
+          }
+          if ('${{ inputs.skip-default-host-setup }}' -ne 'true') {
+            $parameters['InstallHostDependencies'] = $true
           }
           $pipelineScript = [System.IO.Path]::GetFullPath((Join-Path $toolRoot 'scripts\run-packaging-pipeline.ps1'))
           if (-not (Test-Path -LiteralPath $pipelineScript)) {

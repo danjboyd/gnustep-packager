@@ -503,6 +503,104 @@ library and helper.
   - release metadata regressions and unsafe update-handling changes are caught
     before downstream users discover them manually
 
+## Phase 11: Manifest-Driven Host Dependency Provisioning
+Goal: let downstream manifests declare app-specific host/build dependencies
+once, then have `gnustep-packager` realize or validate them consistently across
+local runs, reusable workflows, and remote packaging hosts.
+Status: implemented.
+
+This phase keeps host dependency declaration in the packaging manifest while
+preserving the existing stage-first boundary. These dependencies are for host
+tooling and build prerequisites such as MSYS2 or apt packages, not for staged
+runtime payload contents.
+
+- `Phase 11A`: Manifest schema and resolution model
+  Deliverables:
+  - manifest schema additions for host dependency declaration
+  - defaults and profile-layering rules for shared dependency sets
+  - a resolved internal model that stays backend-neutral in shared code while
+    still supporting host-specific package managers
+  Exit criteria:
+  - a downstream manifest can declare additional Windows and Linux host
+    dependencies without relying on workflow-only inputs
+  - resolved manifest output is deterministic and testable
+
+- `Phase 11B`: Shared preflight and failure model
+  Deliverables:
+  - a shared preflight path that validates or installs declared host
+    dependencies before build or package steps begin
+  - explicit policy for install-versus-verify behavior on local and CI hosts
+  - precise early failure messages for unresolved or disallowed dependencies
+  Exit criteria:
+  - missing host dependencies fail before compiler or backend-specific build
+    work starts
+  - runtime staging and host dependency provisioning remain separate concerns
+
+- `Phase 11C`: Windows MSI host realization
+  Deliverables:
+  - Windows/MSYS2 realization for declared `msys2Packages`
+  - support for both installation and verification-only modes on supported
+    Windows packaging hosts
+  - backend-aware diagnostics when declared packages cannot be installed or
+    found
+  Exit criteria:
+  - a downstream Windows MSI packaging run can satisfy manifest-declared MSYS2
+    package requirements without duplicating that list in repo-local wrapper
+    scripts
+  - failures point at the declared package requirement rather than surfacing
+    later as missing headers or tools
+
+- `Phase 11D`: Linux AppImage host realization
+  Deliverables:
+  - Linux host realization for declared apt-side dependencies used by AppImage
+    packaging flows
+  - support for both installation and verification-only modes on supported
+    Linux hosts
+  - backend-aware diagnostics for missing Linux host packages
+  Exit criteria:
+  - Linux packaging can use the same manifest-driven host dependency model as
+    Windows
+  - Linux-side host dependency behavior is documented and testable separately
+    from bundled runtime policy
+
+- `Phase 11E`: Reusable workflow and local parity
+  Deliverables:
+  - reusable workflow logic that reads manifest-declared host dependencies and
+    realizes them automatically
+  - local wrapper and repo entry-point updates so the same dependency
+    declarations drive local packaging
+  - a compatibility path for existing workflow inputs such as
+    `msys2-packages` and `appimage-apt-packages`
+  Exit criteria:
+  - local and CI packaging use the same declared host dependency set by
+    default
+  - downstream workflow YAML no longer has to duplicate app-specific package
+    lists just to match local runs
+
+- `Phase 11F`: Remote and leased host parity
+  Deliverables:
+  - remote Windows host and leased-VM helpers that consume the same resolved
+    host dependency model
+  - plan execution updates so remote packaging environments can provision or
+    verify declared dependencies before build begins
+  Exit criteria:
+  - remote packaging helpers do not need app-specific package lists copied into
+    separate scripts
+  - preflight behavior is consistent across local, CI, and remote-host paths
+
+- `Phase 11G`: Consumer docs, examples, and regression coverage
+  Deliverables:
+  - consumer-facing documentation for declaring host/build dependencies in the
+    manifest
+  - updated examples showing a downstream app such as one using `cmark`
+  - regression coverage for manifest resolution, preflight failure behavior,
+    and workflow integration
+  Exit criteria:
+  - downstream users can adopt manifest-driven host dependency provisioning
+    without source spelunking
+  - repo tests catch drift between manifest declaration, workflow realization,
+    and remote-host handling
+
 ## Suggested Early Execution Order
 Prioritize these subphases first:
 

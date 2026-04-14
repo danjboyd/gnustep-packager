@@ -314,6 +314,38 @@
         }
       }
     },
+    "hostDependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "windows": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "msys2Packages": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "linux": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "aptPackages": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
     "validation": {
       "type": "object",
       "additionalProperties": false,

@@ -7,6 +7,7 @@ Describe "Reusable workflow surface" {
     $script:workflowText = Get-Content -Raw -Path (Join-Path $script:repoRoot ".github/workflows/package-gnustep-app.yml")
     $script:githubActionsDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/github-actions.md")
     $script:consumerSetupDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/consumer-setup.md")
+    $script:otvmRemoteText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/ci/otvm-windows-remote.ps1")
   }
 
   It "exposes runner, preflight, and package-extension inputs" {
@@ -41,11 +42,26 @@ Describe "Reusable workflow surface" {
     }
   }
 
+  It "resolves manifest-declared host dependency packages in workflow setup" {
+    foreach ($pattern in @(
+      "manifest_msys2_packages",
+      "manifest_apt_packages",
+      "resolved_msys2_packages",
+      "resolved_apt_packages",
+      "InstallHostDependencies"
+    )) {
+      if ($script:workflowText -notmatch [regex]::Escape($pattern)) {
+        throw "Reusable workflow is missing manifest-driven host dependency integration: $pattern"
+      }
+    }
+  }
+
   It "documents downstream workflow extension points" {
     foreach ($pattern in @(
       "runs-on-msi",
       "runs-on-appimage",
       "preflight-command",
+      "hostDependencies",
       "msys2-packages",
       "launch-only",
       "marker-file"
@@ -60,6 +76,15 @@ Describe "Reusable workflow surface" {
     $examplePath = Join-Path $script:repoRoot "examples/downstream/package-appimage-self-hosted.yml"
     if (-not (Test-Path $examplePath)) {
       throw "Expected self-hosted AppImage workflow example at $examplePath"
+    }
+  }
+
+  It "runs remote Windows validation through manifest-driven host preflight" {
+    if ($script:otvmRemoteText -notmatch [regex]::Escape("packager-host-preflight")) {
+      throw "Remote Windows helper should run host preflight before build."
+    }
+    if ($script:otvmRemoteText -notmatch [regex]::Escape("-InstallHostDependencies")) {
+      throw "Remote Windows helper should allow manifest-driven host dependency installation."
     }
   }
 }

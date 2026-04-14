@@ -33,8 +33,10 @@ Recommended adoption order:
 
 1. Start from the closest manifest template.
 2. Fill in the app-specific package identity and stage paths.
-3. Replace the placeholder `updates.github.*` and backend `updates.feedUrl`
+3. Add any app-specific host packages under `hostDependencies` instead of
+   copying package-manager lists into workflow YAML.
+4. Replace the placeholder `updates.github.*` and backend `updates.feedUrl`
    values with your real repo and feed URLs.
-4. Add real `compliance.runtimeNotices` entries for shipped runtime contents.
-5. Run `scripts/run-packaging-pipeline.ps1 -Backend <msi|appimage> -RunSmoke`
+5. Add real `compliance.runtimeNotices` entries for shipped runtime contents.
+6. Run `scripts/run-packaging-pipeline.ps1 -Backend <msi|appimage> -RunSmoke`
    locally.

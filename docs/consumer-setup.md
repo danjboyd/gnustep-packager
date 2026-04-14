@@ -45,8 +45,9 @@ For the current MSI backend, the consumer should:
 4. enable `backends.msi`
 5. provide a stable `upgradeCode`
 6. run the shared pipeline wrapper locally before wiring CI
-7. add app-specific MSYS2 packages in reusable-workflow calls through
-   `msys2-packages` when the default GNUstep baseline is not enough
+7. declare app-specific MSYS2 host packages under
+   `hostDependencies.windows.msys2Packages` when the default GNUstep baseline
+   is not enough
 
 The reusable workflow's default MSI host setup installs a GNUstep-capable MSYS2
 `CLANG64` baseline. Downstream apps remain responsible for app-specific
@@ -62,7 +63,9 @@ For the AppImage backend, the consumer should:
 4. enable `backends.appimage`
 5. provide a stable `desktopEntryName`
 6. choose an AppImage smoke mode under `backends.appimage.smoke`
-7. install `squashfs-tools` and `desktop-file-utils` before local validation or
+7. declare extra Linux host packages under `hostDependencies.linux.aptPackages`
+   when the documented AppImage host baseline is not enough
+8. install `squashfs-tools` and `desktop-file-utils` before local validation or
    let the reusable workflow install them in CI
 
 Recommended AppImage smoke modes:
@@ -96,6 +99,14 @@ Recommended updater docs:
 ```json
 {
   "profiles": ["gnustep-gui"],
+  "hostDependencies": {
+    "windows": {
+      "msys2Packages": ["mingw-w64-clang-x86_64-cmark"]
+    },
+    "linux": {
+      "aptPackages": ["libcmark-dev"]
+    }
+  },
   "compliance": {
     "runtimeNotices": [
       {
@@ -114,8 +125,14 @@ Recommended updater docs:
 ./scripts/run-packaging-pipeline.ps1 `
   -Manifest packaging/package.manifest.json `
   -Backend msi `
+  -InstallHostDependencies `
   -RunSmoke
 ```
+
+Manifest-declared host dependencies are implemented for shared local preflight
+and CLI usage in the current repo state. Reusable workflow and remote-host
+realization still use their existing explicit inputs until the later `Phase
+11E` and `Phase 11F` integration work lands.
 
 ```powershell
 ./scripts/run-packaging-pipeline.ps1 `

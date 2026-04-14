@@ -9,6 +9,7 @@ The initial command set is:
 - `describe`
 - `launch-plan`
 - `backend-list`
+- `host-preflight`
 - `build`
 - `stage`
 - `package`
@@ -42,6 +43,10 @@ through the same CLI surface rather than inventing a separate CI-only path.
 - `launch-plan`
   Print the normalized launch contract
 
+- `host-preflight`
+  Verify or install manifest-declared host/build dependencies for the current
+  host
+
 - `build`
   Run the consumer repo build command
 
@@ -53,3 +58,7 @@ through the same CLI surface rather than inventing a separate CI-only path.
 
 - `validate`
   Run shared validation and optionally dispatch to backend validation
+
+The shared pipeline wrapper runs `host-preflight` before build by default. Use
+`-InstallHostDependencies` to allow package-manager realization, or
+`-SkipHostPreflight` when intentionally bypassing that step.

@@ -3,6 +3,8 @@ param(
   [string]$Manifest = "examples/sample-gui/package.manifest.json",
   [string]$Backend,
   [string]$PackageVersion,
+  [switch]$InstallHostDependencies,
+  [switch]$SkipHostPreflight,
   [switch]$SkipBuild,
   [switch]$SkipStage,
   [switch]$SkipSharedValidation,
@@ -38,6 +40,10 @@ function Invoke-GpPipelineStep {
     $parameters["PackageVersion"] = $PackageVersion
   }
 
+  if ($InstallHostDependencies) {
+    $parameters["InstallHostDependencies"] = $true
+  }
+
   if ($UseRunSmoke) {
     $parameters["RunSmoke"] = $true
   }
@@ -47,6 +53,10 @@ function Invoke-GpPipelineStep {
   }
 
   & $toolScript @parameters
+}
+
+if (-not $SkipHostPreflight) {
+  Invoke-GpPipelineStep -CommandName "host-preflight" -BackendName $Backend
 }
 
 if (-not $SkipBuild) {

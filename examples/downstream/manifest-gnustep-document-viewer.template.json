@@ -46,6 +46,18 @@
     "tempRoot": "dist/tmp",
     "validationRoot": "dist/validation"
   },
+  "hostDependencies": {
+    "windows": {
+      "msys2Packages": [
+        "mingw-w64-clang-x86_64-cmark"
+      ]
+    },
+    "linux": {
+      "aptPackages": [
+        "libcmark-dev"
+      ]
+    }
+  },
   "validation": {
     "smoke": {
       "enabled": true,

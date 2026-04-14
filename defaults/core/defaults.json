@@ -24,6 +24,14 @@
     "tempRoot": "dist/tmp",
     "validationRoot": "dist/validation"
   },
+  "hostDependencies": {
+    "windows": {
+      "msys2Packages": []
+    },
+    "linux": {
+      "aptPackages": []
+    }
+  },
   "validation": {
     "smoke": {
       "enabled": true,

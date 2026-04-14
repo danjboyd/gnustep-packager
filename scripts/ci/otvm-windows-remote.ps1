@@ -104,6 +104,10 @@ try {
 
   Push-Location (Split-Path -Parent $ManifestPath)
   try {
+    Invoke-GpOtvmStep -Name "packager-host-preflight" -Body {
+      & (Join-Path $RepoRoot "scripts\gnustep-packager.ps1") -Command host-preflight -Manifest $ManifestPath -Backend msi -InstallHostDependencies
+    }
+
     Invoke-GpOtvmStep -Name "packager-build" -Body {
       & (Join-Path $RepoRoot "scripts\gnustep-packager.ps1") -Command build -Manifest $ManifestPath
     }

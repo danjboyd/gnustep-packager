@@ -22,7 +22,8 @@ Callers may override either input with a different JSON array, for example:
 
 ## Default Host Setup
 When `skip-default-host-setup` is `false`, the workflow provisions a documented
-baseline per backend before resolving the manifest.
+baseline per backend, resolves the manifest, and then merges manifest-declared
+host dependency packages with any additive workflow inputs.
 
 Default MSI MSYS2 baseline:
 
@@ -35,15 +36,19 @@ Default MSI MSYS2 baseline:
 - `mingw-w64-clang-x86_64-libobjc2`
 - `mingw-w64-clang-x86_64-toolchain`
 
-Add app-specific MSYS2 packages through `msys2-packages`, for example
-`mingw-w64-clang-x86_64-cmark`.
+Manifest-declared Windows host packages under
+`hostDependencies.windows.msys2Packages` are installed automatically. The
+`msys2-packages` input remains available as an additive override or temporary
+escape hatch.
 
 Default AppImage host packages:
 
 - `squashfs-tools`
 - `desktop-file-utils`
 
-Override that list through `appimage-apt-packages`, or set
+Manifest-declared Linux host packages under `hostDependencies.linux.aptPackages`
+are added automatically. Override or extend that list through
+`appimage-apt-packages`, or set
 `skip-default-host-setup: true` on a pre-provisioned self-hosted runner.
 
 ## Caller Preflight
@@ -100,8 +105,6 @@ jobs:
     with:
       manifest-path: packaging/package.manifest.json
       backend: msi
-      msys2-packages: >-
-        mingw-w64-clang-x86_64-cmark
       run-validation: true
       run-smoke: true
       artifact-name: my-app-windows
@@ -147,6 +150,13 @@ That means the consumer manifest and build outputs stay in the caller repo while
 the packaging logic stays centralized here. Caller preflight commands run in
 that checked-out workspace before the workflow resolves outputs or invokes the
 shared packaging pipeline.
+
+When default host setup is enabled, the workflow also passes
+`-InstallHostDependencies` into the shared pipeline wrapper so manifest-driven
+host preflight can repair missing app-specific packages before build starts.
+On self-hosted runs with `skip-default-host-setup: true`, manifest-driven host
+preflight still runs, but it verifies dependencies instead of installing them
+automatically.
 
 ## Release Publishing Follow-On
 The reusable workflow stops at packaging, validation, and artifact upload.
