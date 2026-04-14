@@ -601,10 +601,11 @@ runtime payload contents.
   - repo tests catch drift between manifest declaration, workflow realization,
     and remote-host handling
 
-## Phase 12: Host Dependency Maturity and Validation Depth
-Goal: harden the new host dependency model beyond the initial MSYS2 and apt
-support so it stays maintainable, extensible, and verifiable under broader
-consumer and CI scenarios.
+## Phase 12: Packaging Contracts and Validation Maturity
+Goal: harden the new host dependency model and extend manifest-driven packaging
+contracts so staged content, packaged defaults, and installed or extracted
+results stay maintainable, extensible, and verifiable under broader consumer
+and CI scenarios.
 Status: planned.
 
 Current handoff:
@@ -621,8 +622,9 @@ Current handoff:
   expanding the public manifest contract
 
 This phase is follow-on work after the manifest-driven host dependency model is
-in place. It focuses on stronger abstraction, better coverage of self-hosted
-and manifest-only provisioning paths, and improved end-to-end confidence.
+in place. It focuses on stronger provider abstraction, better coverage of
+self-hosted and manifest-only provisioning paths, richer packaged-content and
+installed-result contracts, and improved end-to-end confidence.
 
 - `Phase 12A`: Provider abstraction and package-manager extensibility
   Deliverables:
@@ -687,6 +689,52 @@ and manifest-only provisioning paths, and improved end-to-end confidence.
   - consumers can tell which host dependency scenarios are fully supported
     versus compatibility best-effort
   - support boundaries stay explicit as more provisioning paths are added
+
+- `Phase 12F`: Packaged content contracts and semantic package assertions
+  Deliverables:
+  - manifest-level package contract sections for declaring required packaged
+    content at a higher level than raw path lists
+  - shared normalization rules that can map semantic declarations such as
+    themes, updater helpers, updater UI/runtime libraries, metadata files, and
+    other packaged support assets into concrete backend checks
+  - compatibility rules that preserve existing low-level path-based escape
+    hatches for unusual consumer cases
+  Exit criteria:
+  - downstream manifests can express common packaging intent without encoding
+    packager internals directly in repo-local scripts
+  - shared and backend validation can explain which declared packaged contract
+    was expected and which concrete artifacts satisfy it
+
+- `Phase 12G`: Installed-result assertions and backend validation hooks
+  Deliverables:
+  - backend-aware installed or extracted package assertion hooks for MSI and
+    AppImage validation paths
+  - manifest support for installed-result expectations such as required files,
+    expected launcher/runtime outputs, and declared package defaults surviving
+    packaging transforms
+  - higher-signal diagnostics that identify the phase where declared content
+    disappeared: stage, package transform, install, or extracted result
+  Exit criteria:
+  - a package that looks correct in stage but regresses during backend
+    transform or install fails with a precise installed-result assertion
+  - backend parity exists in principle for MSI install checks and AppImage
+    extractability/assertion checks
+
+- `Phase 12H`: Declarative packaged defaults and contract-backed drift detection
+  Deliverables:
+  - manifest support for semantic packaged defaults such as a default Windows
+    theme, updater helper enablement, and other generated launch/runtime
+    defaults that the packager is expected to carry through
+  - validation helpers that confirm declared defaults are represented in the
+    generated package and installed result
+  - downstream fixture coverage for drift scenarios such as a declared theme or
+    helper being present in one phase and missing in another
+  Exit criteria:
+  - consumers can declare packaging defaults once and rely on the packager to
+    both realize and validate them
+  - regressions such as omitted themes, dropped helpers, or lost packaged
+    defaults are caught by repo-owned validation instead of downstream ad hoc
+    checks
 
 ## Suggested Early Execution Order
 Prioritize these subphases first:
