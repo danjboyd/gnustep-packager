@@ -35,6 +35,44 @@ function Copy-GpValue {
   return $Value
 }
 
+function Convert-GpJsonObjectToHashtable {
+  param(
+    [Parameter(Mandatory = $true)]
+    [AllowNull()]
+    [object]$Value
+  )
+
+  if ($null -eq $Value) {
+    return $null
+  }
+
+  if ($Value -is [System.Collections.IDictionary]) {
+    $copy = @{}
+    foreach ($key in $Value.Keys) {
+      $copy[$key] = Convert-GpJsonObjectToHashtable -Value $Value[$key]
+    }
+    return $copy
+  }
+
+  if ($Value -is [System.Management.Automation.PSCustomObject]) {
+    $copy = @{}
+    foreach ($property in $Value.PSObject.Properties) {
+      $copy[$property.Name] = Convert-GpJsonObjectToHashtable -Value $property.Value
+    }
+    return $copy
+  }
+
+  if (($Value -is [System.Collections.IEnumerable]) -and -not ($Value -is [string])) {
+    $items = @()
+    foreach ($item in $Value) {
+      $items += ,(Convert-GpJsonObjectToHashtable -Value $item)
+    }
+    return ,$items
+  }
+
+  return $Value
+}
+
 function Merge-GpHashtable {
   param(
     [Parameter(Mandatory = $true)]
@@ -151,7 +189,26 @@ function Get-GpJsonFile {
   )
 
   $resolvedPath = (Resolve-Path $Path).Path
-  return (Get-Content -Raw -Path $resolvedPath | ConvertFrom-Json -AsHashtable)
+  $json = Get-Content -Raw -Path $resolvedPath
+  $command = Get-Command ConvertFrom-Json -ErrorAction Stop
+  $supportsAsHashtable = $false
+  foreach ($parameterSet in $command.ParameterSets) {
+    foreach ($parameter in $parameterSet.Parameters) {
+      if ($parameter.Name -eq "AsHashtable") {
+        $supportsAsHashtable = $true
+        break
+      }
+    }
+    if ($supportsAsHashtable) {
+      break
+    }
+  }
+
+  if ($supportsAsHashtable) {
+    return ($json | ConvertFrom-Json -AsHashtable)
+  }
+
+  return (Convert-GpJsonObjectToHashtable -Value ($json | ConvertFrom-Json))
 }
 
 function Get-GpManifestSchemaPath {
@@ -168,6 +225,10 @@ function Test-GpManifestSchema {
   $schemaPath = Get-GpManifestSchemaPath
   if (-not (Test-Path $schemaPath)) {
     $issues.Add("Manifest schema not found: $schemaPath") | Out-Null
+    return [string[]]$issues.ToArray()
+  }
+
+  if (-not (Get-Command Test-Json -ErrorAction SilentlyContinue)) {
     return [string[]]$issues.ToArray()
   }
 
@@ -1294,8 +1355,15 @@ function Get-GpShellInvocation {
         }
       }
       $parts += $Command
+      $program = if ($ShellConfig.Contains("program")) {
+        [string]$ShellConfig["program"]
+      } elseif (($env:OS -eq "Windows_NT") -and -not (Get-Command pwsh -ErrorAction SilentlyContinue)) {
+        "powershell"
+      } else {
+        "pwsh"
+      }
       return [pscustomobject]@{
-        FilePath     = $(if ($ShellConfig.Contains("program")) { [string]$ShellConfig["program"] } else { "pwsh" })
+        FilePath     = $program
         ArgumentList = @("-NoProfile", "-Command", ($parts -join "; "))
         ShellKind    = $kind
       }
@@ -1583,10 +1651,49 @@ function Invoke-GpShellCommand {
 
   Push-Location $WorkingDirectory
   try {
-    $global:LASTEXITCODE = 0
     $argumentList = @($Invocation.ArgumentList)
-    & $Invocation.FilePath @argumentList 2>&1 | Tee-Object -FilePath $LogPath -Append | Out-Host
-    $exitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+    $streamRoot = Split-Path -Parent $LogPath
+    $streamId = [guid]::NewGuid().ToString("N")
+    $stdoutPath = Join-Path $streamRoot ("{0}.stdout.tmp" -f $streamId)
+    $stderrPath = Join-Path $streamRoot ("{0}.stderr.tmp" -f $streamId)
+
+    try {
+      # Native Windows toolchains regularly emit warnings on stderr even when the
+      # process succeeds. Capture both streams as plain text and use only the
+      # native exit code as the success/failure signal.
+      $process = Start-Process `
+        -FilePath $Invocation.FilePath `
+        -ArgumentList $argumentList `
+        -WorkingDirectory $WorkingDirectory `
+        -NoNewWindow `
+        -Wait `
+        -PassThru `
+        -RedirectStandardOutput $stdoutPath `
+        -RedirectStandardError $stderrPath
+      $exitCode = [int]$process.ExitCode
+
+      foreach ($path in @($stdoutPath, $stderrPath)) {
+        if (-not (Test-Path $path)) {
+          continue
+        }
+
+        $lines = @(Get-Content -Path $path)
+        if ($lines.Count -eq 0) {
+          continue
+        }
+
+        Add-Content -Path $LogPath -Value $lines
+        foreach ($line in $lines) {
+          Write-Host $line
+        }
+      }
+    } finally {
+      foreach ($path in @($stdoutPath, $stderrPath)) {
+        if (Test-Path $path) {
+          Remove-Item -Force $path
+        }
+      }
+    }
   } finally {
     Pop-Location
   }

@@ -25,6 +25,9 @@ Symptoms:
 First checks:
 - confirm MSYS2 `CLANG64` tools are installed
 - confirm the configured staged `.ico` exists when `iconRelativePath` is set
+- compiler or linker warnings written to stderr are logged but should not fail
+  packaging by themselves; treat a nonzero native exit code as the actual
+  failure signal
 
 ### Runtime Closure
 Symptoms:

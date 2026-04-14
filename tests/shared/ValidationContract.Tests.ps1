@@ -173,4 +173,36 @@ Describe "Shared validation contract" {
       }
     }
   }
+
+  It "treats native stderr output as diagnostic when the process exits successfully" {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-shell-command-" + [guid]::NewGuid().ToString("N"))
+    $logPath = Join-Path $tempRoot "shell-command.log"
+    $shellPath = (Get-Process -Id $PID).Path
+
+    New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+
+    try {
+      $result = Invoke-GpShellCommand `
+        -Invocation ([pscustomobject]@{
+          FilePath = $shellPath
+          ArgumentList = @(
+            "-NoProfile",
+            "-Command",
+            "[Console]::Out.WriteLine('stdout ok'); [Console]::Error.WriteLine('stderr warning'); exit 0"
+          )
+          ShellKind = "pwsh"
+        }) `
+        -WorkingDirectory $tempRoot `
+        -LogPath $logPath
+      $logText = Get-Content -Raw -Path $logPath
+
+      Assert-GpEqual -Actual $result.ExitCode -Expected 0 -Message "Shell command execution should preserve a successful native exit code."
+      Assert-GpMatch -Actual $logText -Pattern "stdout ok" -Message "Shell command logs should keep native stdout."
+      Assert-GpMatch -Actual $logText -Pattern "stderr warning" -Message "Shell command logs should keep native stderr without treating it as fatal."
+    } finally {
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
 }
