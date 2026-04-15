@@ -154,12 +154,16 @@ jobs:
           $context = Get-GpManifestContext -Path $manifestPath -PackageVersion '${{ inputs.package-version }}'
           $manifest = $context.Manifest
           $manifestRoot = Split-Path -Parent $manifestPath
-          $hostSetupPlan = Get-GpWorkflowHostSetupPlan `
-            -Context $context `
-            -Backend '${{ inputs.backend }}' `
-            -SkipDefaultHostSetup:${{ inputs.skip-default-host-setup }} `
-            -AdditionalMsys2Packages '${{ inputs.msys2-packages }}' `
-            -AdditionalAptPackages '${{ inputs.appimage-apt-packages }}'
+          $hostSetupPlanArgs = @{
+            Context = $context
+            Backend = '${{ inputs.backend }}'
+            AdditionalMsys2Packages = '${{ inputs.msys2-packages }}'
+            AdditionalAptPackages = '${{ inputs.appimage-apt-packages }}'
+          }
+          if (${{ inputs.skip-default-host-setup }}) {
+            $hostSetupPlanArgs.SkipDefaultHostSetup = $true
+          }
+          $hostSetupPlan = Get-GpWorkflowHostSetupPlan @hostSetupPlanArgs
 
           if (@($hostSetupPlan.Errors).Count -gt 0) {
             throw ([string]::Join(" ", @($hostSetupPlan.Errors)))
