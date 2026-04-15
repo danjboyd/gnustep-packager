@@ -160,7 +160,7 @@ jobs:
             AdditionalMsys2Packages = '${{ inputs.msys2-packages }}'
             AdditionalAptPackages = '${{ inputs.appimage-apt-packages }}'
           }
-          if (${{ inputs.skip-default-host-setup }}) {
+          if ($${{ inputs.skip-default-host-setup }}) {
             $hostSetupPlanArgs.SkipDefaultHostSetup = $true
           }
           $hostSetupPlan = Get-GpWorkflowHostSetupPlan @hostSetupPlanArgs
