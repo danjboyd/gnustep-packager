@@ -354,4 +354,65 @@ Describe "Shared validation contract" {
       }
     }
   }
+
+  It "accepts bundled-theme under the GNUstep System/Library runtime tree" {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-validation-theme-system-stage-" + [guid]::NewGuid().ToString("N"))
+    $stageRoot = Join-Path $tempRoot "stage"
+    $appPath = Join-Path $stageRoot "app\\SampleGNUstepApp.app\\SampleGNUstepApp.exe"
+    $resourcePath = Join-Path $stageRoot "app\\SampleGNUstepApp.app\\Resources\\Info-gnustep.plist"
+    $runtimeBinPath = Join-Path $stageRoot "runtime\\bin\\defaults.exe"
+    $themePath = Join-Path $stageRoot "runtime\\System\\Library\\Themes\\Adwaita.theme"
+    $metadataPath = Join-Path $stageRoot "metadata\\icons\\sample-icon.txt"
+    $manifestPath = $null
+
+    foreach ($dir in @(
+      (Split-Path -Parent $appPath),
+      (Split-Path -Parent $resourcePath),
+      (Split-Path -Parent $runtimeBinPath),
+      $themePath,
+      (Split-Path -Parent $metadataPath)
+    )) {
+      New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    }
+    Set-Content -Path $appPath -Value "fixture"
+    Set-Content -Path $resourcePath -Value "fixture"
+    Set-Content -Path $runtimeBinPath -Value "fixture"
+    Set-Content -Path (Join-Path $themePath "theme.txt") -Value "fixture theme"
+    Set-Content -Path $metadataPath -Value "fixture"
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest["payload"]["stageRoot"] = $stageRoot
+        $manifest["outputs"]["root"] = (Join-Path $tempRoot "dist")
+        $manifest["outputs"]["packageRoot"] = (Join-Path $tempRoot "dist\\packages")
+        $manifest["outputs"]["logRoot"] = (Join-Path $tempRoot "dist\\logs")
+        $manifest["outputs"]["tempRoot"] = (Join-Path $tempRoot "dist\\tmp")
+        $manifest["outputs"]["validationRoot"] = (Join-Path $tempRoot "dist\\validation")
+        $manifest["validation"]["smoke"]["requiredPaths"] = @()
+        $manifest["validation"]["packageContract"] = @{
+          requiredContent = @(
+            @{
+              kind = "bundled-theme"
+              name = "Adwaita"
+            }
+          )
+        }
+      }
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      $result = Invoke-GpSharedValidation -Context $context
+      $logText = Get-Content -Raw -Path $result.LogPath
+
+      Assert-GpMatch -Actual $logText -Pattern "validation\.packageContract\.requiredContent\[0\]" -Message "Bundled-theme System/Library validation should log the semantic assertion source."
+      Assert-GpMatch -Actual $logText -Pattern "runtime[/\\]System[/\\]Library[/\\]Themes[/\\]Adwaita\.theme" -Message "Bundled-theme System/Library validation should log the GNUstep runtime tree candidate path."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
 }

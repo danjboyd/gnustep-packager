@@ -2375,6 +2375,7 @@ function Get-GpBundledThemeCandidatePaths {
   )
 
   return [string[]]@(
+    (Join-Path "runtime/System/Library/Themes" ("{0}.theme" -f $ThemeName)),
     (Join-Path "runtime/lib/GNUstep/Themes" ("{0}.theme" -f $ThemeName)),
     (Join-Path "runtime/share/GNUstep/Themes" ("{0}.theme" -f $ThemeName))
   )

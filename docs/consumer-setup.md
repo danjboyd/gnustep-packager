@@ -37,6 +37,9 @@ manifest instead of scattering them across backend-specific tests:
 
 Use `packagedDefaults.defaultTheme` for launcher behavior and `bundled-theme`
 for theme payload presence. They are related but intentionally separate.
+`bundled-theme` currently covers the common GNUstep runtime theme roots under
+`runtime/System/Library/Themes`, `runtime/lib/GNUstep/Themes`, and
+`runtime/share/GNUstep/Themes`.
 
 ## Expected Stage Layout
 

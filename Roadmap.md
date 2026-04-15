@@ -609,13 +609,13 @@ and CI scenarios.
 Status: implemented.
 
 Current handoff:
-- last completed checkpoint: `Phase 12A` through `Phase 12H` implemented on
+- last completed checkpoint: `Phase 12A` through `Phase 12J` implemented on
   `main`
 - recommended next starting point: define the post-`Phase 12` roadmap boundary
   before expanding the manifest contract again
 - first review target tomorrow:
   audit whether the current semantic contract set should stay intentionally
-  narrow or grow to include more updater-side packaged assets
+  narrow or grow only in response to repeated downstream runtime-layout needs
 - guardrail for next work:
   keep the semantic contract set small and explicit unless a repeated consumer
   need justifies broadening it; prefer high-signal assertions over a large enum
@@ -640,6 +640,12 @@ Current status notes:
 - `Phase 12H` landed as declarative packaged defaults, currently including
   `packagedDefaults.defaultTheme`, with contract-backed drift detection across
   stage, package, and installed or extracted results
+- `Phase 12I` landed as a narrow semantic follow-on: `bundled-theme` now
+  covers the common GNUstep `runtime/System/Library/Themes/<Theme>.theme`
+  layout in addition to the existing `runtime/lib/GNUstep/Themes` and
+  `runtime/share/GNUstep/Themes` checks
+- `Phase 12J` landed as multi-layout regression coverage so semantic theme
+  assertions no longer validate only one fixture-preferred runtime tree
 
 This phase is follow-on work after the manifest-driven host dependency model is
 in place. It focuses on stronger provider abstraction, better coverage of
@@ -755,6 +761,40 @@ installed-result contracts, and improved end-to-end confidence.
   - regressions such as omitted themes, dropped helpers, or lost packaged
     defaults are caught by repo-owned validation instead of downstream ad hoc
     checks
+
+- `Phase 12I`: Bundled-theme root broadening for common GNUstep runtime trees
+  Deliverables:
+  - broaden `bundled-theme` candidate resolution to include common GNUstep
+    runtime theme roots, at minimum
+    `runtime/System/Library/Themes/<Theme>.theme`,
+    `runtime/lib/GNUstep/Themes/<Theme>.theme`, and
+    `runtime/share/GNUstep/Themes/<Theme>.theme`
+  - preserve the current phase-aware semantic diagnostics, including the
+    manifest assertion source and the concrete candidate paths checked
+  - keep `requiredPaths` available as the low-level escape hatch for unusual
+    consumer layouts
+  Exit criteria:
+  - downstream consumers staging private themes under
+    `runtime/System/Library/Themes` can use `bundled-theme` without falling
+    back to raw backend-specific path assertions
+  - shared, packaged-result, and installed or extracted result checks all pass
+    when any supported GNUstep theme root contains the declared theme
+
+- `Phase 12J`: Multi-layout bundled-theme regression coverage
+  Deliverables:
+  - shared validation tests that prove `bundled-theme` succeeds across at least
+    one GNUstep runtime tree layout under `runtime/System/Library/Themes` and
+    one existing `runtime/lib/GNUstep/Themes` layout
+  - backend regression coverage that confirms MSI and AppImage package or
+    installed-result checks still pass with the broadened candidate set
+  - fixture or manifest updates that avoid coupling semantic theme assertions
+    to a single preferred staged runtime tree
+  Exit criteria:
+  - repo tests catch regressions where `bundled-theme` works only for one
+    fixture-specific layout
+  - downstream consumers can rely on semantic theme presence checks across
+    common GNUstep runtime trees without reintroducing literal theme-bundle
+    path assertions
 
 ## Suggested Early Execution Order
 Prioritize these subphases first:

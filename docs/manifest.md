@@ -159,7 +159,11 @@ unusual packaged results that are easier to assert as concrete paths.
   behavior.
 - `bundled-theme`
   Confirms the named GNUstep theme payload is actually present in stage,
-  packaged output, and installed or extracted results.
+  packaged output, and installed or extracted results across the supported
+  runtime theme roots:
+  `runtime/System/Library/Themes/<Theme>.theme`,
+  `runtime/lib/GNUstep/Themes/<Theme>.theme`, and
+  `runtime/share/GNUstep/Themes/<Theme>.theme`.
 
 ## `updates`
 Declares shared release-discovery settings for packaged apps.

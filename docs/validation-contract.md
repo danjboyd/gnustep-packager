@@ -69,7 +69,10 @@ Current semantic kinds:
 - `bundled-theme`
   Confirms a named GNUstep theme payload exists under the packaged runtime
   theme roots without forcing the manifest to spell out backend-specific theme
-  paths.
+  paths. The current candidate set includes
+  `runtime/System/Library/Themes/<Theme>.theme`,
+  `runtime/lib/GNUstep/Themes/<Theme>.theme`, and
+  `runtime/share/GNUstep/Themes/<Theme>.theme`.
 - `metadata-file`
   Confirms a staged metadata file survives packaging.
 - `updater-helper`
