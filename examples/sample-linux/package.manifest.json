@@ -78,6 +78,10 @@
           "kind": "notice-report"
         },
         {
+          "kind": "bundled-theme",
+          "name": "Adwaita"
+        },
+        {
           "kind": "metadata-file",
           "path": "metadata/icons/sample-linux.png"
         }
@@ -87,6 +91,10 @@
       "requiredContent": [
         {
           "kind": "notice-report"
+        },
+        {
+          "kind": "bundled-theme",
+          "name": "Adwaita"
         }
       ],
       "requiredPaths": [

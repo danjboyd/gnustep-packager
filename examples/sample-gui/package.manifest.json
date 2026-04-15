@@ -80,6 +80,10 @@
           "kind": "notice-report"
         },
         {
+          "kind": "bundled-theme",
+          "name": "WinUXTheme"
+        },
+        {
           "kind": "metadata-file",
           "path": "metadata/icons/sample-icon.txt"
         }
@@ -89,6 +93,10 @@
       "requiredContent": [
         {
           "kind": "notice-report"
+        },
+        {
+          "kind": "bundled-theme",
+          "name": "WinUXTheme"
         }
       ],
       "requiredPaths": [

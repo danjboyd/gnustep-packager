@@ -180,6 +180,7 @@ Describe "MSI backend" {
 
       Assert-GpEqual -Actual $contract.HasIssues -Expected $false -Message "The transformed MSI install tree should satisfy the declared package contract."
       Assert-GpMatch -Actual ([string]::Join("`n", @($contract.Lines))) -Pattern "defaultTheme" -Message "The semantic MSI package contract should include declarative packaged defaults."
+      Assert-GpMatch -Actual ([string]::Join("`n", @($contract.Lines))) -Pattern "bundled-theme" -Message "The semantic MSI package contract should include bundled theme assertions."
     }
 
     It "places the shortcut at the Start Menu root" {

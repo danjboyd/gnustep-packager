@@ -66,6 +66,10 @@ Current semantic kinds:
 - `default-theme`
   Confirms the declared theme default survives into the generated launcher
   artifact, such as MSI `.launcher.ini` or AppImage `AppRun`.
+- `bundled-theme`
+  Confirms a named GNUstep theme payload exists under the packaged runtime
+  theme roots without forcing the manifest to spell out backend-specific theme
+  paths.
 - `metadata-file`
   Confirms a staged metadata file survives packaging.
 - `updater-helper`
@@ -85,6 +89,12 @@ This is what lets validation distinguish between:
 - content missing in stage
 - content lost during package transform
 - content lost after install or extraction
+
+For bundled GNUstep themes, this keeps two separate invariants explicit:
+- `packagedDefaults.defaultTheme`
+  What launcher behavior should default to.
+- `bundled-theme`
+  Whether the actual theme payload is still present.
 
 Example:
 

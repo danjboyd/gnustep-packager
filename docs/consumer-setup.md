@@ -30,10 +30,13 @@ manifest instead of scattering them across backend-specific tests:
   `ifUnset` semantics.
 - `validation.packageContract.requiredContent`
   Declares semantic packaged-content expectations such as notice reports,
-  updater runtime config, metadata files, or updater helpers.
+  updater runtime config, bundled themes, metadata files, or updater helpers.
 - `validation.installedResult`
   Declares the installed or extracted result checks that should still hold
   after MSI install or AppImage extraction.
+
+Use `packagedDefaults.defaultTheme` for launcher behavior and `bundled-theme`
+for theme payload presence. They are related but intentionally separate.
 
 ## Expected Stage Layout
 

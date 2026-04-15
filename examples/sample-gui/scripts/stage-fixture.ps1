@@ -12,6 +12,7 @@ $resourceRoot = Join-Path $appRoot "Resources"
 $runtimeBin = Join-Path $resolvedStageRoot "runtime\\bin"
 $runtimeFonts = Join-Path $resolvedStageRoot "runtime\\etc\\fonts"
 $runtimeConfig = Join-Path $resolvedStageRoot "runtime\\config"
+$runtimeTheme = Join-Path $resolvedStageRoot "runtime\\lib\\GNUstep\\Themes\\WinUXTheme.theme"
 $metadataIcons = Join-Path $resolvedStageRoot "metadata\\icons"
 $metadataLicenses = Join-Path $resolvedStageRoot "metadata\\licenses"
 $logRoot = Join-Path $resolvedStageRoot "logs"
@@ -31,7 +32,7 @@ if (Test-Path $resolvedStageRoot) {
   Remove-Item -Recurse -Force $resolvedStageRoot
 }
 
-foreach ($dir in @($appRoot, $resourceRoot, $runtimeBin, $runtimeFonts, $runtimeConfig, $metadataIcons, $metadataLicenses, $logRoot)) {
+foreach ($dir in @($appRoot, $resourceRoot, $runtimeBin, $runtimeFonts, $runtimeConfig, $runtimeTheme, $metadataIcons, $metadataLicenses, $logRoot)) {
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
 
@@ -55,6 +56,7 @@ if ($fontConfigSource) {
 }
 
 Set-Content -Path (Join-Path $runtimeConfig "theme.conf") -Value "GSTheme=WinUXTheme"
+Set-Content -Path (Join-Path $runtimeTheme "WinUXTheme.dll") -Value "fixture theme payload"
 Set-Content -Path (Join-Path $metadataIcons "sample-icon.txt") -Value "fixture icon placeholder"
 Set-Content -Path (Join-Path $metadataLicenses "SampleGNUstepApp.txt") -Value "SampleGNUstepApp fixture license notice. License: MIT."
 Set-Content -Path (Join-Path $metadataLicenses "GNUstep-runtime.txt") -Value "GNUstep runtime fixture notice. License: LGPL-2.1-or-later."

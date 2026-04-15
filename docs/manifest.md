@@ -146,11 +146,20 @@ Current semantic contract kinds:
 - `notice-report`
 - `update-runtime-config`
 - `default-theme`
+- `bundled-theme`
 - `metadata-file`
 - `updater-helper`
 
 `requiredPaths` remains the low-level escape hatch for backend-specific or
 unusual packaged results that are easier to assert as concrete paths.
+
+`default-theme` and `bundled-theme` intentionally cover different invariants:
+- `default-theme`
+  Confirms the generated launcher preserves the declared default theme
+  behavior.
+- `bundled-theme`
+  Confirms the named GNUstep theme payload is actually present in stage,
+  packaged output, and installed or extracted results.
 
 ## `updates`
 Declares shared release-discovery settings for packaged apps.

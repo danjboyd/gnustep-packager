@@ -838,7 +838,7 @@ function Test-GpManifest {
     }
 
     $kind = [string]$Item["kind"]
-    $validKinds = @("notice-report", "update-runtime-config", "default-theme", "metadata-file", "updater-helper")
+    $validKinds = @("notice-report", "update-runtime-config", "default-theme", "metadata-file", "updater-helper", "bundled-theme")
     if ($kind -notin $validKinds) {
       Add-Issue "$Label.kind must be one of: $([string]::Join(', ', $validKinds))."
     }
@@ -857,6 +857,10 @@ function Test-GpManifest {
 
     if ($kind -eq "metadata-file" -and (-not $Item.Contains("path") -or -not (Test-StringValue $Item["path"]))) {
       Add-Issue "$Label.path is required when $Label.kind is metadata-file."
+    }
+
+    if ($kind -eq "bundled-theme" -and (-not $Item.Contains("name") -or -not (Test-StringValue $Item["name"]))) {
+      Add-Issue "$Label.name is required when $Label.kind is bundled-theme."
     }
   }
 
@@ -2364,6 +2368,18 @@ function Get-GpUpdaterHelperCandidates {
   )
 }
 
+function Get-GpBundledThemeCandidatePaths {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ThemeName
+  )
+
+  return [string[]]@(
+    (Join-Path "runtime/lib/GNUstep/Themes" ("{0}.theme" -f $ThemeName)),
+    (Join-Path "runtime/share/GNUstep/Themes" ("{0}.theme" -f $ThemeName))
+  )
+}
+
 function Get-GpDefaultThemeContractValue {
   param(
     [Parameter(Mandatory = $true)]
@@ -2409,6 +2425,27 @@ function Invoke-GpPackageContractAssertions {
   foreach ($entry in @($declarations)) {
     $label = if (-not [string]::IsNullOrWhiteSpace([string]$entry.Name)) { $entry.Name } else { $entry.Kind }
     switch ($entry.Kind) {
+      "bundled-theme" {
+        $bundledThemeLabel = ("bundled-theme:{0}" -f $entry.Name)
+        $candidatePaths = [System.Collections.Generic.List[string]]::new()
+        $matchedPaths = [System.Collections.Generic.List[string]]::new()
+        foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $entry.Name)) {
+          $candidatePath = Resolve-GpPathRelativeToBase -BasePath $payloadRoot -Path $candidate
+          $candidatePaths.Add($candidatePath) | Out-Null
+          if (Test-Path $candidatePath) {
+            $matchedPaths.Add($candidatePath) | Out-Null
+          }
+        }
+
+        if ($matchedPaths.Count -gt 0) {
+          $lines.Add(("OK      {0} [{1}] -> matched {2}" -f $bundledThemeLabel, $entry.Source, ([string]::Join(", ", @($matchedPaths.ToArray()))))) | Out-Null
+        } else {
+          $message = ("MISSING {0} [{1}] -> checked {2}" -f $bundledThemeLabel, $entry.Source, ([string]::Join(", ", @($candidatePaths.ToArray()))))
+          $lines.Add($message) | Out-Null
+          $issues.Add($message) | Out-Null
+        }
+      }
+
       "metadata-file" {
         $path = Resolve-GpPathRelativeToBase -BasePath $payloadRoot -Path $entry.Path
         if (Test-Path $path) {

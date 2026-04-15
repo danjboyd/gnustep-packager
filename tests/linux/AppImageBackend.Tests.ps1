@@ -129,6 +129,8 @@ Describe "AppImage backend" {
 
       Assert-GpEqual -Actual $contract.HasIssues -Expected $false -Message "The AppDir should satisfy the declared package contract."
       Assert-GpMatch -Actual ([string]::Join("`n", @($contract.Lines))) -Pattern "defaultTheme" -Message "The AppImage package contract should include declarative packaged defaults."
+      Assert-GpMatch -Actual ([string]::Join("`n", @($contract.Lines))) -Pattern "bundled-theme" -Message "The AppImage package contract should include semantic bundled theme assertions."
+      Assert-GpMatch -Actual ([string]::Join("`n", @($contract.Lines))) -Pattern "Adwaita\.theme" -Message "Bundled-theme diagnostics should include the concrete theme path candidate."
     }
 
     It "renders desktop metadata and generated MIME types" {
@@ -193,6 +195,7 @@ Describe "AppImage backend" {
       $contract = Invoke-GpPackageContractAssertions -Context $script:packageContext -Scope "installed" -Backend "appimage" -RootPath $script:validationResult.ExpandedRoot
 
       Assert-GpEqual -Actual $contract.HasIssues -Expected $false -Message "Extracted AppImage contents should satisfy the declared installed-result contract."
+      Assert-GpMatch -Actual ([string]::Join("`n", @($contract.Lines))) -Pattern "bundled-theme" -Message "Installed-result assertions should include bundled theme checks."
     }
 
     It "runs the launch-only smoke path through the packaged AppImage" {
