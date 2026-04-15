@@ -1430,6 +1430,13 @@ function Prepare-GpMsiInstallTree {
   if (-not [string]::IsNullOrWhiteSpace($updateRuntimeConfigPath)) {
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Generated updater runtime config: {0}" -f $updateRuntimeConfigPath)
   }
+  $packageContract = Invoke-GpPackageContractAssertions -Context $Context -Scope "package" -Backend "msi" -RootPath $WorkPaths.InstallRoot
+  foreach ($line in @($packageContract.Lines)) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Package contract: {0}" -f $line)
+  }
+  if ($packageContract.HasIssues) {
+    throw "MSI package contract validation failed. See $LogPath."
+  }
   $runtimeClosureAnalysis = Get-GpMsiRuntimeClosureAnalysis `
     -Context $Context `
     -Config $Config `
@@ -1892,6 +1899,13 @@ function Invoke-GpMsiValidation {
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed launcher path: {0}" -f $launcherPath)
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed app path: {0}" -f $appPath)
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed runtime path: {0}" -f $runtimePath)
+  $installedContract = Invoke-GpPackageContractAssertions -Context $Context -Scope "installed" -Backend "msi" -RootPath $installPath
+  foreach ($line in @($installedContract.Lines)) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed contract: {0}" -f $line)
+  }
+  if ($installedContract.HasIssues) {
+    throw "MSI validation failed: installed-result contract drift detected. See $LogPath."
+  }
 
   $installedRuntimeAudit = Get-GpMsiRuntimeClosureAnalysis `
     -Context $Context `

@@ -984,6 +984,13 @@ function Prepare-GpAppDir {
   if (-not [string]::IsNullOrWhiteSpace($updateRuntimeConfigPath)) {
     Write-GpAppImageLogLine -LogPath $LogPath -Message ("Generated updater runtime config: {0}" -f $updateRuntimeConfigPath)
   }
+  $packageContract = Invoke-GpPackageContractAssertions -Context $Context -Scope "package" -Backend "appimage" -RootPath $WorkPaths.AppDirRoot
+  foreach ($line in @($packageContract.Lines)) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("Package contract: {0}" -f $line)
+  }
+  if ($packageContract.HasIssues) {
+    throw "AppImage package contract validation failed. See $LogPath."
+  }
 
   return [pscustomobject]@{
     AppDirRoot = $WorkPaths.AppDirRoot
@@ -2172,6 +2179,13 @@ function Invoke-GpAppImageValidation {
   }
 
   $runtimeClosureResult = Invoke-GpAppImageRuntimeClosureValidation -Config $config -ExpandedRoot $expandedRoot -LogPath $runtimeClosureLog
+  $installedContract = Invoke-GpPackageContractAssertions -Context $Context -Scope "installed" -Backend "appimage" -RootPath $expandedRoot
+  foreach ($line in @($installedContract.Lines)) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("Installed contract: {0}" -f $line)
+  }
+  if ($installedContract.HasIssues) {
+    throw "AppImage installed-result contract validation failed. See $LogPath."
+  }
   $smokeResult = $null
   if ($RunSmoke -or $validationPlan.Enabled) {
     $smokeResult = Invoke-GpAppImageSmoke -Context $Context -Config $config -ValidationPlan $validationPlan -ValidationRoot $validationRoot -SmokeLog $smokeLog

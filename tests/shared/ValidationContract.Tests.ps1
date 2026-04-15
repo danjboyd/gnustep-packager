@@ -205,4 +205,86 @@ Describe "Shared validation contract" {
       }
     }
   }
+
+  It "realizes packagedDefaults.defaultTheme into the launch contract" {
+    $manifestPath = $null
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest["packagedDefaults"] = @{
+          defaultTheme = "StageTheme"
+        }
+        $manifest["launch"]["env"] = @{
+          GNUSTEP_PATHPREFIX_LIST = "{@runtimeRoot}"
+        }
+      }
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      $launch = Get-GpLaunchContract -Context $context
+
+      Assert-GpEqual -Actual $launch.Environment["GSTheme"]["value"] -Expected "StageTheme" -Message "Declarative packaged defaults should realize a default theme into the launch contract."
+      Assert-GpEqual -Actual $launch.Environment["GSTheme"]["policy"] -Expected "ifUnset" -Message "Declarative packaged defaults should seed the theme only when unset."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+    }
+  }
+
+  It "fails shared validation when a semantic stage contract item is missing" {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-validation-contract-stage-" + [guid]::NewGuid().ToString("N"))
+    $stageRoot = Join-Path $tempRoot "stage"
+    $appPath = Join-Path $stageRoot "app\\SampleGNUstepApp.app\\SampleGNUstepApp.exe"
+    $resourcePath = Join-Path $stageRoot "app\\SampleGNUstepApp.app\\Resources\\Info-gnustep.plist"
+    $runtimeBinPath = Join-Path $stageRoot "runtime\\bin\\defaults.exe"
+    $metadataPath = Join-Path $stageRoot "metadata\\icons\\sample-icon.txt"
+    $manifestPath = $null
+    $threw = $false
+
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $appPath) | Out-Null
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $resourcePath) | Out-Null
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $runtimeBinPath) | Out-Null
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $metadataPath) | Out-Null
+    Set-Content -Path $appPath -Value "fixture"
+    Set-Content -Path $resourcePath -Value "fixture"
+    Set-Content -Path $runtimeBinPath -Value "fixture"
+    Set-Content -Path $metadataPath -Value "fixture"
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest["payload"]["stageRoot"] = $stageRoot
+        $manifest["outputs"]["root"] = (Join-Path $tempRoot "dist")
+        $manifest["outputs"]["packageRoot"] = (Join-Path $tempRoot "dist\\packages")
+        $manifest["outputs"]["logRoot"] = (Join-Path $tempRoot "dist\\logs")
+        $manifest["outputs"]["tempRoot"] = (Join-Path $tempRoot "dist\\tmp")
+        $manifest["outputs"]["validationRoot"] = (Join-Path $tempRoot "dist\\validation")
+        $manifest["validation"]["packageContract"] = @{
+          requiredContent = @(
+            @{
+              kind = "updater-helper"
+            }
+          )
+        }
+      }
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      try {
+        Invoke-GpSharedValidation -Context $context | Out-Null
+      } catch {
+        $threw = $true
+        Assert-GpMatch -Actual $_.Exception.Message -Pattern "Shared validation failed" -Message "Missing semantic stage contract items should fail shared validation."
+      }
+
+      Assert-GpTrue -Condition $threw -Message "Shared validation should fail when semantic contract content is missing from stage."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
 }

@@ -89,8 +89,83 @@ Describe "Host dependency contract" {
       $context = Get-GpManifestContext -Path $manifestPath
       $dependencies = Get-GpHostDependencies -Context $context
 
+      Assert-GpEqual -Actual @($dependencies.Groups.ProviderId) -Expected @("windows-msys2", "linux-apt") -Message "Resolved host dependency groups should track the active internal providers."
       Assert-GpEqual -Actual @($dependencies.WindowsMsys2Packages) -Expected @("mingw-w64-clang-x86_64-cmark") -Message "Resolved manifest should preserve declared Windows MSYS2 host dependencies."
       Assert-GpEqual -Actual @($dependencies.LinuxAptPackages) -Expected @("libcmark-dev") -Message "Resolved manifest should preserve declared Linux apt host dependencies."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+    }
+  }
+
+  It "layers reusable host dependency profiles without changing the manifest shape" {
+    $manifestPath = $null
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest["profiles"] = @("gnustep-gui", "gnustep-cmark")
+        $manifest["hostDependencies"] = @{
+          windows = @{
+            msys2Packages = @("mingw-w64-clang-x86_64-libxml2")
+          }
+          linux = @{
+            aptPackages = @("libxml2-dev")
+          }
+        }
+      }
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      $dependencies = Get-GpHostDependencies -Context $context
+
+      Assert-GpEqual -Actual @($dependencies.WindowsMsys2Packages) -Expected @("mingw-w64-clang-x86_64-libxml2") -Message "Manifest values should still override reusable host dependency profile defaults."
+      Assert-GpEqual -Actual @($dependencies.LinuxAptPackages) -Expected @("libxml2-dev") -Message "Manifest values should still win after reusable host dependency profiles are layered in."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+    }
+  }
+
+  It "builds workflow host setup plans from shared manifest data" {
+    $manifestPath = $null
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest["profiles"] = @("gnustep-gui", "gnustep-cmark")
+      }
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      $plan = Get-GpWorkflowHostSetupPlan -Context $context -Backend "msi" -AdditionalMsys2Packages "make mingw-w64-clang-x86_64-cmark"
+
+      Assert-GpEqual -Actual $plan.HostSetupMode -Expected "install-and-verify" -Message "Hosted workflow runs should report install-and-verify mode."
+      Assert-GpEqual -Actual $plan.ManifestMsys2PackageText -Expected "mingw-w64-clang-x86_64-cmark" -Message "Workflow planning should reuse manifest-driven MSYS2 packages."
+      Assert-GpEqual -Actual $plan.ResolvedMsys2PackageText -Expected "make mingw-w64-clang-x86_64-cmark" -Message "Workflow planning should deduplicate additive and manifest-provided MSYS2 packages."
+      Assert-GpEqual -Actual @($plan.Errors) -Expected @() -Message "Hosted workflow plans should not surface self-hosted additive-input errors."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+    }
+  }
+
+  It "rejects workflow-only additive package inputs on verify-only self-hosted runs" {
+    $manifestPath = $null
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest["profiles"] = @("gnustep-gui")
+      }
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      $plan = Get-GpWorkflowHostSetupPlan -Context $context -Backend "appimage" -SkipDefaultHostSetup -AdditionalAptPackages "libcmark-dev"
+
+      Assert-GpEqual -Actual $plan.HostSetupMode -Expected "verify-only" -Message "Self-hosted workflow runs should report verify-only mode when default setup is disabled."
+      Assert-GpTrue -Condition (@($plan.Errors).Count -eq 1) -Message "Self-hosted workflow planning should reject additive apt inputs that would otherwise be ignored."
+      Assert-GpMatch -Actual $plan.Errors[0] -Pattern "appimage-apt-packages" -Message "Self-hosted workflow planning should explain which additive input is invalid in verify-only mode."
     } finally {
       if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
         Remove-Item -Force $manifestPath

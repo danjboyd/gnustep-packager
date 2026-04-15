@@ -15,6 +15,7 @@ The package manifest tells `gnustep-packager`:
 - `pipeline`
 - `payload`
 - `launch`
+- `packagedDefaults`
 - `outputs`
 - `hostDependencies`
 - `validation`
@@ -29,6 +30,7 @@ Optional built-in defaults layers for common consumer shapes.
 Current built-in profiles:
 - `gnustep-gui`
 - `gnustep-document-viewer`
+- `gnustep-cmark`
 
 ## `package`
 Shared identity and display metadata.
@@ -95,6 +97,17 @@ Important fields:
 - `tempRoot`
 - `validationRoot`
 
+## `packagedDefaults`
+Declares semantic defaults that the packager should realize into generated
+launch/runtime artifacts and later validate against packaged results.
+
+Current fields:
+- `defaultTheme`
+
+`packagedDefaults.defaultTheme` currently realizes a `GSTheme` launch default
+with `policy: ifUnset` when the manifest does not already declare one. If the
+manifest also sets `launch.env.GSTheme`, the values must match.
+
 ## `hostDependencies`
 Declares app-specific host/build prerequisites that the shared tooling may
 verify or install before build and packaging steps begin.
@@ -107,6 +120,11 @@ These declarations are for host-side package managers and build prerequisites,
 not for staged runtime payload contents under `app/`, `runtime/`, or
 `metadata/`.
 
+Shared dependency sets may also come from manifest `profiles`. For example,
+`gnustep-cmark` layers in the common cmark host packages for both the Windows
+MSYS2 and Linux apt provider paths without changing the `hostDependencies`
+shape.
+
 ## `validation`
 Declares shared smoke validation behavior that is backend-neutral.
 
@@ -116,9 +134,23 @@ Important fields:
 - `smoke.requiredPaths`
 - `smoke.timeoutSeconds`
 - `logs.retainOnSuccess`
+- `packageContract.requiredContent`
+- `packageContract.requiredPaths`
+- `installedResult.requiredContent`
+- `installedResult.requiredPaths`
 
-Current shared smoke behavior only covers staged-layout validation. Backend
-artifact smoke strategies stay under backend-specific configuration.
+Shared validation still centers on staged-layout checks, but the manifest can
+now also declare semantic package contracts and installed-result assertions.
+
+Current semantic contract kinds:
+- `notice-report`
+- `update-runtime-config`
+- `default-theme`
+- `metadata-file`
+- `updater-helper`
+
+`requiredPaths` remains the low-level escape hatch for backend-specific or
+unusual packaged results that are easier to assert as concrete paths.
 
 ## `updates`
 Declares shared release-discovery settings for packaged apps.

@@ -27,6 +27,9 @@
 | Updates | AppImage update-feed and native update metadata | Supported | Package step emits `.update-feed.json` and passes native update info into `appimagetool` when updates are enabled |
 | Compliance | MSI notice report generation | Supported | Built from `compliance.runtimeNotices` into the installed metadata tree |
 | Compliance | AppImage notice report generation | Supported | Built from `compliance.runtimeNotices` into the AppDir metadata tree |
+| Contracts | Semantic package contract assertions | Supported | `validation.packageContract` currently supports notice reports, updater config, default theme, metadata files, and updater helpers |
+| Contracts | Installed or extracted result assertions | Supported | `validation.installedResult` runs on MSI install roots and extracted AppDir contents |
+| Defaults | Declarative packaged default theme | Supported | `packagedDefaults.defaultTheme` realizes and validates a `GSTheme` default with `ifUnset` policy |
 
 ## Validation Scope
 
@@ -47,3 +50,7 @@ The current support contract is intentionally narrow:
 - launchers assume a private `runtime/` tree by default
 - the example fixtures currently validate x64 Windows MSI and x64 Linux AppImage
 - consumers are expected to stage any shipped notice files explicitly
+- host dependency provisioning supports MSYS2 and Debian/Ubuntu-style apt paths only
+- automatic host dependency inference is explicitly out of scope
+- package contracts currently normalize a small supported semantic set; unusual
+  packaged layouts should still use path-based escape hatches

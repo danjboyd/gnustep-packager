@@ -124,6 +124,13 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $appRunText -Pattern 'export GSTheme="Adwaita"' -Message "AppRun should preserve the configured default theme value."
     }
 
+    It "satisfies the semantic AppImage package contract in the AppDir" {
+      $contract = Invoke-GpPackageContractAssertions -Context $script:packageContext -Scope "package" -Backend "appimage" -RootPath $script:packageResult.AppDirRoot
+
+      Assert-GpEqual -Actual $contract.HasIssues -Expected $false -Message "The AppDir should satisfy the declared package contract."
+      Assert-GpMatch -Actual ([string]::Join("`n", @($contract.Lines))) -Pattern "defaultTheme" -Message "The AppImage package contract should include declarative packaged defaults."
+    }
+
     It "renders desktop metadata and generated MIME types" {
       $desktopText = Get-Content -Raw -Path $script:packageResult.DesktopEntryPath
       $mimeText = Get-Content -Raw -Path $script:packageResult.MimePackagePath
@@ -180,6 +187,12 @@ Describe "AppImage backend" {
       Assert-GpTrue -Condition (Test-Path (Join-Path $script:validationResult.ExpandedRoot "sample-gnustep-linux.desktop")) -Message "Extracted AppImage should contain the desktop entry."
       Assert-GpEqual -Actual $script:validationResult.RuntimeClosureMode -Expected "strict" -Message "AppImage validation should enable strict runtime-closure checks by default."
       Assert-GpTrue -Condition (Test-Path $script:validationResult.RuntimeClosureLog) -Message "AppImage validation should emit a runtime-closure log."
+    }
+
+    It "satisfies the installed-result contract against the extracted AppImage" {
+      $contract = Invoke-GpPackageContractAssertions -Context $script:packageContext -Scope "installed" -Backend "appimage" -RootPath $script:validationResult.ExpandedRoot
+
+      Assert-GpEqual -Actual $contract.HasIssues -Expected $false -Message "Extracted AppImage contents should satisfy the declared installed-result contract."
     }
 
     It "runs the launch-only smoke path through the packaged AppImage" {

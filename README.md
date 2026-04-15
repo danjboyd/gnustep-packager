@@ -111,6 +111,27 @@ This repo also includes the full phase 10 updater path:
 - consumer docs and downstream release-publishing examples
 - dedicated updater contract and packaging regression coverage
 
+This repo also includes the phase 11 host dependency model plus phase 12A
+through phase 12D hardening:
+
+- manifest-driven host dependency verification and installation for Windows
+  MSYS2 and Linux apt providers
+- a shared internal provider abstraction used by local preflight and reusable
+  workflow setup planning
+- clearer reusable-workflow behavior for self-hosted `skip-default-host-setup`
+  runs, including explicit verify-only policy diagnostics
+- reusable host dependency profiles such as `gnustep-cmark` for downstream
+  manifest layering
+
+This repo now also includes the phase 12E through phase 12H packaging-contract
+and validation pass:
+
+- documented support boundaries for host provisioning and packaging contracts
+- manifest-level semantic package contracts and installed-result assertions
+- declarative packaged defaults such as a default theme carried through
+  generated launchers
+- backend validation hooks that check packaged or extracted results for drift
+
 Current sample verification covers:
 - `build`
 - `stage`

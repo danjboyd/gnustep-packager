@@ -40,6 +40,9 @@
     "workingDirectory": "app/MyGNUstepLinuxApp.app",
     "env": {}
   },
+  "packagedDefaults": {
+    "defaultTheme": "Adwaita"
+  },
   "outputs": {
     "root": "dist",
     "packageRoot": "dist/packages",
@@ -58,6 +61,20 @@
     },
     "logs": {
       "retainOnSuccess": true
+    },
+    "packageContract": {
+      "requiredContent": [
+        {
+          "kind": "notice-report"
+        }
+      ]
+    },
+    "installedResult": {
+      "requiredContent": [
+        {
+          "kind": "notice-report"
+        }
+      ]
     }
   },
   "integrations": {

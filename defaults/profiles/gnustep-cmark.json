@@ -1,0 +1,14 @@
+{
+  "hostDependencies": {
+    "windows": {
+      "msys2Packages": [
+        "mingw-w64-clang-x86_64-cmark"
+      ]
+    },
+    "linux": {
+      "aptPackages": [
+        "libcmark-dev"
+      ]
+    }
+  }
+}

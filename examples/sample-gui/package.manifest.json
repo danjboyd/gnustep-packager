@@ -51,6 +51,9 @@
       }
     }
   },
+  "packagedDefaults": {
+    "defaultTheme": "WinUXTheme"
+  },
   "outputs": {
     "root": "dist",
     "packageRoot": "dist/packages",
@@ -70,6 +73,27 @@
     },
     "logs": {
       "retainOnSuccess": true
+    },
+    "packageContract": {
+      "requiredContent": [
+        {
+          "kind": "notice-report"
+        },
+        {
+          "kind": "metadata-file",
+          "path": "metadata/icons/sample-icon.txt"
+        }
+      ]
+    },
+    "installedResult": {
+      "requiredContent": [
+        {
+          "kind": "notice-report"
+        }
+      ],
+      "requiredPaths": [
+        "metadata/icons/sample-icon.txt"
+      ]
     }
   },
   "integrations": {

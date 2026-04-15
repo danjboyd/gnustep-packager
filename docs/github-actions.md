@@ -39,7 +39,7 @@ Default MSI MSYS2 baseline:
 Manifest-declared Windows host packages under
 `hostDependencies.windows.msys2Packages` are installed automatically. The
 `msys2-packages` input remains available as an additive override or temporary
-escape hatch.
+escape hatch while default host setup is enabled.
 
 Default AppImage host packages:
 
@@ -50,6 +50,11 @@ Manifest-declared Linux host packages under `hostDependencies.linux.aptPackages`
 are added automatically. Override or extend that list through
 `appimage-apt-packages`, or set
 `skip-default-host-setup: true` on a pre-provisioned self-hosted runner.
+
+When `skip-default-host-setup` is `true`, the workflow does not apply
+`msys2-packages` or `appimage-apt-packages`. In that mode, app-specific host
+packages should come from the manifest or from the caller's preflight logic so
+the later shared verification step sees the same declared contract.
 
 ## Caller Preflight
 The reusable workflow can run caller-owned host/bootstrap logic after checkout
@@ -156,7 +161,9 @@ When default host setup is enabled, the workflow also passes
 host preflight can repair missing app-specific packages before build starts.
 On self-hosted runs with `skip-default-host-setup: true`, manifest-driven host
 preflight still runs, but it verifies dependencies instead of installing them
-automatically.
+automatically. The workflow now emits a host-setup policy summary during
+manifest resolution so the logs state whether the run is in install-and-verify
+or verify-only mode.
 
 ## Release Publishing Follow-On
 The reusable workflow stops at packaging, validation, and artifact upload.

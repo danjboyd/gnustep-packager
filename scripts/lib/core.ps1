@@ -316,7 +316,8 @@ function Resolve-GpManifestData {
   )
 
   $defaults = Get-GpDefaultManifest -Profiles (Get-GpRequestedProfiles -Manifest $Manifest)
-  return (Merge-GpHashtable -Base $defaults -Overlay $Manifest)
+  $resolved = Merge-GpHashtable -Base $defaults -Overlay $Manifest
+  return (Apply-GpDeclarativePackagedDefaults -Manifest $resolved)
 }
 
 function Resolve-GpPackageVersionOverride {
@@ -374,32 +375,152 @@ function Get-GpHostPlatform {
   return "unknown"
 }
 
+function Get-GpHostDependencyProviders {
+  $providers = [System.Collections.Generic.List[psobject]]::new()
+
+  $providers.Add([pscustomobject]@{
+    Id                      = "windows-msys2"
+    Platform                = "windows"
+    PackageManager          = "msys2"
+    ManifestPlatformKey     = "windows"
+    ManifestPackageListKey  = "msys2Packages"
+    WorkflowInputName       = "msys2-packages"
+    WorkflowOutputPrefix    = "msys2"
+    DisplayName             = "Windows MSYS2"
+  }) | Out-Null
+
+  $providers.Add([pscustomobject]@{
+    Id                      = "linux-apt"
+    Platform                = "linux"
+    PackageManager          = "apt"
+    ManifestPlatformKey     = "linux"
+    ManifestPackageListKey  = "aptPackages"
+    WorkflowInputName       = "appimage-apt-packages"
+    WorkflowOutputPrefix    = "apt"
+    DisplayName             = "Linux apt"
+  }) | Out-Null
+
+  return @($providers.ToArray())
+}
+
+function Get-GpHostDependencyProvider {
+  param(
+    [string]$Id,
+    [string]$Platform,
+    [string]$PackageManager
+  )
+
+  foreach ($provider in @(Get-GpHostDependencyProviders)) {
+    if (-not [string]::IsNullOrWhiteSpace($Id) -and $provider.Id -eq $Id) {
+      return $provider
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Platform) -and
+        -not [string]::IsNullOrWhiteSpace($PackageManager) -and
+        $provider.Platform -eq $Platform -and
+        $provider.PackageManager -eq $PackageManager) {
+      return $provider
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($Id)) {
+    throw "Unsupported host dependency provider: $Id"
+  }
+
+  throw "Unsupported host dependency provider for platform '$Platform' and package manager '$PackageManager'."
+}
+
+function Get-GpNonEmptyStringList {
+  param(
+    [AllowNull()]
+    [object[]]$Values
+  )
+
+  $items = [System.Collections.Generic.List[string]]::new()
+  foreach ($value in @($Values)) {
+    if ($value -is [string] -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+      $items.Add(([string]$value).Trim()) | Out-Null
+    }
+  }
+
+  return [string[]]@($items.ToArray())
+}
+
+function Join-GpUniquePackageList {
+  param(
+    [AllowNull()]
+    [object[]]$Values
+  )
+
+  $items = [System.Collections.Generic.List[string]]::new()
+  foreach ($value in @($Values)) {
+    if ($null -eq $value) {
+      continue
+    }
+
+    foreach ($line in @(([string]$value) -split '\s+')) {
+      $trimmed = $line.Trim()
+      if (-not [string]::IsNullOrWhiteSpace($trimmed) -and -not $items.Contains($trimmed)) {
+        $items.Add($trimmed) | Out-Null
+      }
+    }
+  }
+
+  return [string]::Join(' ', @($items))
+}
+
+function Get-GpManifestHostDependencyGroups {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest
+  )
+
+  $hostDependencies = if ($Manifest.Contains("hostDependencies") -and ($Manifest["hostDependencies"] -is [System.Collections.IDictionary])) {
+    $Manifest["hostDependencies"]
+  } else {
+    @{}
+  }
+
+  $groups = [System.Collections.Generic.List[psobject]]::new()
+  foreach ($provider in @(Get-GpHostDependencyProviders)) {
+    $platformConfig = if ($hostDependencies.Contains($provider.ManifestPlatformKey) -and ($hostDependencies[$provider.ManifestPlatformKey] -is [System.Collections.IDictionary])) {
+      $hostDependencies[$provider.ManifestPlatformKey]
+    } else {
+      @{}
+    }
+
+    $packages = @(Get-GpNonEmptyStringList -Values @($platformConfig[$provider.ManifestPackageListKey]))
+    if ($packages.Count -le 0) {
+      continue
+    }
+
+    $groups.Add([pscustomobject]@{
+      ProviderId             = $provider.Id
+      Platform               = $provider.Platform
+      PackageManager         = $provider.PackageManager
+      ManifestPlatformKey    = $provider.ManifestPlatformKey
+      ManifestPackageListKey = $provider.ManifestPackageListKey
+      Packages               = [string[]]@($packages)
+    }) | Out-Null
+  }
+
+  return @($groups.ToArray())
+}
+
 function Get-GpHostDependencies {
   param(
     [Parameter(Mandatory = $true)]
     [psobject]$Context
   )
 
-  $hostDependencies = if ($Context.Manifest.Contains("hostDependencies") -and ($Context.Manifest["hostDependencies"] -is [System.Collections.IDictionary])) {
-    $Context.Manifest["hostDependencies"]
-  } else {
-    @{}
-  }
-
-  $windows = if ($hostDependencies.Contains("windows") -and ($hostDependencies["windows"] -is [System.Collections.IDictionary])) {
-    $hostDependencies["windows"]
-  } else {
-    @{}
-  }
-  $linux = if ($hostDependencies.Contains("linux") -and ($hostDependencies["linux"] -is [System.Collections.IDictionary])) {
-    $hostDependencies["linux"]
-  } else {
-    @{}
-  }
+  $groups = @(Get-GpManifestHostDependencyGroups -Manifest $Context.Manifest)
+  $windowsMsys2 = @($groups | Where-Object { $_.ProviderId -eq "windows-msys2" } | Select-Object -First 1)
+  $linuxApt = @($groups | Where-Object { $_.ProviderId -eq "linux-apt" } | Select-Object -First 1)
 
   return [pscustomobject]@{
-    WindowsMsys2Packages = [string[]]@($windows["msys2Packages"] | Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace([string]$_) })
-    LinuxAptPackages = [string[]]@($linux["aptPackages"] | Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace([string]$_) })
+    Groups = @($groups)
+    WindowsMsys2Packages = [string[]]@($(if ($windowsMsys2.Count -gt 0) { $windowsMsys2[0].Packages } else { @() }))
+    LinuxAptPackages = [string[]]@($(if ($linuxApt.Count -gt 0) { $linuxApt[0].Packages } else { @() }))
   }
 }
 
@@ -411,23 +532,17 @@ function Get-GpHostDependencyPlan {
   )
 
   $platform = Get-GpHostPlatform
-  $dependencies = Get-GpHostDependencies -Context $Context
   $groups = [System.Collections.Generic.List[psobject]]::new()
+  foreach ($group in @(Get-GpManifestHostDependencyGroups -Manifest $Context.Manifest)) {
+    if ($group.Platform -ne $platform) {
+      continue
+    }
 
-  if ($platform -eq "windows" -and @($dependencies.WindowsMsys2Packages).Count -gt 0) {
     $groups.Add([pscustomobject]@{
-      Platform = "windows"
-      PackageManager = "msys2"
-      Packages = [string[]]@($dependencies.WindowsMsys2Packages)
-      Backend = $(if (-not [string]::IsNullOrWhiteSpace($Backend)) { $Backend } else { $null })
-    }) | Out-Null
-  }
-
-  if ($platform -eq "linux" -and @($dependencies.LinuxAptPackages).Count -gt 0) {
-    $groups.Add([pscustomobject]@{
-      Platform = "linux"
-      PackageManager = "apt"
-      Packages = [string[]]@($dependencies.LinuxAptPackages)
+      ProviderId = $group.ProviderId
+      Platform = $group.Platform
+      PackageManager = $group.PackageManager
+      Packages = [string[]]@($group.Packages)
       Backend = $(if (-not [string]::IsNullOrWhiteSpace($Backend)) { $Backend } else { $null })
     }) | Out-Null
   }
@@ -435,6 +550,54 @@ function Get-GpHostDependencyPlan {
   return [pscustomobject]@{
     HostPlatform = $platform
     Groups = @($groups.ToArray())
+  }
+}
+
+function Get-GpWorkflowHostSetupPlan {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [string]$Backend,
+    [switch]$SkipDefaultHostSetup,
+    [string]$AdditionalMsys2Packages,
+    [string]$AdditionalAptPackages
+  )
+
+  $hostDependencies = Get-GpHostDependencies -Context $Context
+  $errors = [System.Collections.Generic.List[string]]::new()
+  $mode = if ($SkipDefaultHostSetup) { "verify-only" } else { "install-and-verify" }
+
+  $manifestMsys2Packages = [string[]]@($hostDependencies.WindowsMsys2Packages)
+  $manifestAptPackages = [string[]]@($hostDependencies.LinuxAptPackages)
+  $additionalMsys2Text = Join-GpUniquePackageList -Values @($AdditionalMsys2Packages)
+  $additionalAptText = Join-GpUniquePackageList -Values @($AdditionalAptPackages)
+
+  if ($SkipDefaultHostSetup -and $Backend -eq "msi" -and -not [string]::IsNullOrWhiteSpace($additionalMsys2Text)) {
+    $errors.Add('`msys2-packages` is not applied when `skip-default-host-setup: true`. Declare app-specific MSYS2 packages under `hostDependencies.windows.msys2Packages` or install them in your caller preflight.') | Out-Null
+  }
+
+  if ($SkipDefaultHostSetup -and $Backend -eq "appimage" -and -not [string]::IsNullOrWhiteSpace($additionalAptText)) {
+    $errors.Add('`appimage-apt-packages` is not applied when `skip-default-host-setup: true`. Declare app-specific apt packages under `hostDependencies.linux.aptPackages` or install them in your caller preflight.') | Out-Null
+  }
+
+  $summary = if ($SkipDefaultHostSetup) {
+    "Default host setup disabled; the workflow will rely on caller preflight and shared manifest-driven verification on the target runner."
+  } else {
+    "Default host setup enabled; the workflow will install the documented backend baseline plus manifest-declared and additive host packages before packaging."
+  }
+
+  return [pscustomobject]@{
+    Backend = $Backend
+    HostSetupMode = $mode
+    Summary = $summary
+    ShouldInstallManifestDependencies = (-not [bool]$SkipDefaultHostSetup)
+    ManifestMsys2Packages = [string[]]@($manifestMsys2Packages)
+    ManifestAptPackages = [string[]]@($manifestAptPackages)
+    ManifestMsys2PackageText = Join-GpUniquePackageList -Values @($manifestMsys2Packages)
+    ManifestAptPackageText = Join-GpUniquePackageList -Values @($manifestAptPackages)
+    ResolvedMsys2PackageText = Join-GpUniquePackageList -Values @($AdditionalMsys2Packages, (Join-GpUniquePackageList -Values @($manifestMsys2Packages)))
+    ResolvedAptPackageText = Join-GpUniquePackageList -Values @($AdditionalAptPackages, (Join-GpUniquePackageList -Values @($manifestAptPackages)))
+    Errors = [string[]]@($errors.ToArray())
   }
 }
 
@@ -508,6 +671,56 @@ function Get-GpNormalizedLaunchEnvironment {
   }
 
   return $normalized
+}
+
+function Get-GpPackagedDefaults {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest
+  )
+
+  $packagedDefaults = if ($Manifest.Contains("packagedDefaults") -and ($Manifest["packagedDefaults"] -is [System.Collections.IDictionary])) {
+    $Manifest["packagedDefaults"]
+  } else {
+    @{}
+  }
+
+  $defaultTheme = if ($packagedDefaults.Contains("defaultTheme") -and -not [string]::IsNullOrWhiteSpace([string]$packagedDefaults["defaultTheme"])) {
+    [string]$packagedDefaults["defaultTheme"]
+  } else {
+    $null
+  }
+
+  return [pscustomobject]@{
+    DefaultTheme = $defaultTheme
+  }
+}
+
+function Apply-GpDeclarativePackagedDefaults {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest
+  )
+
+  $resolved = Copy-GpValue -Value $Manifest
+  $packagedDefaults = Get-GpPackagedDefaults -Manifest $resolved
+  if ([string]::IsNullOrWhiteSpace([string]$packagedDefaults.DefaultTheme)) {
+    return $resolved
+  }
+
+  if (-not $resolved.Contains("launch") -or -not ($resolved["launch"] -is [System.Collections.IDictionary])) {
+    $resolved["launch"] = @{}
+  }
+
+  if (-not $resolved["launch"].Contains("env") -or -not ($resolved["launch"]["env"] -is [System.Collections.IDictionary])) {
+    $resolved["launch"]["env"] = @{}
+  }
+
+  if (-not $resolved["launch"]["env"].Contains("GSTheme")) {
+    $resolved["launch"]["env"]["GSTheme"] = New-GpLaunchEnvironmentEntry -Value $packagedDefaults.DefaultTheme -Policy "ifUnset"
+  }
+
+  return $resolved
 }
 
 function Test-GpManifest {
@@ -605,6 +818,79 @@ function Test-GpManifest {
 
     $parsedValue = 0
     return [int]::TryParse([string]$Value, [ref]$parsedValue) -and ($parsedValue -ge $Minimum)
+  }
+
+  function Test-PackageContractContentItem {
+    param(
+      [AllowNull()]
+      [object]$Item,
+      [string]$Label
+    )
+
+    if (-not ($Item -is [System.Collections.IDictionary])) {
+      Add-Issue "$Label entries must be objects."
+      return
+    }
+
+    if (-not $Item.Contains("kind") -or -not (Test-StringValue $Item["kind"])) {
+      Add-Issue "$Label.kind must be a non-empty string."
+      return
+    }
+
+    $kind = [string]$Item["kind"]
+    $validKinds = @("notice-report", "update-runtime-config", "default-theme", "metadata-file", "updater-helper")
+    if ($kind -notin $validKinds) {
+      Add-Issue "$Label.kind must be one of: $([string]::Join(', ', $validKinds))."
+    }
+
+    if ($Item.Contains("name") -and -not (Test-StringValue $Item["name"])) {
+      Add-Issue "$Label.name must be a non-empty string when present."
+    }
+
+    if ($Item.Contains("value") -and -not (Test-StringValue $Item["value"])) {
+      Add-Issue "$Label.value must be a non-empty string when present."
+    }
+
+    if ($Item.Contains("path") -and -not (Test-StringValue $Item["path"])) {
+      Add-Issue "$Label.path must be a non-empty string when present."
+    }
+
+    if ($kind -eq "metadata-file" -and (-not $Item.Contains("path") -or -not (Test-StringValue $Item["path"]))) {
+      Add-Issue "$Label.path is required when $Label.kind is metadata-file."
+    }
+  }
+
+  function Test-PackageContractSection {
+    param(
+      [AllowNull()]
+      [object]$Section,
+      [string]$Label
+    )
+
+    if ($null -eq $Section) {
+      return
+    }
+
+    if (-not ($Section -is [System.Collections.IDictionary])) {
+      Add-Issue "$Label must be an object when present."
+      return
+    }
+
+    if ($Section.Contains("requiredPaths")) {
+      foreach ($path in @($Section["requiredPaths"])) {
+        if (-not (Test-StringValue $path)) {
+          Add-Issue "$Label.requiredPaths must contain non-empty strings."
+        }
+      }
+    }
+
+    if ($Section.Contains("requiredContent")) {
+      $index = 0
+      foreach ($item in @($Section["requiredContent"])) {
+        Test-PackageContractContentItem -Item $item -Label ("{0}.requiredContent[{1}]" -f $Label, $index)
+        $index += 1
+      }
+    }
   }
 
   if (-not $Manifest.Contains("schemaVersion")) {
@@ -713,6 +999,48 @@ function Test-GpManifest {
     }
   }
 
+  if ($Manifest.Contains("packagedDefaults")) {
+    if (-not ($Manifest["packagedDefaults"] -is [System.Collections.IDictionary])) {
+      Add-Issue "packagedDefaults must be an object when present."
+    } else {
+      $packagedDefaults = $Manifest["packagedDefaults"]
+      if ($packagedDefaults.Contains("defaultTheme") -and -not (Test-StringValue $packagedDefaults["defaultTheme"])) {
+        Add-Issue "packagedDefaults.defaultTheme must be a non-empty string when present."
+      }
+
+      if ($packagedDefaults.Contains("defaultTheme") -and (Test-StringValue $packagedDefaults["defaultTheme"])) {
+        $launchEnv = if ($Manifest.Contains("launch") -and ($Manifest["launch"] -is [System.Collections.IDictionary]) -and $Manifest["launch"].Contains("env") -and ($Manifest["launch"]["env"] -is [System.Collections.IDictionary])) {
+          $Manifest["launch"]["env"]
+        } else {
+          @{}
+        }
+
+        if ($launchEnv.Contains("GSTheme")) {
+          $declaredThemeValue = $null
+          $declaredThemePolicy = "override"
+          $themeEntry = $launchEnv["GSTheme"]
+          if ($themeEntry -is [System.Collections.IDictionary]) {
+            if ($themeEntry.Contains("value")) {
+              $declaredThemeValue = [string]$themeEntry["value"]
+            }
+            if ($themeEntry.Contains("policy") -and (Test-StringValue $themeEntry["policy"])) {
+              $declaredThemePolicy = [string]$themeEntry["policy"]
+            }
+          } elseif ($themeEntry -is [string]) {
+            $declaredThemeValue = [string]$themeEntry
+          }
+
+          if ($declaredThemeValue -ne [string]$packagedDefaults["defaultTheme"]) {
+            Add-Issue "packagedDefaults.defaultTheme must match launch.env.GSTheme when both are present."
+          }
+          if ($declaredThemePolicy -ne "ifUnset") {
+            Add-Issue "launch.env.GSTheme.policy must be 'ifUnset' when packagedDefaults.defaultTheme is declared."
+          }
+        }
+      }
+    }
+  }
+
   $validation = Require-Object -Parent $Manifest -Key "validation" -Label "validation"
   if ($validation) {
     $smoke = Require-Object -Parent $validation -Key "smoke" -Label "validation.smoke"
@@ -725,6 +1053,9 @@ function Test-GpManifest {
     if ($logs) {
       Require-Boolean -Parent $logs -Key "retainOnSuccess" -Label "validation.logs.retainOnSuccess"
     }
+
+    Test-PackageContractSection -Section $(if ($validation.Contains("packageContract")) { $validation["packageContract"] } else { $null }) -Label "validation.packageContract"
+    Test-PackageContractSection -Section $(if ($validation.Contains("installedResult")) { $validation["installedResult"] } else { $null }) -Label "validation.installedResult"
   }
 
   if ($Manifest.Contains("updates")) {
@@ -1728,6 +2059,34 @@ function Install-GpAptPackages {
   }
 }
 
+function Get-GpMissingHostDependencyPackages {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Provider,
+    [string[]]$Packages = @()
+  )
+
+  switch ($Provider.PackageManager) {
+    "msys2" { return @(Get-GpMissingMsys2Packages -Packages @($Packages)) }
+    "apt" { return @(Get-GpMissingAptPackages -Packages @($Packages)) }
+    default { throw "Unsupported host package manager: $($Provider.PackageManager)" }
+  }
+}
+
+function Install-GpHostDependencyPackages {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Provider,
+    [string[]]$Packages = @()
+  )
+
+  switch ($Provider.PackageManager) {
+    "msys2" { Install-GpMsys2Packages -Packages @($Packages); break }
+    "apt" { Install-GpAptPackages -Packages @($Packages); break }
+    default { throw "Unsupported host package manager: $($Provider.PackageManager)" }
+  }
+}
+
 function Invoke-GpHostDependencyPreflight {
   param(
     [Parameter(Mandatory = $true)]
@@ -1760,19 +2119,14 @@ function Invoke-GpHostDependencyPreflight {
   }
 
   foreach ($group in @($plan.Groups)) {
+    $provider = Get-GpHostDependencyProvider -Id $group.ProviderId
     $lines.Add(("Checking {0} packages: {1}" -f $group.PackageManager, ([string]::Join(", ", @($group.Packages))))) | Out-Null
     if ($DryRun) {
       $lines.Add(("DRYRUN  would verify {0} packages" -f $group.PackageManager)) | Out-Null
       continue
     }
 
-    $missing = @(
-      switch ($group.PackageManager) {
-      "msys2" { @(Get-GpMissingMsys2Packages -Packages @($group.Packages)) }
-      "apt" { @(Get-GpMissingAptPackages -Packages @($group.Packages)) }
-      default { throw "Unsupported host package manager: $($group.PackageManager)" }
-      }
-    )
+    $missing = @(Get-GpMissingHostDependencyPackages -Provider $provider -Packages @($group.Packages))
 
     if ($missing.Count -eq 0) {
       $lines.Add(("OK      all declared {0} packages are already present" -f $group.PackageManager)) | Out-Null
@@ -1786,11 +2140,7 @@ function Invoke-GpHostDependencyPreflight {
     }
 
     $lines.Add(("INSTALL {0}" -f ([string]::Join(", ", $missing)))) | Out-Null
-    switch ($group.PackageManager) {
-      "msys2" { Install-GpMsys2Packages -Packages $missing }
-      "apt" { Install-GpAptPackages -Packages $missing }
-      default { throw "Unsupported host package manager: $($group.PackageManager)" }
-    }
+    Install-GpHostDependencyPackages -Provider $provider -Packages $missing
     $lines.Add(("OK      installed missing {0} packages" -f $group.PackageManager)) | Out-Null
   }
 
@@ -1896,6 +2246,312 @@ function Get-GpLaunchContract {
     Environment           = [hashtable](Get-GpNormalizedLaunchEnvironment -Environment $launch["env"])
     WindowsEntryPath      = Convert-GpNativePathToWindows -Path $entryPath
     PosixEntryPath        = Convert-GpNativePathToPosix -Path $entryPath
+  }
+}
+
+function Get-GpValidationSection {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest,
+    [Parameter(Mandatory = $true)]
+    [string]$SectionName
+  )
+
+  if ($Manifest.Contains("validation") -and
+      ($Manifest["validation"] -is [System.Collections.IDictionary]) -and
+      $Manifest["validation"].Contains($SectionName) -and
+      ($Manifest["validation"][$SectionName] -is [System.Collections.IDictionary])) {
+    return $Manifest["validation"][$SectionName]
+  }
+
+  return @{}
+}
+
+function Get-GpPackageContractDeclarations {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [ValidateSet("packageContract", "installedResult")]
+    [string]$SectionName = "packageContract"
+  )
+
+  $manifest = $Context.Manifest
+  $section = Get-GpValidationSection -Manifest $manifest -SectionName $SectionName
+  $declarations = [System.Collections.Generic.List[psobject]]::new()
+  $autoKinds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+  $index = 0
+  foreach ($item in @($section["requiredContent"])) {
+    if (-not ($item -is [System.Collections.IDictionary])) {
+      $index += 1
+      continue
+    }
+
+    $kind = if ($item.Contains("kind")) { [string]$item["kind"] } else { $null }
+    if ([string]::IsNullOrWhiteSpace($kind)) {
+      $index += 1
+      continue
+    }
+
+    $null = $autoKinds.Add($kind)
+    $declarations.Add([pscustomobject]@{
+      Kind = $kind
+      Path = $(if ($item.Contains("path")) { [string]$item["path"] } else { $null })
+      Value = $(if ($item.Contains("value")) { [string]$item["value"] } else { $null })
+      Name = $(if ($item.Contains("name")) { [string]$item["name"] } else { $null })
+      Source = ("validation.{0}.requiredContent[{1}]" -f $SectionName, $index)
+    }) | Out-Null
+    $index += 1
+  }
+
+  $packagedDefaults = Get-GpPackagedDefaults -Manifest $manifest
+  if (-not [string]::IsNullOrWhiteSpace([string]$packagedDefaults.DefaultTheme) -and -not $autoKinds.Contains("default-theme")) {
+    $declarations.Add([pscustomobject]@{
+      Kind = "default-theme"
+      Path = $null
+      Value = [string]$packagedDefaults.DefaultTheme
+      Name = "defaultTheme"
+      Source = "packagedDefaults.defaultTheme"
+    }) | Out-Null
+  }
+
+  return @($declarations.ToArray())
+}
+
+function Get-GpValidationRelativePaths {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [ValidateSet("packageContract", "installedResult")]
+    [string]$SectionName
+  )
+
+  $section = Get-GpValidationSection -Manifest $Context.Manifest -SectionName $SectionName
+  return [string[]]@($section["requiredPaths"] | Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace([string]$_) })
+}
+
+function Get-GpAppPayloadRoot {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RootPath,
+    [Parameter(Mandatory = $true)]
+    [string]$Backend
+  )
+
+  if ($Backend -eq "appimage") {
+    return (Join-Path $RootPath "usr")
+  }
+
+  return $RootPath
+}
+
+function Get-GpUpdaterHelperCandidates {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$EntryRelativePath
+  )
+
+  $entryDirectory = Split-Path -Parent $EntryRelativePath
+  if ([string]::IsNullOrWhiteSpace($entryDirectory)) {
+    $entryDirectory = "."
+  }
+
+  return [string[]]@(
+    (Join-Path $entryDirectory "gp-update-helper"),
+    (Join-Path $entryDirectory "gp-update-helper.exe"),
+    (Join-Path (Join-Path $entryDirectory "Helpers") "gp-update-helper"),
+    (Join-Path (Join-Path $entryDirectory "Helpers") "gp-update-helper.exe")
+  )
+}
+
+function Get-GpDefaultThemeContractValue {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [AllowNull()]
+    [string]$DeclaredValue
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($DeclaredValue)) {
+    return $DeclaredValue
+  }
+
+  $launch = Get-GpLaunchContract -Context $Context
+  if ($launch.Environment.ContainsKey("GSTheme") -and -not [string]::IsNullOrWhiteSpace([string]$launch.Environment["GSTheme"]["value"])) {
+    return [string]$launch.Environment["GSTheme"]["value"]
+  }
+
+  return $null
+}
+
+function Invoke-GpPackageContractAssertions {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [ValidateSet("stage", "package", "installed")]
+    [string]$Scope,
+    [string]$Backend,
+    [string]$RootPath,
+    [string]$LogPath,
+    [switch]$Append
+  )
+
+  $manifest = $Context.Manifest
+  $payload = $manifest["payload"]
+  $launch = Get-GpLaunchContract -Context $Context
+  $sectionName = if ($Scope -eq "installed") { "installedResult" } else { "packageContract" }
+  $lines = [System.Collections.Generic.List[string]]::new()
+  $issues = [System.Collections.Generic.List[string]]::new()
+  $declarations = @(Get-GpPackageContractDeclarations -Context $Context -SectionName $sectionName)
+  $payloadRoot = if ($Scope -eq "stage") { $launch.StageRoot } elseif (-not [string]::IsNullOrWhiteSpace($Backend)) { Get-GpAppPayloadRoot -RootPath $RootPath -Backend $Backend } else { $RootPath }
+  $phaseLabel = if ($Scope -eq "stage") { "stage contract" } elseif ($Scope -eq "package") { "$Backend package contract" } else { "$Backend installed-result contract" }
+
+  foreach ($entry in @($declarations)) {
+    $label = if (-not [string]::IsNullOrWhiteSpace([string]$entry.Name)) { $entry.Name } else { $entry.Kind }
+    switch ($entry.Kind) {
+      "metadata-file" {
+        $path = Resolve-GpPathRelativeToBase -BasePath $payloadRoot -Path $entry.Path
+        if (Test-Path $path) {
+          $lines.Add(("OK      {0}: {1}" -f $label, $path)) | Out-Null
+        } else {
+          $message = ("MISSING {0}: {1}" -f $label, $path)
+          $lines.Add($message) | Out-Null
+          $issues.Add($message) | Out-Null
+        }
+      }
+
+      "updater-helper" {
+        $matches = [System.Collections.Generic.List[string]]::new()
+        foreach ($candidate in @(Get-GpUpdaterHelperCandidates -EntryRelativePath $launch.EntryRelativePath)) {
+          $candidatePath = Resolve-GpPathRelativeToBase -BasePath $payloadRoot -Path $candidate
+          if (Test-Path $candidatePath) {
+            $matches.Add($candidatePath) | Out-Null
+          }
+        }
+
+        if ($matches.Count -gt 0) {
+          $lines.Add(("OK      {0}: {1}" -f $label, ([string]::Join(", ", @($matches.ToArray()))))) | Out-Null
+        } else {
+          $message = ("MISSING {0}: no updater helper found near {1}" -f $label, $launch.EntryRelativePath)
+          $lines.Add($message) | Out-Null
+          $issues.Add($message) | Out-Null
+        }
+      }
+
+      "notice-report" {
+        if ($Scope -eq "stage") {
+          $lines.Add(("SKIP    {0}: generated during packaging" -f $label)) | Out-Null
+          continue
+        }
+
+        $reportPath = Resolve-GpPathRelativeToBase -BasePath $payloadRoot -Path (Join-Path ([string]$payload["metadataRoot"]) "THIRD-PARTY-NOTICES.txt")
+        if (Test-Path $reportPath) {
+          $lines.Add(("OK      {0}: {1}" -f $label, $reportPath)) | Out-Null
+        } else {
+          $message = ("MISSING {0}: {1}" -f $label, $reportPath)
+          $lines.Add($message) | Out-Null
+          $issues.Add($message) | Out-Null
+        }
+      }
+
+      "update-runtime-config" {
+        if ($Scope -eq "stage") {
+          $lines.Add(("SKIP    {0}: generated during packaging" -f $label)) | Out-Null
+          continue
+        }
+
+        $configPath = Resolve-GpPathRelativeToBase -BasePath $payloadRoot -Path (Get-GpUpdateRuntimeConfigRelativePath -MetadataRootRelative ([string]$payload["metadataRoot"]))
+        if (Test-Path $configPath) {
+          $lines.Add(("OK      {0}: {1}" -f $label, $configPath)) | Out-Null
+        } else {
+          $message = ("MISSING {0}: {1}" -f $label, $configPath)
+          $lines.Add($message) | Out-Null
+          $issues.Add($message) | Out-Null
+        }
+      }
+
+      "default-theme" {
+        $themeValue = Get-GpDefaultThemeContractValue -Context $Context -DeclaredValue $entry.Value
+        if ([string]::IsNullOrWhiteSpace($themeValue)) {
+          $message = ("MISSING {0}: no theme value is available from the manifest contract" -f $label)
+          $lines.Add($message) | Out-Null
+          $issues.Add($message) | Out-Null
+          continue
+        }
+
+        if ($Scope -eq "stage") {
+          $themeEntry = $launch.Environment["GSTheme"]
+          $actualValue = if ($null -ne $themeEntry) { [string]$themeEntry["value"] } else { $null }
+          $actualPolicy = if ($null -ne $themeEntry) { [string]$themeEntry["policy"] } else { $null }
+          if (($actualValue -eq $themeValue) -and ($actualPolicy -eq "ifUnset")) {
+            $lines.Add(("OK      {0}: launch.env.GSTheme={1} (ifUnset)" -f $label, $themeValue)) | Out-Null
+          } else {
+            $message = ("MISSING {0}: expected launch.env.GSTheme={1} with policy ifUnset" -f $label, $themeValue)
+            $lines.Add($message) | Out-Null
+            $issues.Add($message) | Out-Null
+          }
+          continue
+        }
+
+        if ($Backend -eq "msi") {
+          $config = Get-GpMsiConfig -Context $Context
+          $configPath = Join-Path $RootPath $config.LauncherConfigName
+          $pattern = [regex]::Escape(("env=ifUnset|GSTheme={0}" -f $themeValue))
+          if ((Test-Path $configPath) -and ((Get-Content -Raw -Path $configPath) -match $pattern)) {
+            $lines.Add(("OK      {0}: {1}" -f $label, $configPath)) | Out-Null
+          } else {
+            $message = ("MISSING {0}: launcher config does not preserve GSTheme={1} at {2}" -f $label, $themeValue, $configPath)
+            $lines.Add($message) | Out-Null
+            $issues.Add($message) | Out-Null
+          }
+        } elseif ($Backend -eq "appimage") {
+          $appRunPath = Join-Path $RootPath "AppRun"
+          $appRunText = if (Test-Path $appRunPath) { Get-Content -Raw -Path $appRunPath } else { "" }
+          $policyPattern = 'if \[ -z "\$\{GSTheme\+x\}" \]; then'
+          $valuePattern = [regex]::Escape(("export GSTheme=""{0}""" -f $themeValue))
+          if (($appRunText -match $policyPattern) -and ($appRunText -match $valuePattern)) {
+            $lines.Add(("OK      {0}: {1}" -f $label, $appRunPath)) | Out-Null
+          } else {
+            $message = ("MISSING {0}: AppRun does not preserve GSTheme={1} at {2}" -f $label, $themeValue, $appRunPath)
+            $lines.Add($message) | Out-Null
+            $issues.Add($message) | Out-Null
+          }
+        }
+      }
+    }
+  }
+
+  foreach ($relativePath in @(Get-GpValidationRelativePaths -Context $Context -SectionName $sectionName)) {
+    if ($Scope -eq "stage") {
+      continue
+    }
+
+    $path = Resolve-GpPathRelativeToBase -BasePath $RootPath -Path $relativePath
+    if (Test-Path $path) {
+      $lines.Add(("OK      path:{0} -> {1}" -f $relativePath, $path)) | Out-Null
+    } else {
+      $message = ("MISSING path:{0} -> {1}" -f $relativePath, $path)
+      $lines.Add($message) | Out-Null
+      $issues.Add($message) | Out-Null
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+    if ($Append -and (Test-Path $LogPath)) {
+      Add-Content -Path $LogPath -Value ""
+      Add-Content -Path $LogPath -Value ("[{0}]" -f $phaseLabel)
+      Add-Content -Path $LogPath -Value @($lines.ToArray())
+    } else {
+      Set-Content -Path $LogPath -Value @($lines.ToArray())
+    }
+  }
+
+  return [pscustomobject]@{
+    Scope = $Scope
+    Backend = $Backend
+    Lines = [string[]]@($lines.ToArray())
+    Issues = [string[]]@($issues.ToArray())
+    HasIssues = [bool]($issues.Count -gt 0)
   }
 }
 
@@ -2174,7 +2830,21 @@ function Invoke-GpSharedValidation {
     }
   }
 
-  Set-Content -Path $logPath -Value $lines
+  $stageContract = Invoke-GpPackageContractAssertions -Context $Context -Scope "stage"
+  foreach ($issue in @($stageContract.Issues)) {
+    $missing.Add($issue) | Out-Null
+  }
+
+  if ($lines.Count -gt 0) {
+    Set-Content -Path $logPath -Value $lines
+    if (@($stageContract.Lines).Count -gt 0) {
+      Add-Content -Path $logPath -Value ""
+      Add-Content -Path $logPath -Value "[stage contract]"
+      Add-Content -Path $logPath -Value @($stageContract.Lines)
+    }
+  } else {
+    Set-Content -Path $logPath -Value @($stageContract.Lines)
+  }
 
   if ($missing.Count -gt 0) {
     throw "Shared validation failed. See log: $logPath"

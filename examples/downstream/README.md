@@ -18,7 +18,8 @@ Contents:
   Minimal manifest starting point for a typical GNUstep GUI app, including a
   GitHub release-feed update block for MSI publishing
 - `manifest-gnustep-document-viewer.template.json`
-  Slightly more opinionated starting point for a document-viewer style app
+  Slightly more opinionated starting point for a document-viewer style app,
+  using the reusable `gnustep-cmark` host dependency profile
 - `manifest-gnustep-linux-appimage.template.json`
   Linux-oriented manifest starting point for AppImage packaging, including
   AppImage-native update metadata settings
@@ -33,10 +34,14 @@ Recommended adoption order:
 
 1. Start from the closest manifest template.
 2. Fill in the app-specific package identity and stage paths.
-3. Add any app-specific host packages under `hostDependencies` instead of
+3. Reuse built-in host dependency profiles where they fit, then add any
+   remaining app-specific host packages under `hostDependencies` instead of
    copying package-manager lists into workflow YAML.
-4. Replace the placeholder `updates.github.*` and backend `updates.feedUrl`
+4. Declare semantic packaging intent under `packagedDefaults`,
+   `validation.packageContract`, and `validation.installedResult` before adding
+   backend-specific path assertions.
+5. Replace the placeholder `updates.github.*` and backend `updates.feedUrl`
    values with your real repo and feed URLs.
-5. Add real `compliance.runtimeNotices` entries for shipped runtime contents.
-6. Run `scripts/run-packaging-pipeline.ps1 -Backend <msi|appimage> -RunSmoke`
+6. Add real `compliance.runtimeNotices` entries for shipped runtime contents.
+7. Run `scripts/run-packaging-pipeline.ps1 -Backend <msi|appimage> -RunSmoke`
    locally.

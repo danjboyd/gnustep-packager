@@ -3,7 +3,8 @@
   "schemaVersion": 1,
   "profiles": [
     "gnustep-gui",
-    "gnustep-document-viewer"
+    "gnustep-document-viewer",
+    "gnustep-cmark"
   ],
   "package": {
     "id": "com.example.MarkdownViewer",
@@ -45,18 +46,6 @@
     "logRoot": "dist/logs",
     "tempRoot": "dist/tmp",
     "validationRoot": "dist/validation"
-  },
-  "hostDependencies": {
-    "windows": {
-      "msys2Packages": [
-        "mingw-w64-clang-x86_64-cmark"
-      ]
-    },
-    "linux": {
-      "aptPackages": [
-        "libcmark-dev"
-      ]
-    }
   },
   "validation": {
     "smoke": {

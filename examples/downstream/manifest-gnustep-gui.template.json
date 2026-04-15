@@ -38,6 +38,9 @@
     "workingDirectory": ".",
     "env": {}
   },
+  "packagedDefaults": {
+    "defaultTheme": "WinUXTheme"
+  },
   "outputs": {
     "root": "dist",
     "packageRoot": "dist/packages",
@@ -62,6 +65,20 @@
     },
     "logs": {
       "retainOnSuccess": true
+    },
+    "packageContract": {
+      "requiredContent": [
+        {
+          "kind": "notice-report"
+        }
+      ]
+    },
+    "installedResult": {
+      "requiredContent": [
+        {
+          "kind": "notice-report"
+        }
+      ]
     }
   },
   "integrations": {

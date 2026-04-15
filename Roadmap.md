@@ -606,20 +606,40 @@ Goal: harden the new host dependency model and extend manifest-driven packaging
 contracts so staged content, packaged defaults, and installed or extracted
 results stay maintainable, extensible, and verifiable under broader consumer
 and CI scenarios.
-Status: planned.
+Status: implemented.
 
 Current handoff:
-- last completed checkpoint: `Phase 11` implemented and pushed on `main`
-- last sync point: commit `576a02061aa2` on `2026-04-14T22:27:34Z`
-- recommended next starting point: `Phase 12A`
+- last completed checkpoint: `Phase 12A` through `Phase 12H` implemented on
+  `main`
+- recommended next starting point: define the post-`Phase 12` roadmap boundary
+  before expanding the manifest contract again
 - first review target tomorrow:
-  inspect `scripts/lib/core.ps1` host dependency provider functions and decide
-  whether to extract a shared provider contract before adding any new package
-  managers or self-hosted runner behavior
+  audit whether the current semantic contract set should stay intentionally
+  narrow or grow to include more updater-side packaged assets
 - guardrail for next work:
-  keep `hostDependencies` manifest shape stable unless a concrete blocker
-  appears; prefer internal provider refactors and stronger tests before
-  expanding the public manifest contract
+  keep the semantic contract set small and explicit unless a repeated consumer
+  need justifies broadening it; prefer high-signal assertions over a large enum
+  of barely-supported packaged asset kinds
+
+Current status notes:
+- `Phase 12A` landed as a shared internal provider abstraction for Windows
+  MSYS2 and Linux apt host dependency verification and installation
+- `Phase 12B` landed as clearer reusable-workflow host setup policy for hosted
+  and self-hosted runs, including explicit verify-only behavior when
+  `skip-default-host-setup: true`
+- `Phase 12C` landed as stronger regression coverage around workflow host setup
+  planning and provider-backed preflight behavior
+- `Phase 12D` landed as reusable host dependency profile layering, starting
+  with the built-in `gnustep-cmark` profile
+- `Phase 12E` landed as updated consumer guidance, compatibility notes, and
+  explicit support-boundary documentation for provisioning and contract usage
+- `Phase 12F` landed as manifest-level semantic package contracts plus
+  low-level packaged-path escape hatches
+- `Phase 12G` landed as installed or extracted result assertions wired into MSI
+  and AppImage backend validation
+- `Phase 12H` landed as declarative packaged defaults, currently including
+  `packagedDefaults.defaultTheme`, with contract-backed drift detection across
+  stage, package, and installed or extracted results
 
 This phase is follow-on work after the manifest-driven host dependency model is
 in place. It focuses on stronger provider abstraction, better coverage of

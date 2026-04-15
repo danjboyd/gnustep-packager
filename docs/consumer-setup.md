@@ -15,9 +15,25 @@ The manifest may opt into small built-in defaults layers through `profiles`.
 Current profiles:
 - `gnustep-gui`
 - `gnustep-document-viewer`
+- `gnustep-cmark`
 
 These profiles are intentionally small. They provide common runtime PATH,
-resource, and category defaults without hiding the manifest shape.
+resource, category, and reusable host dependency defaults without hiding the
+manifest shape.
+
+## Packaged Defaults And Contracts
+Consumers can now declare a few semantic packaging expectations directly in the
+manifest instead of scattering them across backend-specific tests:
+
+- `packagedDefaults.defaultTheme`
+  Declares the default `GSTheme` the generated launcher should carry with
+  `ifUnset` semantics.
+- `validation.packageContract.requiredContent`
+  Declares semantic packaged-content expectations such as notice reports,
+  updater runtime config, metadata files, or updater helpers.
+- `validation.installedResult`
+  Declares the installed or extracted result checks that should still hold
+  after MSI install or AppImage extraction.
 
 ## Expected Stage Layout
 
@@ -51,7 +67,9 @@ For the current MSI backend, the consumer should:
 
 The reusable workflow's default MSI host setup installs a GNUstep-capable MSYS2
 `CLANG64` baseline. Downstream apps remain responsible for app-specific
-dependencies such as `mingw-w64-clang-x86_64-cmark`.
+dependencies such as `mingw-w64-clang-x86_64-cmark`, either directly under
+`hostDependencies.windows.msys2Packages` or through a reusable profile such as
+`gnustep-cmark`.
 
 ## Linux AppImage Onboarding
 For the AppImage backend, the consumer should:
@@ -64,7 +82,8 @@ For the AppImage backend, the consumer should:
 5. provide a stable `desktopEntryName`
 6. choose an AppImage smoke mode under `backends.appimage.smoke`
 7. declare extra Linux host packages under `hostDependencies.linux.aptPackages`
-   when the documented AppImage host baseline is not enough
+   when the documented AppImage host baseline is not enough, or layer in a
+   reusable dependency profile such as `gnustep-cmark`
 8. install `squashfs-tools` and `desktop-file-utils` before local validation or
    let the reusable workflow install them in CI
 
@@ -98,13 +117,20 @@ Recommended updater docs:
 
 ```json
 {
-  "profiles": ["gnustep-gui"],
-  "hostDependencies": {
-    "windows": {
-      "msys2Packages": ["mingw-w64-clang-x86_64-cmark"]
+  "profiles": ["gnustep-gui", "gnustep-cmark"],
+  "packagedDefaults": {
+    "defaultTheme": "WinUXTheme"
+  },
+  "validation": {
+    "packageContract": {
+      "requiredContent": [
+        { "kind": "notice-report" }
+      ]
     },
-    "linux": {
-      "aptPackages": ["libcmark-dev"]
+    "installedResult": {
+      "requiredContent": [
+        { "kind": "notice-report" }
+      ]
     }
   },
   "compliance": {
@@ -129,10 +155,11 @@ Recommended updater docs:
   -RunSmoke
 ```
 
-Manifest-declared host dependencies are implemented for shared local preflight
-and CLI usage in the current repo state. Reusable workflow and remote-host
-realization still use their existing explicit inputs until the later `Phase
-11E` and `Phase 11F` integration work lands.
+Manifest-declared host dependencies are implemented for shared local preflight,
+remote-host validation, and reusable-workflow setup in the current repo state.
+On self-hosted runs with `skip-default-host-setup: true`, the workflow still
+expects manifest-declared dependencies for verification, but it will not apply
+workflow-only additive package inputs.
 
 ```powershell
 ./scripts/run-packaging-pipeline.ps1 `
@@ -147,10 +174,14 @@ Once the local run works, call the reusable workflow documented in
 
 Hosted-runner consumers can usually rely on the workflow defaults. Self-hosted
 or more advanced consumers can override `runs-on-*`, disable default host setup,
-and inject repo-owned preflight commands without forking the workflow.
+and inject repo-owned preflight commands without forking the workflow. When
+default host setup is disabled, keep app-specific dependencies in the manifest
+or install them in that preflight step instead of relying on workflow-only
+package-list inputs.
 
 Related docs:
 - [manifest.md](manifest.md)
+- [validation-contract.md](validation-contract.md)
 - [compliance-notices.md](compliance-notices.md)
 - [windows-msi-triage.md](windows-msi-triage.md)
 - [../backends/appimage/README.md](../backends/appimage/README.md)

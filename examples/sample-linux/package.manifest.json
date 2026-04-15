@@ -49,6 +49,9 @@
       }
     }
   },
+  "packagedDefaults": {
+    "defaultTheme": "Adwaita"
+  },
   "outputs": {
     "root": "dist",
     "packageRoot": "dist/packages",
@@ -68,6 +71,27 @@
     },
     "logs": {
       "retainOnSuccess": true
+    },
+    "packageContract": {
+      "requiredContent": [
+        {
+          "kind": "notice-report"
+        },
+        {
+          "kind": "metadata-file",
+          "path": "metadata/icons/sample-linux.png"
+        }
+      ]
+    },
+    "installedResult": {
+      "requiredContent": [
+        {
+          "kind": "notice-report"
+        }
+      ],
+      "requiredPaths": [
+        "usr/metadata/icons/sample-linux.png"
+      ]
     }
   },
   "integrations": {

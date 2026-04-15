@@ -346,6 +346,16 @@
         }
       }
     },
+    "packagedDefaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultTheme": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "validation": {
       "type": "object",
       "additionalProperties": false,
@@ -395,6 +405,100 @@
           "properties": {
             "retainOnSuccess": {
               "type": "boolean"
+            }
+          }
+        },
+        "packageContract": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requiredPaths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "requiredContent": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "notice-report",
+                      "update-runtime-config",
+                      "default-theme",
+                      "metadata-file",
+                      "updater-helper"
+                    ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "installedResult": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requiredPaths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "requiredContent": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "notice-report",
+                      "update-runtime-config",
+                      "default-theme",
+                      "metadata-file",
+                      "updater-helper"
+                    ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
             }
           }
         }

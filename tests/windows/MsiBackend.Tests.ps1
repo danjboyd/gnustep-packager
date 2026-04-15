@@ -175,6 +175,13 @@ Describe "MSI backend" {
       Assert-GpMatch -Actual $noticeText -Pattern "metadata/licenses/GNUstep-runtime.txt" -Message "Notice report should preserve staged notice paths."
     }
 
+    It "satisfies the semantic MSI package contract on the transformed install tree" {
+      $contract = Invoke-GpPackageContractAssertions -Context $script:transformContext -Scope "package" -Backend "msi" -RootPath $script:transform.InstallRoot
+
+      Assert-GpEqual -Actual $contract.HasIssues -Expected $false -Message "The transformed MSI install tree should satisfy the declared package contract."
+      Assert-GpMatch -Actual ([string]::Join("`n", @($contract.Lines))) -Pattern "defaultTheme" -Message "The semantic MSI package contract should include declarative packaged defaults."
+    }
+
     It "places the shortcut at the Start Menu root" {
       $templateText = Get-Content -Raw -Path $script:transformConfig.ProductTemplatePath
 

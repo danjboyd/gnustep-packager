@@ -146,20 +146,24 @@ jobs:
         run: |
           $toolRoot = Join-Path $env:GITHUB_WORKSPACE ".gnustep-packager-toolkit"
           $manifestPath = [System.IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '${{ inputs.manifest-path }}'))
-          $parameters = @{
-            Command = 'resolve-manifest'
-            Manifest = $manifestPath
+          $coreScript = [System.IO.Path]::GetFullPath((Join-Path $toolRoot 'scripts\lib\core.ps1'))
+          if (-not (Test-Path -LiteralPath $coreScript)) {
+            throw "gnustep-packager core library not found at $coreScript"
           }
-          if (-not [string]::IsNullOrWhiteSpace('${{ inputs.package-version }}')) {
-            $parameters['PackageVersion'] = '${{ inputs.package-version }}'
-          }
-          $packagerScript = [System.IO.Path]::GetFullPath((Join-Path $toolRoot 'scripts\gnustep-packager.ps1'))
-          if (-not (Test-Path -LiteralPath $packagerScript)) {
-            throw "gnustep-packager entrypoint not found at $packagerScript"
-          }
-          $manifestJson = & $packagerScript @parameters
-          $manifest = $manifestJson | ConvertFrom-Json -AsHashtable
+          . $coreScript
+          $context = Get-GpManifestContext -Path $manifestPath -PackageVersion '${{ inputs.package-version }}'
+          $manifest = $context.Manifest
           $manifestRoot = Split-Path -Parent $manifestPath
+          $hostSetupPlan = Get-GpWorkflowHostSetupPlan `
+            -Context $context `
+            -Backend '${{ inputs.backend }}' `
+            -SkipDefaultHostSetup:${{ inputs.skip-default-host-setup }} `
+            -AdditionalMsys2Packages '${{ inputs.msys2-packages }}' `
+            -AdditionalAptPackages '${{ inputs.appimage-apt-packages }}'
+
+          if (@($hostSetupPlan.Errors).Count -gt 0) {
+            throw ([string]::Join(" ", @($hostSetupPlan.Errors)))
+          }
 
           function Resolve-OutputPath([string]$basePath, [string]$value) {
             if ([System.IO.Path]::IsPathRooted($value)) {
@@ -168,41 +172,17 @@ jobs:
             return [System.IO.Path]::GetFullPath((Join-Path $basePath $value))
           }
 
-          function Join-UniquePackageList([object[]]$Values) {
-            $items = [System.Collections.Generic.List[string]]::new()
-            foreach ($value in @($Values)) {
-              if ($null -eq $value) {
-                continue
-              }
-              foreach ($line in @(([string]$value) -split '\s+')) {
-                $trimmed = $line.Trim()
-                if (-not [string]::IsNullOrWhiteSpace($trimmed) -and -not $items.Contains($trimmed)) {
-                  $items.Add($trimmed) | Out-Null
-                }
-              }
-            }
-            return [string]::Join(' ', @($items))
-          }
-
-          $windowsHostDeps = @()
-          $linuxHostDeps = @()
-          if ($manifest.ContainsKey('hostDependencies') -and ($manifest.hostDependencies -is [System.Collections.IDictionary])) {
-            if ($manifest.hostDependencies.ContainsKey('windows') -and ($manifest.hostDependencies.windows -is [System.Collections.IDictionary])) {
-              $windowsHostDeps = @($manifest.hostDependencies.windows.msys2Packages)
-            }
-            if ($manifest.hostDependencies.ContainsKey('linux') -and ($manifest.hostDependencies.linux -is [System.Collections.IDictionary])) {
-              $linuxHostDeps = @($manifest.hostDependencies.linux.aptPackages)
-            }
-          }
-
           "resolved_version=$($manifest.package.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "package_root=$(Resolve-OutputPath $manifestRoot $manifest.outputs.packageRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "log_root=$(Resolve-OutputPath $manifestRoot $manifest.outputs.logRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "validation_root=$(Resolve-OutputPath $manifestRoot $manifest.outputs.validationRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "manifest_msys2_packages=$(Join-UniquePackageList $windowsHostDeps)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "manifest_apt_packages=$(Join-UniquePackageList $linuxHostDeps)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "resolved_msys2_packages=$(Join-UniquePackageList @('${{ inputs.msys2-packages }}', (Join-UniquePackageList $windowsHostDeps)))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "resolved_apt_packages=$(Join-UniquePackageList @('${{ inputs.appimage-apt-packages }}', (Join-UniquePackageList $linuxHostDeps)))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "manifest_msys2_packages=$($hostSetupPlan.ManifestMsys2PackageText)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "manifest_apt_packages=$($hostSetupPlan.ManifestAptPackageText)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "resolved_msys2_packages=$($hostSetupPlan.ResolvedMsys2PackageText)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "resolved_apt_packages=$($hostSetupPlan.ResolvedAptPackageText)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "host_setup_mode=$($hostSetupPlan.HostSetupMode)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "host_setup_summary=$($hostSetupPlan.Summary)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host $hostSetupPlan.Summary
 
       - name: Install MSYS2 CLANG64 Prerequisites
         if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup }}

@@ -7,6 +7,7 @@ Describe "Reusable workflow surface" {
     $script:workflowText = Get-Content -Raw -Path (Join-Path $script:repoRoot ".github/workflows/package-gnustep-app.yml")
     $script:githubActionsDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/github-actions.md")
     $script:consumerSetupDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/consumer-setup.md")
+    $script:coreText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/lib/core.ps1")
     $script:otvmRemoteText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/ci/otvm-windows-remote.ps1")
   }
 
@@ -48,6 +49,9 @@ Describe "Reusable workflow surface" {
       "manifest_apt_packages",
       "resolved_msys2_packages",
       "resolved_apt_packages",
+      "host_setup_mode",
+      "host_setup_summary",
+      "Get-GpWorkflowHostSetupPlan",
       "InstallHostDependencies"
     )) {
       if ($script:workflowText -notmatch [regex]::Escape($pattern)) {
@@ -62,12 +66,27 @@ Describe "Reusable workflow surface" {
       "runs-on-appimage",
       "preflight-command",
       "hostDependencies",
+      "gnustep-cmark",
       "msys2-packages",
       "launch-only",
       "marker-file"
     )) {
       if (($script:githubActionsDocText -notmatch [regex]::Escape($pattern)) -and ($script:consumerSetupDocText -notmatch [regex]::Escape($pattern))) {
         throw "Updated docs do not mention expected workflow or smoke-mode surface: $pattern"
+      }
+    }
+  }
+
+  It "guards self-hosted verify-only runs against ignored additive package inputs" {
+    foreach ($pattern in @(
+      '`msys2-packages` is not applied when `skip-default-host-setup: true`',
+      '`appimage-apt-packages` is not applied when `skip-default-host-setup: true`',
+      'verify-only'
+    )) {
+      if (($script:workflowText -notmatch [regex]::Escape($pattern)) -and
+          ($script:githubActionsDocText -notmatch [regex]::Escape($pattern)) -and
+          ($script:coreText -notmatch [regex]::Escape($pattern))) {
+        throw "Self-hosted workflow guardrail is missing expected text: $pattern"
       }
     }
   }
