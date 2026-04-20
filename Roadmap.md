@@ -611,8 +611,9 @@ Status: implemented.
 Current handoff:
 - last completed checkpoint: `Phase 12A` through `Phase 12J` implemented on
   `main`
-- recommended next starting point: define the post-`Phase 12` roadmap boundary
-  before expanding the manifest contract again
+- recommended next starting point: begin `Phase 13` by making
+  `gnustep-cli-new` the standard GNUstep toolchain bootstrap path for local and
+  CI packaging work
 - first review target tomorrow:
   audit whether the current semantic contract set should stay intentionally
   narrow or grow only in response to repeated downstream runtime-layout needs
@@ -795,6 +796,130 @@ installed-result contracts, and improved end-to-end confidence.
   - downstream consumers can rely on semantic theme presence checks across
     common GNUstep runtime trees without reintroducing literal theme-bundle
     path assertions
+
+## Phase 13: GNUstep CLI New Toolchain Integration
+Goal: make `gnustep-cli-new` the default and required GNUstep toolchain
+bootstrap path across supported local and CI packaging flows, treating
+`gnustep-cli-new` failures as blockers to diagnose and report upstream rather
+than falling back to legacy repo-local setup code.
+Status: planned.
+
+This phase recognizes `gnustep-cli-new` as a sister project and a core part of
+the packaging strategy. The packager should exercise it early, use it as the
+normal source of GNUstep build environments, and produce concise upstream bug
+reports whenever it prevents a supported packaging path from working.
+
+- `Phase 13A`: Policy and support-boundary update
+  Deliverables:
+  - roadmap, README, and CI guidance updates that name `gnustep-cli-new` as the
+    default GNUstep bootstrap mechanism for supported packaging workflows
+  - explicit removal of legacy fallback expectations from the documented
+    support path
+  - a blocker policy that distinguishes packager bugs from actionable
+    `gnustep-cli-new` upstream issues
+  Exit criteria:
+  - contributors can tell that `gnustep-cli-new` is the standard path before
+    reading workflow internals
+  - failures in `gnustep-cli-new` setup are tracked as blockers with enough
+    context for upstream maintainers to act on them
+
+- `Phase 13B`: Version and manifest selection contract
+  Deliverables:
+  - a documented way to select the `gnustep-cli-new` release, commit, or
+    release manifest used by local tests and GitHub Actions
+  - default inputs for reusable workflows that point at the supported
+    `gnustep-cli-new` manifest while still allowing deliberate override for
+    upstream validation
+  - logging that records the selected manifest URL, resolved artifact IDs, and
+    `gnustep --version`
+  Exit criteria:
+  - CI runs are reproducible enough to identify which `gnustep-cli-new`
+    artifact set was tested
+  - testing a newly published `gnustep-cli-new` manifest does not require
+    editing backend implementation code
+
+- `Phase 13C`: Ubuntu runner bootstrap smoke test
+  Deliverables:
+  - a clean Ubuntu runner or container smoke test that runs
+    `gnustep-bootstrap.sh --json --yes setup`
+  - validation steps for `gnustep --version`, `gnustep doctor --json`,
+    `gnustep new`, `gnustep build`, and `gnustep run`
+  - captured logs and JSON output suitable for upstream issue reports when the
+    smoke path fails
+  Exit criteria:
+  - the supported Ubuntu GitHub Actions runner can install and use
+    `gnustep-cli-new` without hand-installed GNUstep prerequisites
+  - failure output identifies the missing artifact, missing package,
+    incompatible library, or command failure precisely enough to file upstream
+
+- `Phase 13D`: Linux AppImage workflow integration
+  Deliverables:
+  - AppImage build and stage workflows updated to bootstrap GNUstep through
+    `gnustep-cli-new`
+  - fixture coverage proving a small GNUstep app can be built, staged, packaged
+    as an AppImage, and smoke-validated from the same toolchain path
+  - removal or quarantine of repo-local Linux GNUstep setup code from the
+    supported default path
+  Exit criteria:
+  - the AppImage CI path uses `gnustep-cli-new` for GNUstep setup by default
+  - AppImage validation failures clearly separate packager staging or packaging
+    bugs from upstream toolchain/bootstrap blockers
+
+- `Phase 13E`: Windows MSI workflow integration
+  Deliverables:
+  - Windows reusable workflows updated to use the `gnustep-cli-new` Windows or
+    MSYS2 bootstrap path when producing MSI fixtures
+  - logging of the resolved MSYS2/GNUstep environment, selected target, and
+    package versions used for MSI builds
+  - verification that existing MSI staging, WiX generation, install, and smoke
+    validation still operate from the `gnustep-cli-new` provisioned toolchain
+  Exit criteria:
+  - the MSI CI path uses `gnustep-cli-new` for supported GNUstep setup by
+    default
+  - Windows failures produce enough detail to decide whether the fix belongs in
+    `gnustep-packager`, `gnustep-cli-new`, MSYS2 packaging, or WiX integration
+
+- `Phase 13F`: Blocker evidence and upstream bug-report workflow
+  Deliverables:
+  - a repo-owned bug-report template or generated diagnostic bundle for
+    `gnustep-cli-new` blockers
+  - CI artifact collection for bootstrap logs, selected manifest data,
+    `gnustep doctor --json`, host OS details, and failed command output
+  - documentation for when to stop packager work and file or update an
+    upstream `gnustep-cli-new` issue
+  Exit criteria:
+  - failed `gnustep-cli-new` setup runs produce a ready-to-copy upstream report
+    without manual log archaeology
+  - the packager does not silently bypass `gnustep-cli-new` when the supported
+    bootstrap path fails
+
+- `Phase 13G`: Consumer docs and migration examples
+  Deliverables:
+  - consumer-facing documentation showing local and GitHub Actions setup with
+    `gnustep-cli-new`
+  - updated reference workflow snippets for projects that need both Windows MSI
+    and Linux AppImage artifacts
+  - migration notes for removing legacy GNUstep setup steps from downstream
+    workflows
+  Exit criteria:
+  - a downstream GNUstep project can adopt the standard MSI plus AppImage
+    workflow without inventing its own build boxes or bootstrap scripts
+  - consumer docs make clear that `gnustep-cli-new` issues should be reported
+    upstream with the generated evidence
+
+- `Phase 13H`: Release gating and regression coverage
+  Deliverables:
+  - CI gates that require the `gnustep-cli-new` bootstrap smoke test before
+    packaging release artifacts
+  - regression coverage for manifest selection, workflow inputs, and
+    blocker-report artifact generation
+  - release-readiness notes that record the known-good `gnustep-cli-new`
+    manifest or commit for each packager release
+  Exit criteria:
+  - packager releases cannot accidentally publish from an unvalidated legacy
+    GNUstep setup path
+  - release notes identify the `gnustep-cli-new` baseline that downstream
+    projects should use or compare against
 
 ## Suggested Early Execution Order
 Prioritize these subphases first:

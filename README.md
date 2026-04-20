@@ -202,6 +202,7 @@ Release and consumer docs:
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md)
 - [docs/compliance-notices.md](docs/compliance-notices.md)
 - [docs/objcmarkdown-upstream-requests.md](docs/objcmarkdown-upstream-requests.md)
+- [docs/gnustep-cli-new-upstream-requests.md](docs/gnustep-cli-new-upstream-requests.md)
 - [docs/update-architecture.md](docs/update-architecture.md)
 - [docs/update-feed-contract.md](docs/update-feed-contract.md)
 - [docs/updater-consumer-guide.md](docs/updater-consumer-guide.md)
