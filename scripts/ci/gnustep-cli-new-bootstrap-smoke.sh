@@ -86,13 +86,13 @@ write_report() {
   status="$1"
   {
     printf '# gnustep-cli-new Bootstrap Report\n\n'
-    printf '- status: %s\n' "$status"
-    printf '- host: %s\n' "$(uname -a 2>/dev/null || printf unknown)"
-    printf '- manifest: %s\n' "$manifest_url"
-    printf '- bootstrap: %s\n' "$bootstrap_url"
-    printf '- install root: %s\n' "$install_root"
-    printf '- host kind: %s\n' "${GP_GNUSTEP_CLI_HOST_KIND:-unknown}"
-    printf '- log root: %s\n\n' "$log_root"
+    printf '%s\n' "- status: $status"
+    printf '%s\n' "- host: $(uname -a 2>/dev/null || printf unknown)"
+    printf '%s\n' "- manifest: $manifest_url"
+    printf '%s\n' "- bootstrap: $bootstrap_url"
+    printf '%s\n' "- install root: $install_root"
+    printf '%s\n' "- host kind: ${GP_GNUSTEP_CLI_HOST_KIND:-unknown}"
+    printf '%s\n\n' "- log root: $log_root"
     printf '## Command Contract\n\n'
     printf '```sh\n'
     printf 'gnustep-bootstrap.sh --json --yes setup --user --root "%s" --manifest "%s"\n' "$install_root" "$manifest_url"
