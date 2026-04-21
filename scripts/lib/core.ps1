@@ -1836,6 +1836,7 @@ function Get-GpShellCommandPath {
 
   $pathValue = $env:PATH
   foreach ($toolPath in @(
+    (Join-Path $env:GP_GNUSTEP_CLI_ROOT "bin"),
     (Join-Path $env:GP_GNUSTEP_CLI_ROOT "Tools"),
     (Join-Path $env:GP_GNUSTEP_CLI_ROOT "System/Tools")
   )) {
