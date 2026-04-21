@@ -222,6 +222,7 @@ jobs:
       - name: Bootstrap And Smoke Test gnustep-cli-new For MSI
         if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup }}
         shell: pwsh
+        timeout-minutes: 30
         env:
           GP_GNUSTEP_CLI_MANIFEST_URL: ${{ inputs.gnustep-cli-manifest-url }}
           GP_GNUSTEP_CLI_BOOTSTRAP_URL: ${{ inputs.gnustep-cli-bootstrap-url }}
@@ -232,22 +233,114 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          function Invoke-Logged {
+          function Stop-ProcessTree {
+            param(
+              [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process
+            )
+            if ($Process.HasExited) {
+              return
+            }
+            try {
+              & taskkill.exe /PID $Process.Id /T /F | Out-Host
+            }
+            catch {
+              try {
+                Stop-Process -Id $Process.Id -Force -ErrorAction Stop
+              }
+              catch {
+                Write-Warning "Unable to stop process $($Process.Id): $($_.Exception.Message)"
+              }
+            }
+          }
+
+          function Append-ProcessOutput {
             param(
               [Parameter(Mandatory = $true)][string]$LogPath,
-              [Parameter(Mandatory = $true)][scriptblock]$Command
+              [Parameter(Mandatory = $true)][string]$StdOutPath,
+              [Parameter(Mandatory = $true)][string]$StdErrPath
+            )
+            if (Test-Path -LiteralPath $StdOutPath) {
+              Add-Content -Path $LogPath -Value ""
+              Add-Content -Path $LogPath -Value "## stdout"
+              Get-Content -LiteralPath $StdOutPath | Add-Content -Path $LogPath
+            }
+            if (Test-Path -LiteralPath $StdErrPath) {
+              Add-Content -Path $LogPath -Value ""
+              Add-Content -Path $LogPath -Value "## stderr"
+              Get-Content -LiteralPath $StdErrPath | Add-Content -Path $LogPath
+            }
+          }
+
+          function Invoke-LoggedProcess {
+            param(
+              [Parameter(Mandatory = $true)][string]$LogPath,
+              [Parameter(Mandatory = $true)][string]$FilePath,
+              [string[]]$ArgumentList = @(),
+              [string]$WorkingDirectory = "",
+              [int]$TimeoutSeconds = 600,
+              [int]$HeartbeatSeconds = 30
             )
             New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LogPath) | Out-Null
+            $stdoutPath = "$LogPath.stdout.tmp"
+            $stderrPath = "$LogPath.stderr.tmp"
+            Remove-Item -Force -ErrorAction SilentlyContinue $stdoutPath, $stderrPath
+            $commandLine = "$FilePath $([string]::Join(' ', $ArgumentList))"
+            Set-Content -Path $LogPath -Value @(
+              "timestamp=$([DateTimeOffset]::UtcNow.ToString("o"))",
+              "command=$commandLine",
+              "working_directory=$WorkingDirectory",
+              "timeout_seconds=$TimeoutSeconds"
+            ) -Encoding UTF8
+            Write-Host "RUN $commandLine"
+
+            $parameters = @{
+              FilePath = $FilePath
+              ArgumentList = $ArgumentList
+              PassThru = $true
+              NoNewWindow = $true
+              RedirectStandardOutput = $stdoutPath
+              RedirectStandardError = $stderrPath
+            }
+            if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+              $parameters.WorkingDirectory = $WorkingDirectory
+            }
+            $process = Start-Process @parameters
+            $deadline = [DateTimeOffset]::UtcNow.AddSeconds([Math]::Max($TimeoutSeconds, 1))
+            $lastHeartbeat = [DateTimeOffset]::UtcNow
             try {
-              $global:LASTEXITCODE = 0
-              & $Command *>&1 | Tee-Object -FilePath $LogPath
-              if ($global:LASTEXITCODE -ne 0) {
-                throw "command exited with $global:LASTEXITCODE"
+              while (-not $process.HasExited) {
+                Start-Sleep -Seconds 2
+                $now = [DateTimeOffset]::UtcNow
+                if (($now - $lastHeartbeat).TotalSeconds -ge $HeartbeatSeconds) {
+                  $message = "heartbeat=$($now.ToString("o")) pid=$($process.Id) elapsed_seconds=$([int](($now - ($deadline.AddSeconds(-1 * [Math]::Max($TimeoutSeconds, 1)))).TotalSeconds))"
+                  Write-Host $message
+                  Add-Content -Path $LogPath -Value $message
+                  $lastHeartbeat = $now
+                }
+                if ($now -ge $deadline) {
+                  $message = "ERROR: timed out after $TimeoutSeconds seconds"
+                  Write-Host $message
+                  Add-Content -Path $LogPath -Value $message
+                  Stop-ProcessTree -Process $process
+                  $process.WaitForExit()
+                  Append-ProcessOutput -LogPath $LogPath -StdOutPath $stdoutPath -StdErrPath $stderrPath
+                  throw $message
+                }
+              }
+
+              $process.WaitForExit()
+              Append-ProcessOutput -LogPath $LogPath -StdOutPath $stdoutPath -StdErrPath $stderrPath
+              Add-Content -Path $LogPath -Value "exit_code=$($process.ExitCode)"
+              if ([int]$process.ExitCode -ne 0) {
+                throw "command exited with $($process.ExitCode)"
               }
             }
             catch {
               "ERROR: $($_.Exception.Message)" | Tee-Object -FilePath $LogPath -Append
               throw
+            }
+            finally {
+              Remove-Item -Force -ErrorAction SilentlyContinue $stdoutPath, $stderrPath
             }
           }
 
@@ -321,12 +414,16 @@ jobs:
           ) | Tee-Object -FilePath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-selection.log")
 
           try {
-            Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-bootstrap-download.log") {
-              Invoke-WebRequest -UseBasicParsing -Uri $bootstrapUrl -OutFile $bootstrapPath
-            }
-            Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-setup.log") {
-              & pwsh -NoProfile -ExecutionPolicy Bypass -File $bootstrapPath --json --yes setup --user --root $env:GP_GNUSTEP_CLI_ROOT --manifest $env:GP_GNUSTEP_CLI_MANIFEST_URL
-            }
+            Invoke-LoggedProcess `
+              -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-bootstrap-download.log") `
+              -FilePath "curl.exe" `
+              -ArgumentList @("--fail", "--location", "--show-error", "--connect-timeout", "30", "--max-time", "300", "--output", $bootstrapPath, $bootstrapUrl) `
+              -TimeoutSeconds 360
+            Invoke-LoggedProcess `
+              -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-setup.log") `
+              -FilePath "pwsh" `
+              -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $bootstrapPath, "--json", "--yes", "setup", "--user", "--root", $env:GP_GNUSTEP_CLI_ROOT, "--manifest", $env:GP_GNUSTEP_CLI_MANIFEST_URL) `
+              -TimeoutSeconds 1200
 
             $toolPaths = @(
               (Join-Path $env:GP_GNUSTEP_CLI_ROOT "bin"),
@@ -348,19 +445,19 @@ jobs:
               "clang=$((Get-Command clang -ErrorAction SilentlyContinue).Source)"
             ) | Set-Content -Path (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-path-context.log") -Encoding UTF8
 
-            Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-version.log") { & gnustep --version }
-            Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-doctor.json") { & gnustep doctor --json --manifest $env:GP_GNUSTEP_CLI_MANIFEST_URL }
+            Invoke-LoggedProcess -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-version.log") -FilePath "gnustep" -ArgumentList @("--version") -TimeoutSeconds 120
+            Invoke-LoggedProcess -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-doctor.json") -FilePath "gnustep" -ArgumentList @("doctor", "--json", "--manifest", $env:GP_GNUSTEP_CLI_MANIFEST_URL) -TimeoutSeconds 180
 
             $workRoot = Join-Path $env:GP_GNUSTEP_CLI_SMOKE_ROOT "work"
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $workRoot
             New-Item -ItemType Directory -Force -Path $workRoot | Out-Null
             Push-Location $workRoot
             try {
-              Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-new.json") { & gnustep new cli-tool HelloPackager --json }
+              Invoke-LoggedProcess -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-new.json") -FilePath "gnustep" -ArgumentList @("new", "cli-tool", "HelloPackager", "--json") -WorkingDirectory $workRoot -TimeoutSeconds 180
               Push-Location (Join-Path $workRoot "HelloPackager")
               try {
-                Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-build.json") { & gnustep build --json }
-                Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-run.json") { & gnustep run --json }
+                Invoke-LoggedProcess -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-build.json") -FilePath "gnustep" -ArgumentList @("build", "--json") -WorkingDirectory (Join-Path $workRoot "HelloPackager") -TimeoutSeconds 600
+                Invoke-LoggedProcess -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-run.json") -FilePath "gnustep" -ArgumentList @("run", "--json") -WorkingDirectory (Join-Path $workRoot "HelloPackager") -TimeoutSeconds 180
               }
               finally {
                 Pop-Location
