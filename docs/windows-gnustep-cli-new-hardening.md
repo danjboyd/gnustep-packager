@@ -83,6 +83,12 @@ No matching release artifacts were found for this host.
 
 The uploaded `windows-gnustep-cli-new` artifact contains the blocker report,
 setup log, host context, and bootstrap download log for upstream reproduction.
+Hosted validation run `24738535673` retested the completed phase 14 gate:
+Linux passed through the `gnustep-cli-new` bootstrap, Pester regression tests,
+and the shared AppImage packaging pipeline; Windows failed closed at
+`Bootstrap And Smoke Test gnustep-cli-new` with exit code 4 before any
+manifest, Pester, build, stage, or MSI package steps ran, and still uploaded
+`windows-gnustep-cli-new` diagnostics.
 
 Phase 14E-H are implemented as the release gate and handoff layer around that
 evidence:

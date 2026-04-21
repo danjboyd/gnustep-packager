@@ -986,6 +986,11 @@ Current status notes:
   `windows-amd64-msys2-clang64` artifacts. The generated
   `windows-gnustep-cli-new` artifact contains the blocker report and command
   logs.
+- hosted validation run `24738535673` confirmed the completed phase 14 gate
+  behavior: Linux validation passed through bootstrap, Pester, and the shared
+  AppImage pipeline; Windows failed closed at `Bootstrap And Smoke Test
+  gnustep-cli-new` with exit code 4 before manifest, Pester, or MSI packaging
+  steps ran, and uploaded `windows-gnustep-cli-new` diagnostics.
 - `Phase 14E` landed as a hosted-runner regression gate contract: the default
   Windows MSI path runs the `gnustep-cli-new` bootstrap smoke before packaging,
   fails closed when that smoke fails or is skipped, and preserves diagnostics

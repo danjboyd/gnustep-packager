@@ -54,6 +54,15 @@ MSYS2 shell as `os: unknown` and does not select the published
 upstream issue until a retest records a successful bootstrap smoke and MSI
 package smoke on `windows-latest`.
 
+Latest phase 14 gate evidence:
+
+- run: `24738535673`
+- commit: `83cfc8f`
+- Linux/AppImage: passed bootstrap, Pester regression tests, and shared
+  packaging pipeline
+- Windows/MSI: failed closed at `Bootstrap And Smoke Test gnustep-cli-new`
+  before packaging, with `windows-gnustep-cli-new` diagnostics uploaded
+
 Release-note template:
 
 ```text
