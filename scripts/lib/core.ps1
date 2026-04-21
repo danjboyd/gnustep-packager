@@ -1790,6 +1790,54 @@ function Resolve-GpDefaultPosixShellProgram {
   return $Name
 }
 
+function Move-GpPathEntryToEnd {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PathValue,
+    [Parameter(Mandatory = $true)]
+    [string]$Entry
+  )
+
+  $separator = [System.IO.Path]::PathSeparator
+  $normalizedEntry = $Entry.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  $kept = [System.Collections.Generic.List[string]]::new()
+  $found = $false
+
+  foreach ($item in ($PathValue -split [regex]::Escape([string]$separator))) {
+    if ([string]::IsNullOrWhiteSpace($item)) {
+      continue
+    }
+
+    $normalizedItem = $item.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    if ($normalizedItem -eq $normalizedEntry) {
+      $found = $true
+      continue
+    }
+
+    $kept.Add($item) | Out-Null
+  }
+
+  if ($found) {
+    $kept.Add($Entry) | Out-Null
+  }
+
+  return [string]::Join([string]$separator, $kept)
+}
+
+function Get-GpShellCommandPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Invocation
+  )
+
+  if (($Invocation.ShellKind -notin @("bash", "sh")) -or [string]::IsNullOrWhiteSpace($env:GP_GNUSTEP_CLI_ROOT)) {
+    return $env:PATH
+  }
+
+  $systemToolsPath = Join-Path $env:GP_GNUSTEP_CLI_ROOT "System/Tools"
+  return Move-GpPathEntryToEnd -PathValue $env:PATH -Entry $systemToolsPath
+}
+
 function Get-GpShellInvocation {
   param(
     [Parameter(Mandatory = $true)]
@@ -2721,7 +2769,9 @@ function Invoke-GpShellCommand {
   }
 
   Push-Location $WorkingDirectory
+  $previousPath = $env:PATH
   try {
+    $env:PATH = Get-GpShellCommandPath -Invocation $Invocation
     $argumentList = @($Invocation.ArgumentList)
     $streamRoot = Split-Path -Parent $LogPath
     $streamId = [guid]::NewGuid().ToString("N")
@@ -2766,6 +2816,7 @@ function Invoke-GpShellCommand {
       }
     }
   } finally {
+    $env:PATH = $previousPath
     Pop-Location
   }
 

@@ -236,6 +236,34 @@ Describe "Shared validation contract" {
     }
   }
 
+  It "moves managed System Tools behind host tools for POSIX pipeline commands" {
+    if ($IsWindows) {
+      return
+    }
+
+    $oldPath = $env:PATH
+    $oldRoot = $env:GP_GNUSTEP_CLI_ROOT
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-shell-tool-path-" + [guid]::NewGuid().ToString("N"))
+    $managedRoot = Join-Path $tempRoot "gnustep-cli"
+    $systemTools = Join-Path $managedRoot "System/Tools"
+
+    try {
+      New-Item -ItemType Directory -Force -Path $systemTools | Out-Null
+      $env:GP_GNUSTEP_CLI_ROOT = $managedRoot
+      $env:PATH = "$systemTools$([System.IO.Path]::PathSeparator)$oldPath"
+
+      $shellPath = Get-GpShellCommandPath -Invocation ([pscustomobject]@{ ShellKind = "bash" })
+
+      Assert-GpMatch -Actual $shellPath -Pattern "$([regex]::Escape($oldPath))$([regex]::Escape([string][System.IO.Path]::PathSeparator))$([regex]::Escape($systemTools))$" -Message "Managed System Tools should move behind host tools for POSIX pipeline commands."
+    } finally {
+      $env:PATH = $oldPath
+      $env:GP_GNUSTEP_CLI_ROOT = $oldRoot
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
   It "realizes packagedDefaults.defaultTheme into the launch contract" {
     $manifestPath = $null
 
