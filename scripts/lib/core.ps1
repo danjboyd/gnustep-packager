@@ -1834,8 +1834,15 @@ function Get-GpShellCommandPath {
     return $env:PATH
   }
 
-  $systemToolsPath = Join-Path $env:GP_GNUSTEP_CLI_ROOT "System/Tools"
-  return Move-GpPathEntryToEnd -PathValue $env:PATH -Entry $systemToolsPath
+  $pathValue = $env:PATH
+  foreach ($toolPath in @(
+    (Join-Path $env:GP_GNUSTEP_CLI_ROOT "Tools"),
+    (Join-Path $env:GP_GNUSTEP_CLI_ROOT "System/Tools")
+  )) {
+    $pathValue = Move-GpPathEntryToEnd -PathValue $pathValue -Entry $toolPath
+  }
+
+  return $pathValue
 }
 
 function Get-GpShellInvocation {
