@@ -9,6 +9,7 @@ Describe "Reusable workflow surface" {
     $script:githubActionsDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/github-actions.md")
     $script:consumerSetupDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/consumer-setup.md")
     $script:gnustepCliDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/gnustep-cli-new-integration.md")
+    $script:windowsHardeningDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/windows-gnustep-cli-new-hardening.md")
     $script:releaseGateDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/release-gate.md")
     $script:downstreamMsiText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/package-msi.yml")
     $script:downstreamAppImageText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/package-appimage.yml")
@@ -59,6 +60,7 @@ Describe "Reusable workflow surface" {
       "shell: msys2 {0}",
       "GP_GNUSTEP_CLI_MANIFEST_URL",
       "GP_GNUSTEP_CLI_BOOTSTRAP_URL",
+      "GP_GNUSTEP_CLI_HOST_KIND",
       "MSYS2_LOCATION",
       "scripts/ci/gnustep-cli-new-bootstrap-smoke.sh"
     )) {
@@ -109,12 +111,33 @@ Describe "Reusable workflow surface" {
     foreach ($pattern in @(
       "Upload gnustep-cli-new Diagnostics",
       "-gnustep-cli-new",
-      "gnustep-cli-new-blocker-report.md"
+      "gnustep-cli-new-blocker-report.md",
+      "gnustep-cli-new-host-context.log",
+      "gnustep-cli-new-path-context.log"
     )) {
       if (($script:workflowText -notmatch [regex]::Escape($pattern)) -and
           ($script:gnustepCliDocText -notmatch [regex]::Escape($pattern)) -and
+          ($script:windowsHardeningDocText -notmatch [regex]::Escape($pattern)) -and
           ($script:gnustepCliSmokeText -notmatch [regex]::Escape($pattern))) {
         throw "gnustep-cli-new diagnostic artifact surface is missing: $pattern"
+      }
+    }
+  }
+
+  It "captures Windows path normalization evidence for hosted MSI hardening" {
+    foreach ($pattern in @(
+      "host_kind",
+      "windows-msys2-clang64",
+      "cygpath",
+      "cmd.exe",
+      "where gnustep",
+      "MSYS2_LOCATION"
+    )) {
+      if (($script:workflowText -notmatch [regex]::Escape($pattern)) -and
+          ($script:validateRepoText -notmatch [regex]::Escape($pattern)) -and
+          ($script:gnustepCliSmokeText -notmatch [regex]::Escape($pattern)) -and
+          ($script:windowsHardeningDocText -notmatch [regex]::Escape($pattern))) {
+        throw "Windows gnustep-cli-new hardening evidence is missing: $pattern"
       }
     }
   }
@@ -152,6 +175,7 @@ Describe "Reusable workflow surface" {
     )) {
       if (($script:githubActionsDocText -notmatch [regex]::Escape($pattern)) -and
           ($script:consumerSetupDocText -notmatch [regex]::Escape($pattern)) -and
+          ($script:windowsHardeningDocText -notmatch [regex]::Escape($pattern)) -and
           ($script:gnustepCliDocText -notmatch [regex]::Escape($pattern))) {
         throw "Updated docs do not mention expected workflow or smoke-mode surface: $pattern"
       }

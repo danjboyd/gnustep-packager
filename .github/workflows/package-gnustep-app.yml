@@ -228,6 +228,7 @@ jobs:
           GP_GNUSTEP_CLI_ROOT: ${{ inputs.gnustep-cli-root }}
           GP_GNUSTEP_CLI_LOG_ROOT: ${{ steps.manifest.outputs.log_root }}/gnustep-cli-new
           GP_GNUSTEP_CLI_SMOKE_ROOT: ${{ runner.temp }}/gnustep-cli-new-smoke
+          GP_GNUSTEP_CLI_HOST_KIND: windows-msys2-clang64
         run: |
           set -euo pipefail
           if [ -z "${GP_GNUSTEP_CLI_ROOT:-}" ]; then
@@ -270,6 +271,7 @@ jobs:
           GP_GNUSTEP_CLI_ROOT: ${{ inputs.gnustep-cli-root }}
           GP_GNUSTEP_CLI_LOG_ROOT: ${{ steps.manifest.outputs.log_root }}/gnustep-cli-new
           GP_GNUSTEP_CLI_SMOKE_ROOT: ${{ runner.temp }}/gnustep-cli-new-smoke
+          GP_GNUSTEP_CLI_HOST_KIND: linux-ubuntu-appimage
         run: |
           set -euo pipefail
           if [ -z "${GP_GNUSTEP_CLI_ROOT:-}" ]; then

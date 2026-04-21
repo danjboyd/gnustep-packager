@@ -952,6 +952,128 @@ Current status notes:
   - release notes identify the `gnustep-cli-new` baseline that downstream
     projects should use or compare against
 
+## Phase 14: Hosted Windows Toolchain Hardening
+Goal: turn the `gnustep-cli-new` Windows/MSI bootstrap path from workflow
+integration into a proven, diagnosable, release-ready hosted-runner path.
+Status: phase 14A through phase 14D implemented; phase 14E through phase 14H
+planned.
+
+This phase focuses on hosted Windows evidence, path normalization across
+PowerShell, MSYS2, and Windows command contexts, and upstream-quality blocker
+reports. The MSI workflow should continue to package from the staged payload;
+this phase hardens how that staged payload is built and diagnosed on the
+standard hosted Windows runner path.
+
+Current status notes:
+- `Phase 14A` landed as hosted Windows evidence capture in the shared
+  `gnustep-cli-new` smoke path, including host kind, runner metadata, selected
+  manifest, setup logs, doctor output, and command logs suitable for CI
+  artifacts.
+- `Phase 14B` landed as Windows path-context logging for MSYS2 and Windows path
+  forms, including `cygpath` output, PATH entries, command lookup, and
+  `cmd.exe where gnustep` when available.
+- `Phase 14C` landed as workflow enforcement that the MSI hosted path runs the
+  `gnustep-cli-new` smoke before the packaging pipeline, keeping the sample MSI
+  build, stage, package, install, smoke validation, and uninstall path tied to
+  the provisioned toolchain.
+- `Phase 14D` landed as richer blocker-report content for Windows-specific
+  failures, including selected host kind, context logs, and exact command logs
+  with preserved exit status.
+- next recommended starting point: run the hosted Windows validation workflow
+  against this branch, inspect the uploaded `gnustep-cli-new` diagnostics, and
+  use the result to execute `Phase 14E`.
+
+- `Phase 14A`: Hosted Windows bootstrap evidence pass
+  Deliverables:
+  - hosted Windows/MSYS2 evidence capture for the `gnustep-cli-new` setup smoke
+  - logs for setup, `gnustep --version`, `gnustep doctor --json`,
+    `gnustep new`, `gnustep build`, and `gnustep run`
+  - clear separation between packager workflow failures and upstream
+    `gnustep-cli-new` blockers
+  Exit criteria:
+  - Windows runs upload enough evidence to determine where a bootstrap failure
+    belongs
+  - hosted-runner evidence does not require manual log archaeology
+
+- `Phase 14B`: Windows bootstrap path normalization
+  Deliverables:
+  - normalized treatment of `GP_GNUSTEP_CLI_ROOT`, `GITHUB_PATH`,
+    `MSYS2_LOCATION`, and runner temp paths across PowerShell, MSYS2, and
+    Windows command contexts
+  - diagnostics for POSIX and Windows path forms
+  - command lookup logs for `gnustep` and bootstrap tools
+  Exit criteria:
+  - spaces, Windows separators, and MSYS2 path conversion failures are visible
+    in diagnostics
+  - workflow changes do not hide which path form was used by each shell
+
+- `Phase 14C`: MSI fixture build from provisioned toolchain
+  Deliverables:
+  - MSI workflow ordering that runs `gnustep-cli-new` before build and stage
+  - regression coverage that prevents direct hosted-runner GNUstep package
+    installation from re-entering the default MSI path
+  - validation that the existing MSI pipeline still runs through build, stage,
+    package, install, smoke, and uninstall from the provisioned environment
+  Exit criteria:
+  - hosted MSI packaging depends on the `gnustep-cli-new` provisioned
+    toolchain path, not legacy direct GNUstep setup
+  - workflow-surface tests catch regressions in that ordering
+
+- `Phase 14D`: Windows failure classification and upstream report quality
+  Deliverables:
+  - Windows-specific blocker-report fields such as host kind, MSYS2 location,
+    path conversion output, command lookup, and failed command logs
+  - artifact layout that keeps `gnustep-cli-new` evidence separate from generic
+    package logs
+  - upstream-request documentation guidance for filing or updating Windows
+    blockers
+  Exit criteria:
+  - a failed Windows bootstrap smoke produces a ready-to-copy upstream report
+  - the report is precise enough to decide whether the fix belongs in
+    `gnustep-packager`, `gnustep-cli-new`, MSYS2 packaging, or WiX integration
+
+- `Phase 14E`: Windows hosted-runner regression gate
+  Deliverables:
+  - hosted Windows CI status checks that make the `gnustep-cli-new` smoke a
+    required release-packaging gate
+  - uploaded diagnostics retained for failed hosted Windows runs
+  - documentation for interpreting the hosted-runner result
+  Exit criteria:
+  - release packaging cannot proceed from a Windows hosted runner that skipped
+    or failed the supported bootstrap smoke
+
+- `Phase 14F`: Upstream feedback loop
+  Deliverables:
+  - confirmed Windows blockers recorded in
+    `docs/gnustep-cli-new-upstream-requests.md`
+  - minimal reproductions extracted from hosted-runner diagnostics
+  - retest notes when upstream manifests or artifacts change
+  Exit criteria:
+  - every confirmed upstream Windows blocker has a concise reproduction and a
+    packager impact statement
+
+- `Phase 14G`: Consumer-facing Windows migration notes
+  Deliverables:
+  - docs for moving downstream Windows workflows away from direct GNUstep MSYS2
+    setup and toward the reusable `gnustep-cli-new` bootstrap path
+  - guidance for keeping app-specific host packages under
+    `hostDependencies.windows.msys2Packages`
+  - examples for hosted and self-hosted Windows runners
+  Exit criteria:
+  - downstream maintainers can migrate Windows packaging without reading
+    workflow internals
+
+- `Phase 14H`: Release readiness baseline
+  Deliverables:
+  - release-gate notes for the known-good Windows runner image,
+    `gnustep-cli-new` manifest, MSYS2 bootstrap baseline, WiX baseline, and MSI
+    smoke result
+  - regression coverage for baseline documentation and workflow inputs
+  - release-note guidance for future baseline changes
+  Exit criteria:
+  - a packager release records the Windows toolchain baseline that downstream
+    projects should use or compare against
+
 ## Suggested Early Execution Order
 Prioritize these subphases first:
 

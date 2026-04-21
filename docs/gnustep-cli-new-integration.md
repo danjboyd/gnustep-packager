@@ -113,6 +113,10 @@ on both success and failure. On failure, that file is the ready-to-copy upstream
 report body. The reusable workflow uploads the `gnustep-cli-new` log directory
 as a dedicated diagnostic artifact even when later packaging steps fail.
 
+See [windows-gnustep-cli-new-hardening.md](windows-gnustep-cli-new-hardening.md)
+for the Windows/MSYS2 hosted-runner evidence contract and failure
+classification guidance.
+
 ## Migration Notes
 
 Downstream projects should remove workflow-local GNUstep installation steps

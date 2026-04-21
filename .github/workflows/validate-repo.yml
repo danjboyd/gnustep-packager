@@ -41,6 +41,7 @@ jobs:
           export GP_GNUSTEP_CLI_ROOT="$(cygpath -u '${{ runner.temp }}')/gnustep-cli-new"
           export GP_GNUSTEP_CLI_LOG_ROOT="$(cygpath -u '${{ github.workspace }}')/dist/logs/gnustep-cli-new"
           export GP_GNUSTEP_CLI_SMOKE_ROOT="$(cygpath -u '${{ runner.temp }}')/gnustep-cli-new-smoke"
+          export GP_GNUSTEP_CLI_HOST_KIND="windows-msys2-clang64"
           ./scripts/ci/gnustep-cli-new-bootstrap-smoke.sh
           {
             cygpath -w "${GP_GNUSTEP_CLI_ROOT}/bin"
@@ -94,6 +95,7 @@ jobs:
           export GP_GNUSTEP_CLI_ROOT="${RUNNER_TEMP}/gnustep-cli-new"
           export GP_GNUSTEP_CLI_LOG_ROOT="${GITHUB_WORKSPACE}/dist/logs/gnustep-cli-new"
           export GP_GNUSTEP_CLI_SMOKE_ROOT="${RUNNER_TEMP}/gnustep-cli-new-smoke"
+          export GP_GNUSTEP_CLI_HOST_KIND="linux-ubuntu-appimage"
           ./scripts/ci/gnustep-cli-new-bootstrap-smoke.sh
           {
             echo "${GP_GNUSTEP_CLI_ROOT}/bin"

@@ -217,6 +217,7 @@ Release and consumer docs:
 - [docs/objcmarkdown-upstream-requests.md](docs/objcmarkdown-upstream-requests.md)
 - [docs/gnustep-cli-new-integration.md](docs/gnustep-cli-new-integration.md)
 - [docs/gnustep-cli-new-upstream-requests.md](docs/gnustep-cli-new-upstream-requests.md)
+- [docs/windows-gnustep-cli-new-hardening.md](docs/windows-gnustep-cli-new-hardening.md)
 - [docs/update-architecture.md](docs/update-architecture.md)
 - [docs/update-feed-contract.md](docs/update-feed-contract.md)
 - [docs/updater-consumer-guide.md](docs/updater-consumer-guide.md)
