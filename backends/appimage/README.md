@@ -29,6 +29,9 @@ AppImage using the shared stage-first packaging model.
 ## Host Requirements
 - Linux x64 host
 - `pwsh` 7+
+- `gnustep-cli-new` for supported CI GNUstep toolchain bootstrap
+- `ca-certificates`, `curl`, `tar`, and `gzip` for bootstrap download and
+  extraction
 - `squashfs-tools`
 - `desktop-file-utils` for repo CI and recommended local validation
 - `appimagetool` on `PATH`, or let the backend bootstrap it into
@@ -77,14 +80,17 @@ Supported smoke modes:
 ## CI Usage
 Use `.github/workflows/package-gnustep-app.yml` with `backend: appimage`.
 By default the reusable workflow selects `["ubuntu-latest"]` and installs
-`squashfs-tools` plus `desktop-file-utils` before calling the shared pipeline
-wrapper.
+`gnustep-cli-new` bootstrap prerequisites, `squashfs-tools`, and
+`desktop-file-utils`. It then runs the `gnustep-cli-new` bootstrap smoke before
+calling the shared pipeline wrapper.
 
 Downstreams can override:
 
 - `runs-on-appimage` for self-hosted runner labels
 - `skip-default-host-setup` when the runner is already provisioned
 - `appimage-apt-packages` to change the default apt package list
+- `gnustep-cli-manifest-url`, `gnustep-cli-bootstrap-url`, and
+  `gnustep-cli-root` to test or pin the selected upstream toolchain manifest
 - `preflight-shell` and `preflight-command` for repo-specific bootstrap work
 
 ## Related Docs

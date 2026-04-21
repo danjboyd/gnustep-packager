@@ -132,6 +132,19 @@ and validation pass:
   generated launchers
 - backend validation hooks that check packaged or extracted results for drift
 
+This repo now also includes the phase 13 `gnustep-cli-new` integration:
+
+- `gnustep-cli-new` is the default GNUstep bootstrap path for supported
+  Windows/MSI and Linux/AppImage CI packaging flows
+- the reusable workflow exposes `gnustep-cli-manifest-url`,
+  `gnustep-cli-bootstrap-url`, and `gnustep-cli-root` for reproducible upstream
+  manifest selection and validation
+- hosted MSI and AppImage CI paths run a clean `gnustep-cli-new` bootstrap
+  smoke before the shared packaging pipeline
+- upstream bootstrap and artifact blockers are tracked as first-class packager
+  blockers through generated diagnostic reports instead of being hidden by
+  legacy setup fallback
+
 Current sample verification covers:
 - `build`
 - `stage`
@@ -202,6 +215,7 @@ Release and consumer docs:
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md)
 - [docs/compliance-notices.md](docs/compliance-notices.md)
 - [docs/objcmarkdown-upstream-requests.md](docs/objcmarkdown-upstream-requests.md)
+- [docs/gnustep-cli-new-integration.md](docs/gnustep-cli-new-integration.md)
 - [docs/gnustep-cli-new-upstream-requests.md](docs/gnustep-cli-new-upstream-requests.md)
 - [docs/update-architecture.md](docs/update-architecture.md)
 - [docs/update-feed-contract.md](docs/update-feed-contract.md)

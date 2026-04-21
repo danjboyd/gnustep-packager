@@ -18,6 +18,7 @@ jobs:
       manifest-path: packaging/package.manifest.json
       backend: msi
       package-version: ${{ github.ref_name }}
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
       run-validation: true
       run-smoke: true
       artifact-name: my-gnustep-app-windows
@@ -32,6 +33,7 @@ jobs:
       manifest-path: packaging/package.manifest.json
       backend: appimage
       package-version: ${{ github.ref_name }}
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
       run-validation: true
       run-smoke: true
       artifact-name: my-gnustep-app-linux

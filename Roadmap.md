@@ -802,12 +802,43 @@ Goal: make `gnustep-cli-new` the default and required GNUstep toolchain
 bootstrap path across supported local and CI packaging flows, treating
 `gnustep-cli-new` failures as blockers to diagnose and report upstream rather
 than falling back to legacy repo-local setup code.
-Status: planned.
+Status: implemented.
 
 This phase recognizes `gnustep-cli-new` as a sister project and a core part of
 the packaging strategy. The packager should exercise it early, use it as the
 normal source of GNUstep build environments, and produce concise upstream bug
 reports whenever it prevents a supported packaging path from working.
+
+Current status notes:
+- `Phase 13A` landed as a documented policy update: `gnustep-cli-new` is now
+  the default GNUstep bootstrap path for supported Linux/AppImage CI packaging
+  flows, and supported bootstrap failures are tracked as blockers instead of
+  being bypassed by legacy setup fallback.
+- `Phase 13B` landed as workflow-level version and manifest selection inputs:
+  `gnustep-cli-manifest-url`, `gnustep-cli-bootstrap-url`, and
+  `gnustep-cli-root`.
+- `Phase 13C` landed as `scripts/ci/gnustep-cli-new-bootstrap-smoke.sh`, which
+  runs setup, `gnustep --version`, `gnustep doctor --json`, `gnustep new`,
+  `gnustep build`, and `gnustep run`, while preserving logs for upstream
+  reports.
+- `Phase 13D` landed for the Linux/AppImage CI path: the reusable AppImage
+  workflow and repo validation now run the `gnustep-cli-new` bootstrap smoke
+  before invoking the shared packaging pipeline and expose the selected
+  toolchain root on `PATH`.
+- `Phase 13E` landed for the Windows/MSI CI path: the reusable MSI workflow and
+  repo validation now run the `gnustep-cli-new` bootstrap smoke from an MSYS2
+  `CLANG64` bootstrap shell before invoking the shared packaging pipeline.
+- `Phase 13F` landed as a generated `gnustep-cli-new-blocker-report.md` plus a
+  dedicated workflow diagnostic artifact for bootstrap logs, doctor output,
+  selected manifest data, and failed command output.
+- `Phase 13G` landed as updated consumer setup guidance and downstream workflow
+  examples that show the standard `gnustep-cli-new` manifest selection.
+- `Phase 13H` landed as release-gate documentation and workflow regression
+  coverage that require the `gnustep-cli-new` smoke and known-good manifest
+  baseline before release packaging.
+- next recommended starting point: define the next roadmap phase around
+  hardening Windows `gnustep-cli-new` evidence from hosted runner results and
+  any upstream fixes found by the new MSI bootstrap path.
 
 - `Phase 13A`: Policy and support-boundary update
   Deliverables:

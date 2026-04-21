@@ -24,12 +24,33 @@ jobs:
           msystem: CLANG64
           update: true
           install: >-
+            curl
+            tar
+            gzip
             mingw-w64-clang-x86_64-clang
 
       - name: Expose MSYS2 Toolchain
         run: |
           "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           (Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'clang64\bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Bootstrap And Smoke Test gnustep-cli-new
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          export GP_GNUSTEP_CLI_ROOT="$(cygpath -u '${{ runner.temp }}')/gnustep-cli-new"
+          export GP_GNUSTEP_CLI_LOG_ROOT="$(cygpath -u '${{ github.workspace }}')/dist/logs/gnustep-cli-new"
+          export GP_GNUSTEP_CLI_SMOKE_ROOT="$(cygpath -u '${{ runner.temp }}')/gnustep-cli-new-smoke"
+          ./scripts/ci/gnustep-cli-new-bootstrap-smoke.sh
+          {
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/bin"
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/Tools"
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/System/Tools"
+          } >> "$GITHUB_PATH"
+          {
+            echo "GP_GNUSTEP_CLI_ROOT=$(cygpath -w "${GP_GNUSTEP_CLI_ROOT}")"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json}"
+          } >> "$GITHUB_ENV"
 
       - name: Validate Example Manifest
         run: |
@@ -64,7 +85,25 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y squashfs-tools desktop-file-utils
+          sudo apt-get install -y ca-certificates curl tar gzip squashfs-tools desktop-file-utils
+
+      - name: Bootstrap And Smoke Test gnustep-cli-new
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GP_GNUSTEP_CLI_ROOT="${RUNNER_TEMP}/gnustep-cli-new"
+          export GP_GNUSTEP_CLI_LOG_ROOT="${GITHUB_WORKSPACE}/dist/logs/gnustep-cli-new"
+          export GP_GNUSTEP_CLI_SMOKE_ROOT="${RUNNER_TEMP}/gnustep-cli-new-smoke"
+          ./scripts/ci/gnustep-cli-new-bootstrap-smoke.sh
+          {
+            echo "${GP_GNUSTEP_CLI_ROOT}/bin"
+            echo "${GP_GNUSTEP_CLI_ROOT}/Tools"
+            echo "${GP_GNUSTEP_CLI_ROOT}/System/Tools"
+          } >> "$GITHUB_PATH"
+          {
+            echo "GP_GNUSTEP_CLI_ROOT=${GP_GNUSTEP_CLI_ROOT}"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json}"
+          } >> "$GITHUB_ENV"
 
       - name: Validate Linux Example Manifest
         run: |

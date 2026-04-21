@@ -5,8 +5,15 @@ Describe "Reusable workflow surface" {
   BeforeAll {
     $script:repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\\.."))
     $script:workflowText = Get-Content -Raw -Path (Join-Path $script:repoRoot ".github/workflows/package-gnustep-app.yml")
+    $script:validateRepoText = Get-Content -Raw -Path (Join-Path $script:repoRoot ".github/workflows/validate-repo.yml")
     $script:githubActionsDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/github-actions.md")
     $script:consumerSetupDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/consumer-setup.md")
+    $script:gnustepCliDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/gnustep-cli-new-integration.md")
+    $script:releaseGateDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/release-gate.md")
+    $script:downstreamMsiText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/package-msi.yml")
+    $script:downstreamAppImageText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/package-appimage.yml")
+    $script:downstreamReleaseText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/package-release-with-updates.yml")
+    $script:gnustepCliSmokeText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/ci/gnustep-cli-new-bootstrap-smoke.sh")
     $script:coreText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/lib/core.ps1")
     $script:otvmRemoteText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/ci/otvm-windows-remote.ps1")
   }
@@ -18,6 +25,9 @@ Describe "Reusable workflow surface" {
       "skip-default-host-setup:",
       "msys2-packages:",
       "appimage-apt-packages:",
+      "gnustep-cli-manifest-url:",
+      "gnustep-cli-bootstrap-url:",
+      "gnustep-cli-root:",
       "preflight-shell:",
       "preflight-command:"
     )) {
@@ -27,18 +37,84 @@ Describe "Reusable workflow surface" {
     }
   }
 
-  It "installs the documented default MSI GNUstep baseline" {
+  It "wires gnustep-cli-new into the default AppImage workflow path" {
+    foreach ($pattern in @(
+      "Bootstrap And Smoke Test gnustep-cli-new",
+      "scripts/ci/gnustep-cli-new-bootstrap-smoke.sh",
+      "GP_GNUSTEP_CLI_MANIFEST_URL",
+      "GP_GNUSTEP_CLI_BOOTSTRAP_URL",
+      "GP_GNUSTEP_CLI_ROOT",
+      "gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json"
+    )) {
+      if ($script:workflowText -notmatch [regex]::Escape($pattern)) {
+        throw "Reusable AppImage workflow is missing gnustep-cli-new integration surface: $pattern"
+      }
+    }
+  }
+
+  It "wires gnustep-cli-new into the default MSI workflow path" {
+    foreach ($pattern in @(
+      "Install MSYS2 Bootstrap Shell",
+      "Bootstrap And Smoke Test gnustep-cli-new For MSI",
+      "shell: msys2 {0}",
+      "GP_GNUSTEP_CLI_MANIFEST_URL",
+      "GP_GNUSTEP_CLI_BOOTSTRAP_URL",
+      "MSYS2_LOCATION",
+      "scripts/ci/gnustep-cli-new-bootstrap-smoke.sh"
+    )) {
+      if ($script:workflowText -notmatch [regex]::Escape($pattern)) {
+        throw "Reusable MSI workflow is missing gnustep-cli-new integration surface: $pattern"
+      }
+    }
+    if ($script:validateRepoText -notmatch [regex]::Escape("shell: msys2 {0}") -or
+        $script:validateRepoText -notmatch [regex]::Escape("Bootstrap And Smoke Test gnustep-cli-new")) {
+      throw "Repo Windows validation should run the gnustep-cli-new bootstrap smoke from MSYS2."
+    }
+  }
+
+  It "ships an Ubuntu gnustep-cli-new bootstrap smoke for repo validation" {
+    foreach ($pattern in @(
+      "gnustep-bootstrap.sh",
+      "--json --yes setup",
+      "gnustep --version",
+      "gnustep doctor --json",
+      "gnustep new cli-tool HelloPackager --json",
+      "gnustep build --json",
+      "gnustep run --json"
+    )) {
+      if ($script:gnustepCliSmokeText -notmatch [regex]::Escape($pattern)) {
+        throw "gnustep-cli-new smoke script is missing expected command: $pattern"
+      }
+    }
+    if ($script:validateRepoText -notmatch [regex]::Escape("Bootstrap And Smoke Test gnustep-cli-new")) {
+      throw "Repo validation should run the gnustep-cli-new bootstrap smoke on Linux."
+    }
+  }
+
+  It "keeps direct GNUstep package installation out of the MSI workflow baseline" {
     foreach ($pattern in @(
       "mingw-w64-clang-x86_64-gnustep-make",
       "mingw-w64-clang-x86_64-gnustep-base",
       "mingw-w64-clang-x86_64-gnustep-gui",
       "mingw-w64-clang-x86_64-gnustep-back",
-      "mingw-w64-clang-x86_64-libdispatch",
-      "mingw-w64-clang-x86_64-libobjc2",
       "mingw-w64-clang-x86_64-toolchain"
     )) {
-      if ($script:workflowText -notmatch [regex]::Escape($pattern)) {
-        throw "Reusable workflow MSI baseline is missing package: $pattern"
+      if ($script:workflowText -match [regex]::Escape($pattern)) {
+        throw "Reusable workflow MSI baseline should use gnustep-cli-new instead of installing GNUstep directly: $pattern"
+      }
+    }
+  }
+
+  It "uploads gnustep-cli-new diagnostic artifacts and blocker reports" {
+    foreach ($pattern in @(
+      "Upload gnustep-cli-new Diagnostics",
+      "-gnustep-cli-new",
+      "gnustep-cli-new-blocker-report.md"
+    )) {
+      if (($script:workflowText -notmatch [regex]::Escape($pattern)) -and
+          ($script:gnustepCliDocText -notmatch [regex]::Escape($pattern)) -and
+          ($script:gnustepCliSmokeText -notmatch [regex]::Escape($pattern))) {
+        throw "gnustep-cli-new diagnostic artifact surface is missing: $pattern"
       }
     }
   }
@@ -65,13 +141,18 @@ Describe "Reusable workflow surface" {
       "runs-on-msi",
       "runs-on-appimage",
       "preflight-command",
+      "gnustep-cli-manifest-url",
+      "gnustep-cli-new",
+      "gnustep-cli-new-blocker-report.md",
       "hostDependencies",
       "gnustep-cmark",
       "msys2-packages",
       "launch-only",
       "marker-file"
     )) {
-      if (($script:githubActionsDocText -notmatch [regex]::Escape($pattern)) -and ($script:consumerSetupDocText -notmatch [regex]::Escape($pattern))) {
+      if (($script:githubActionsDocText -notmatch [regex]::Escape($pattern)) -and
+          ($script:consumerSetupDocText -notmatch [regex]::Escape($pattern)) -and
+          ($script:gnustepCliDocText -notmatch [regex]::Escape($pattern))) {
         throw "Updated docs do not mention expected workflow or smoke-mode surface: $pattern"
       }
     }
@@ -95,6 +176,26 @@ Describe "Reusable workflow surface" {
     $examplePath = Join-Path $script:repoRoot "examples/downstream/package-appimage-self-hosted.yml"
     if (-not (Test-Path $examplePath)) {
       throw "Expected self-hosted AppImage workflow example at $examplePath"
+    }
+  }
+
+  It "ships downstream hosted workflow examples with gnustep-cli-new manifest selection" {
+    foreach ($text in @($script:downstreamMsiText, $script:downstreamAppImageText, $script:downstreamReleaseText)) {
+      if ($text -notmatch [regex]::Escape("gnustep-cli-manifest-url")) {
+        throw "Downstream hosted workflow examples should show gnustep-cli-new manifest selection."
+      }
+    }
+  }
+
+  It "documents the release gate gnustep-cli-new baseline" {
+    foreach ($pattern in @(
+      "gnustep-cli-new",
+      "v0.1.0-dev",
+      "gnustep-cli-new-blocker-report.md"
+    )) {
+      if ($script:releaseGateDocText -notmatch [regex]::Escape($pattern)) {
+        throw "Release gate docs should record gnustep-cli-new baseline and diagnostics: $pattern"
+      }
     }
   }
 

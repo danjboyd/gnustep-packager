@@ -72,7 +72,8 @@ For the current MSI backend, the consumer should:
    is not enough
 
 The reusable workflow's default MSI host setup installs a GNUstep-capable MSYS2
-`CLANG64` baseline. Downstream apps remain responsible for app-specific
+`CLANG64` bootstrap shell and then provisions the GNUstep toolchain through
+`gnustep-cli-new`. Downstream apps remain responsible for app-specific
 dependencies such as `mingw-w64-clang-x86_64-cmark`, either directly under
 `hostDependencies.windows.msys2Packages` or through a reusable profile such as
 `gnustep-cmark`.
@@ -92,6 +93,23 @@ For the AppImage backend, the consumer should:
    reusable dependency profile such as `gnustep-cmark`
 8. install `squashfs-tools` and `desktop-file-utils` before local validation or
    let the reusable workflow install them in CI
+
+The supported CI path uses `gnustep-cli-new` to provision and smoke-test the
+GNUstep build toolchain before running MSI or AppImage build, stage, package,
+and validation commands. Downstream build and stage commands can assume the
+selected `gnustep-cli-new` root has been added to `PATH` when
+`skip-default-host-setup` is left at its default `false` value.
+
+Use the reusable workflow's `gnustep-cli-manifest-url` and
+`gnustep-cli-bootstrap-url` inputs when validating a newly published
+`gnustep-cli-new` release manifest or bootstrap change. On self-hosted runners
+with `skip-default-host-setup: true`, the consumer owns that bootstrap and
+should fail preflight if the expected `gnustep` command is unavailable.
+
+When migrating older downstream workflows, remove hosted-runner steps that
+install GNUstep directly through MSYS2 or apt. Keep app-specific prerequisites
+in the manifest, and let the reusable workflow provide the default
+`gnustep-cli-new` toolchain bootstrap.
 
 Recommended AppImage smoke modes:
 

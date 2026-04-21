@@ -42,6 +42,8 @@ Recommended adoption order:
    backend-specific path assertions.
 5. Replace the placeholder `updates.github.*` and backend `updates.feedUrl`
    values with your real repo and feed URLs.
-6. Add real `compliance.runtimeNotices` entries for shipped runtime contents.
-7. Run `scripts/run-packaging-pipeline.ps1 -Backend <msi|appimage> -RunSmoke`
+6. Keep the default `gnustep-cli-new` workflow bootstrap unless you are using a
+   self-hosted runner with an explicit preflight.
+7. Add real `compliance.runtimeNotices` entries for shipped runtime contents.
+8. Run `scripts/run-packaging-pipeline.ps1 -Backend <msi|appimage> -RunSmoke`
    locally.

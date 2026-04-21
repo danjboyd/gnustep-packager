@@ -10,6 +10,10 @@ workflow still delegates packaging to `scripts/run-packaging-pipeline.ps1`, but
 it now lets callers control runner selection, host setup, and app-specific
 prerequisites.
 
+For Windows/MSI and Linux/AppImage jobs with default host setup enabled, the
+workflow uses `gnustep-cli-new` as the standard GNUstep toolchain bootstrap path
+before it starts the shared packaging pipeline.
+
 ## Runner Selection
 Default runner JSON arrays:
 
@@ -25,24 +29,25 @@ When `skip-default-host-setup` is `false`, the workflow provisions a documented
 baseline per backend, resolves the manifest, and then merges manifest-declared
 host dependency packages with any additive workflow inputs.
 
-Default MSI MSYS2 baseline:
+Default MSI MSYS2 bootstrap baseline:
 
-- `make`
-- `mingw-w64-clang-x86_64-gnustep-make`
-- `mingw-w64-clang-x86_64-gnustep-base`
-- `mingw-w64-clang-x86_64-gnustep-gui`
-- `mingw-w64-clang-x86_64-gnustep-back`
-- `mingw-w64-clang-x86_64-libdispatch`
-- `mingw-w64-clang-x86_64-libobjc2`
-- `mingw-w64-clang-x86_64-toolchain`
+- `curl`
+- `tar`
+- `gzip`
 
 Manifest-declared Windows host packages under
-`hostDependencies.windows.msys2Packages` are installed automatically. The
-`msys2-packages` input remains available as an additive override or temporary
-escape hatch while default host setup is enabled.
+`hostDependencies.windows.msys2Packages` are installed into the bootstrap shell
+automatically. The reusable workflow then runs `gnustep-cli-new` setup and smoke
+validation before MSI packaging. The `msys2-packages` input remains available as
+an additive override or temporary escape hatch while default host setup is
+enabled.
 
 Default AppImage host packages:
 
+- `ca-certificates`
+- `curl`
+- `tar`
+- `gzip`
 - `squashfs-tools`
 - `desktop-file-utils`
 
@@ -50,6 +55,14 @@ Manifest-declared Linux host packages under `hostDependencies.linux.aptPackages`
 are added automatically. Override or extend that list through
 `appimage-apt-packages`, or set
 `skip-default-host-setup: true` on a pre-provisioned self-hosted runner.
+
+After installing backend host prerequisites, the default MSI and AppImage paths
+run the repo-owned `scripts/ci/gnustep-cli-new-bootstrap-smoke.sh` script. That
+smoke downloads the selected bootstrap script, runs `gnustep-bootstrap.sh
+--json --yes setup`, records `gnustep --version`, runs `gnustep doctor --json`,
+generates a small `HelloPackager` CLI project, builds it, and runs it. The
+workflow adds the selected `gnustep-cli-new` root to `PATH` for the downstream
+build and stage commands.
 
 When `skip-default-host-setup` is `true`, the workflow does not apply
 `msys2-packages` or `appimage-apt-packages`. In that mode, app-specific host
@@ -80,6 +93,9 @@ Primary inputs:
 - `skip-default-host-setup`
 - `msys2-packages`
 - `appimage-apt-packages`
+- `gnustep-cli-manifest-url`
+- `gnustep-cli-bootstrap-url`
+- `gnustep-cli-root`
 - `preflight-shell`
 - `preflight-command`
 - `run-validation`
@@ -93,6 +109,9 @@ Primary inputs:
 The reusable workflow uploads package outputs exactly as the backend produced
 them. When updates are enabled, that includes the generated `.update-feed.json`
 sidecars and any AppImage `.zsync` outputs under the `-packages` artifact.
+The workflow also uploads a dedicated `<artifact-name>-gnustep-cli-new`
+diagnostic artifact containing the selected manifest, setup logs, doctor output,
+and `gnustep-cli-new-blocker-report.md`.
 
 ## Secrets
 Optional signing secrets:
@@ -110,6 +129,7 @@ jobs:
     with:
       manifest-path: packaging/package.manifest.json
       backend: msi
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
       run-validation: true
       run-smoke: true
       artifact-name: my-app-windows
@@ -122,6 +142,7 @@ jobs:
     with:
       manifest-path: packaging/package.manifest.json
       backend: appimage
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
       run-validation: true
       run-smoke: true
       artifact-name: my-app-linux
@@ -164,6 +185,15 @@ preflight still runs, but it verifies dependencies instead of installing them
 automatically. The workflow now emits a host-setup policy summary during
 manifest resolution so the logs state whether the run is in install-and-verify
 or verify-only mode.
+
+The `gnustep-cli-manifest-url`, `gnustep-cli-bootstrap-url`, and
+`gnustep-cli-root` inputs exist so CI can test a new upstream manifest or
+bootstrap commit without editing packager implementation files. The selected
+values are recorded under the workflow log root in `gnustep-cli-new` logs. If
+that supported bootstrap path fails, treat it as an upstream blocker unless the
+failure is clearly in downstream app build/stage commands or packager
+transform/validation code. The generated `gnustep-cli-new-blocker-report.md`
+file is intended to be copied into the upstream issue body.
 
 ## Release Publishing Follow-On
 The reusable workflow stops at packaging, validation, and artifact upload.

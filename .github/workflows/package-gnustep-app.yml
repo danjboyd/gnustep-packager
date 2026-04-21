@@ -41,7 +41,19 @@ on:
       appimage-apt-packages:
         required: false
         type: string
-        default: "squashfs-tools desktop-file-utils"
+        default: "ca-certificates curl tar gzip squashfs-tools desktop-file-utils"
+      gnustep-cli-manifest-url:
+        required: false
+        type: string
+        default: "https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json"
+      gnustep-cli-bootstrap-url:
+        required: false
+        type: string
+        default: "https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/master/scripts/bootstrap/gnustep-bootstrap.sh"
+      gnustep-cli-root:
+        required: false
+        type: string
+        default: ""
       preflight-shell:
         required: false
         type: string
@@ -188,7 +200,7 @@ jobs:
           "host_setup_summary=$($hostSetupPlan.Summary)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host $hostSetupPlan.Summary
 
-      - name: Install MSYS2 CLANG64 Prerequisites
+      - name: Install MSYS2 Bootstrap Shell
         if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup }}
         id: msys2
         uses: msys2/setup-msys2@v2
@@ -196,14 +208,9 @@ jobs:
           msystem: CLANG64
           update: true
           install: >-
-            make
-            mingw-w64-clang-x86_64-gnustep-make
-            mingw-w64-clang-x86_64-gnustep-base
-            mingw-w64-clang-x86_64-gnustep-gui
-            mingw-w64-clang-x86_64-gnustep-back
-            mingw-w64-clang-x86_64-libdispatch
-            mingw-w64-clang-x86_64-libobjc2
-            mingw-w64-clang-x86_64-toolchain
+            curl
+            tar
+            gzip
             ${{ steps.manifest.outputs.resolved_msys2_packages }}
 
       - name: Expose MSYS2 Toolchain
@@ -211,6 +218,36 @@ jobs:
         run: |
           "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           (Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'clang64\bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Bootstrap And Smoke Test gnustep-cli-new For MSI
+        if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup }}
+        shell: msys2 {0}
+        env:
+          GP_GNUSTEP_CLI_MANIFEST_URL: ${{ inputs.gnustep-cli-manifest-url }}
+          GP_GNUSTEP_CLI_BOOTSTRAP_URL: ${{ inputs.gnustep-cli-bootstrap-url }}
+          GP_GNUSTEP_CLI_ROOT: ${{ inputs.gnustep-cli-root }}
+          GP_GNUSTEP_CLI_LOG_ROOT: ${{ steps.manifest.outputs.log_root }}/gnustep-cli-new
+          GP_GNUSTEP_CLI_SMOKE_ROOT: ${{ runner.temp }}/gnustep-cli-new-smoke
+        run: |
+          set -euo pipefail
+          if [ -z "${GP_GNUSTEP_CLI_ROOT:-}" ]; then
+            GP_GNUSTEP_CLI_ROOT="$(cygpath -u '${{ runner.temp }}')/gnustep-cli-new"
+            export GP_GNUSTEP_CLI_ROOT
+          fi
+          GP_GNUSTEP_CLI_LOG_ROOT="$(cygpath -u "${GP_GNUSTEP_CLI_LOG_ROOT}")"
+          GP_GNUSTEP_CLI_SMOKE_ROOT="$(cygpath -u "${GP_GNUSTEP_CLI_SMOKE_ROOT}")"
+          export GP_GNUSTEP_CLI_LOG_ROOT GP_GNUSTEP_CLI_SMOKE_ROOT
+          ./.gnustep-packager-toolkit/scripts/ci/gnustep-cli-new-bootstrap-smoke.sh
+          {
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/bin"
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/Tools"
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/System/Tools"
+          } >> "$GITHUB_PATH"
+          {
+            echo "GP_GNUSTEP_CLI_ROOT=$(cygpath -w "${GP_GNUSTEP_CLI_ROOT}")"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL}"
+            echo "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}"
+          } >> "$GITHUB_ENV"
 
       - name: Install Linux AppImage Prerequisites
         if: ${{ inputs.backend == 'appimage' && !inputs.skip-default-host-setup }}
@@ -223,6 +260,32 @@ jobs:
           fi
           sudo apt-get update
           sudo apt-get install -y $packages
+
+      - name: Bootstrap And Smoke Test gnustep-cli-new
+        if: ${{ inputs.backend == 'appimage' && !inputs.skip-default-host-setup }}
+        shell: bash
+        env:
+          GP_GNUSTEP_CLI_MANIFEST_URL: ${{ inputs.gnustep-cli-manifest-url }}
+          GP_GNUSTEP_CLI_BOOTSTRAP_URL: ${{ inputs.gnustep-cli-bootstrap-url }}
+          GP_GNUSTEP_CLI_ROOT: ${{ inputs.gnustep-cli-root }}
+          GP_GNUSTEP_CLI_LOG_ROOT: ${{ steps.manifest.outputs.log_root }}/gnustep-cli-new
+          GP_GNUSTEP_CLI_SMOKE_ROOT: ${{ runner.temp }}/gnustep-cli-new-smoke
+        run: |
+          set -euo pipefail
+          if [ -z "${GP_GNUSTEP_CLI_ROOT:-}" ]; then
+            GP_GNUSTEP_CLI_ROOT="${RUNNER_TEMP}/gnustep-cli-new"
+            export GP_GNUSTEP_CLI_ROOT
+          fi
+          ./.gnustep-packager-toolkit/scripts/ci/gnustep-cli-new-bootstrap-smoke.sh
+          {
+            echo "${GP_GNUSTEP_CLI_ROOT}/bin"
+            echo "${GP_GNUSTEP_CLI_ROOT}/Tools"
+            echo "${GP_GNUSTEP_CLI_ROOT}/System/Tools"
+          } >> "$GITHUB_PATH"
+          {
+            echo "GP_GNUSTEP_CLI_ROOT=${GP_GNUSTEP_CLI_ROOT}"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL}"
+          } >> "$GITHUB_ENV"
 
       - name: Run Caller Preflight (pwsh)
         if: ${{ inputs.preflight-command != '' && inputs.preflight-shell == 'pwsh' }}
@@ -295,7 +358,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Logs
-        if: ${{ inputs.upload-artifacts }}
+        if: ${{ always() && inputs.upload-artifacts }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.artifact-name }}-logs
@@ -303,8 +366,17 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
           if-no-files-found: warn
 
+      - name: Upload gnustep-cli-new Diagnostics
+        if: ${{ always() && inputs.upload-artifacts }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}-gnustep-cli-new
+          path: ${{ steps.manifest.outputs.log_root }}/gnustep-cli-new
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: warn
+
       - name: Upload Validation Output
-        if: ${{ inputs.upload-artifacts }}
+        if: ${{ always() && inputs.upload-artifacts }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.artifact-name }}-validation

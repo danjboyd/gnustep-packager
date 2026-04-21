@@ -12,11 +12,23 @@ of the following are true:
 - package outputs include notice and provenance sidecars
 - downstream onboarding docs and examples are current
 - both supported backends have documented local and CI entry points
+- hosted-runner MSI and AppImage workflow paths run the
+  `gnustep-cli-new` bootstrap smoke before packaging
+- release notes record the known-good `gnustep-cli-new` manifest URL
+
+Current `gnustep-cli-new` release baseline:
+
+```text
+https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
+```
 
 ## Windows MSI Checklist
 
 1. Run `./scripts/test-repo.ps1`
-2. Run:
+2. Confirm the reusable Windows workflow path uploads the
+   `gnustep-cli-new` diagnostic artifact, including
+   `gnustep-cli-new-blocker-report.md`
+3. Run:
 
 ```powershell
 ./scripts/run-packaging-pipeline.ps1 `
@@ -25,7 +37,7 @@ of the following are true:
   -RunSmoke
 ```
 
-3. Confirm these outputs exist:
+4. Confirm these outputs exist:
 - MSI artifact
 - portable ZIP artifact
 - `<artifact-base>.metadata.json`
@@ -33,6 +45,9 @@ of the following are true:
 - `metadata/THIRD-PARTY-NOTICES.txt` inside the transformed install tree
 
 ## AppImage Requirement
+Confirm the reusable Linux workflow path uploads the `gnustep-cli-new`
+diagnostic artifact, including `gnustep-cli-new-blocker-report.md`.
+
 Run:
 
 ```powershell

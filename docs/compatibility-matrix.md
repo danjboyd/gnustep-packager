@@ -12,7 +12,8 @@
 | Toolchain | clang-based GNUstep stage on Linux x64 | Supported | AppImage backend expects a self-contained staged payload |
 | WiX | WiX 3.11.x | Supported | Bootstrapped automatically when missing |
 | AppImage tooling | `appimagetool` x86_64 | Supported | Uses `PATH` when present or bootstraps from the configured download URL |
-| Linux host packages | `squashfs-tools`, `desktop-file-utils` | Supported | Required for repo CI and recommended for local AppImage validation |
+| Toolchain bootstrap | `gnustep-cli-new` `v0.1.0-dev` release manifest | Supported for MSI and AppImage CI | Default hosted workflow paths bootstrap and smoke `gnustep-cli-new` before packaging |
+| Linux host packages | `ca-certificates`, `curl`, `tar`, `gzip`, `squashfs-tools`, `desktop-file-utils` | Supported | Required for repo CI and recommended for local AppImage validation |
 | Workflow | Caller-selected runner labels | Supported | Reusable workflow exposes `runs-on-msi` and `runs-on-appimage` |
 | Workflow | Caller preflight hooks | Supported | Reusable workflow exposes `preflight-shell` and `preflight-command` |
 | Workflow | Additive backend prerequisite packages | Supported | Reusable workflow exposes `msys2-packages` and `appimage-apt-packages` |
