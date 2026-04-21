@@ -50,6 +50,12 @@ Then it checks:
 - `gnustep build --json`
 - `gnustep run --json`
 
+The hosted Windows MSI path currently runs the built `HelloPackager.exe`
+directly after `gnustep build --json`. This keeps the hosted packager gate
+blocked on managed toolchain build/run viability without depending on older
+published `gnustep-cli-new` artifacts that still resolve tool runs to the
+POSIX-style `./obj/<target>` path.
+
 The script writes selection, setup, doctor, build, run, and blocker-report logs
 under `GP_GNUSTEP_CLI_LOG_ROOT`.
 

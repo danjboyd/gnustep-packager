@@ -454,10 +454,20 @@ jobs:
             Push-Location $workRoot
             try {
               Invoke-LoggedProcess -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-new.json") -FilePath "gnustep" -ArgumentList @("new", "cli-tool", "HelloPackager", "--json") -WorkingDirectory $workRoot -TimeoutSeconds 180
-              Push-Location (Join-Path $workRoot "HelloPackager")
+              $projectRoot = Join-Path $workRoot "HelloPackager"
+              Push-Location $projectRoot
               try {
-                Invoke-LoggedProcess -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-build.json") -FilePath "gnustep" -ArgumentList @("build", "--json") -WorkingDirectory (Join-Path $workRoot "HelloPackager") -TimeoutSeconds 600
-                Invoke-LoggedProcess -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-run.json") -FilePath "gnustep" -ArgumentList @("run", "--json") -WorkingDirectory (Join-Path $workRoot "HelloPackager") -TimeoutSeconds 180
+                Invoke-LoggedProcess -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-build.json") -FilePath "gnustep" -ArgumentList @("build", "--json") -WorkingDirectory $projectRoot -TimeoutSeconds 600
+                $helloExe = Join-Path (Join-Path $projectRoot "obj") "HelloPackager.exe"
+                if (!(Test-Path -LiteralPath $helloExe)) {
+                  @(
+                    "timestamp=$([DateTimeOffset]::UtcNow.ToString("o"))",
+                    "expected_executable=$helloExe",
+                    "ERROR: expected Windows smoke executable was not produced by gnustep build"
+                  ) | Set-Content -Path (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-run.json") -Encoding UTF8
+                  throw "Expected Windows smoke executable was not produced: $helloExe"
+                }
+                Invoke-LoggedProcess -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-run.json") -FilePath $helloExe -ArgumentList @() -WorkingDirectory $projectRoot -TimeoutSeconds 180
               }
               finally {
                 Pop-Location
