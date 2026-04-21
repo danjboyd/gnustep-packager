@@ -36,6 +36,12 @@ printf 'GNUstep runtime fixture notice. License: LGPL-2.1-or-later.\n' >"$metada
 printf '# Sample smoke document\n\nThis file is staged for AppImage open-file smoke tests.\n' >"$metadata_smoke/smoke-document.md"
 printf 'fixture stage complete\n' >"$log_root/stage.txt"
 
-printf '\211\120\116\107\015\012\032\012\000\000\000\015\111\110\104\122\000\000\000\001\000\000\000\001\010\004\000\000\000\265\034\014\002\000\000\000\013\111\104\101\124\170\332\143\374\377\037\000\003\003\002\000\357\277\153\111\000\000\000\000\111\105\116\104\256\102\140\202' >"$metadata_icons/sample-linux.png"
+icon_path="$metadata_icons/sample-linux.png"
+: >"$icon_path"
+printf '\211\120\116\107\015\012\032\012\000\000\000\015\111\110\104\122\000\000\000\001\000\000\000\001\010\004\000\000\000\265\034\014\002\000\000\000\013\111\104\101\124\170\332\143\374\377\037\000\003\003\002\000\357\277\153\111\000\000\000\000\111\105\116\104\256\102\140\202' >"$icon_path"
+if [ ! -s "$icon_path" ]; then
+  printf 'Expected fixture icon was not created: %s\n' "$icon_path" >&2
+  exit 1
+fi
 
 printf 'Fixture stage output created at %s\n' "$stage_root"
