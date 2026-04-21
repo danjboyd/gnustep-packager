@@ -16,10 +16,55 @@ of the following are true:
   `gnustep-cli-new` bootstrap smoke before packaging
 - release notes record the known-good `gnustep-cli-new` manifest URL
 
+The Windows hosted-runner gate is fail-closed: release packaging from the
+default hosted MSI path must not proceed when the `gnustep-cli-new` bootstrap
+smoke is skipped or fails. Failed runs must retain the
+`windows-gnustep-cli-new` or `<artifact-name>-gnustep-cli-new` diagnostic
+artifact so the failure can be classified as a packager issue, an MSYS2 host
+issue, a WiX issue, or an upstream `gnustep-cli-new` blocker.
+
 Current `gnustep-cli-new` release baseline:
 
 ```text
 https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
+```
+
+## Windows Toolchain Baseline
+
+Record this baseline in release notes whenever publishing a packager release
+that claims hosted Windows MSI readiness:
+
+- runner image: `windows-latest`
+- MSYS2 mode: `CLANG64`
+- bootstrap packages: `curl`, `tar`, `gzip`
+- app-specific MSYS2 packages: declared under
+  `hostDependencies.windows.msys2Packages`
+- `gnustep-cli-new` manifest URL:
+  `https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json`
+- WiX source: hosted runner WiX installation or the documented local WiX
+  baseline used by the MSI backend
+- MSI smoke: shared pipeline `-Backend msi -RunSmoke` result
+- diagnostics artifact: `windows-gnustep-cli-new` for repo validation or
+  `<artifact-name>-gnustep-cli-new` for reusable workflow calls
+
+Current Windows hosted status: blocked before MSI build by the upstream
+`gnustep-cli-new` MSYS2 CLANG64 selector. The bootstrap classifies the hosted
+MSYS2 shell as `os: unknown` and does not select the published
+`windows-amd64-msys2-clang64` artifacts. Treat this as a release-blocking
+upstream issue until a retest records a successful bootstrap smoke and MSI
+package smoke on `windows-latest`.
+
+Release-note template:
+
+```text
+Windows MSI hosted baseline:
+- runner: windows-latest
+- MSYS2: CLANG64
+- gnustep-cli-new manifest: <url>
+- gnustep-cli-new smoke: <run URL and result>
+- WiX baseline: <version/source>
+- MSI package smoke: <run URL and result>
+- known blockers: <none or upstream issue links>
 ```
 
 ## Windows MSI Checklist

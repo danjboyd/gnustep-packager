@@ -145,6 +145,19 @@ This repo now also includes the phase 13 `gnustep-cli-new` integration:
   blockers through generated diagnostic reports instead of being hidden by
   legacy setup fallback
 
+This repo now also includes the phase 14 hosted Windows hardening pass:
+
+- the hosted Windows MSI path treats the `gnustep-cli-new` bootstrap smoke as a
+  fail-closed release packaging gate
+- Windows/MSYS2 path, host-kind, command lookup, and blocker diagnostics are
+  uploaded as dedicated CI artifacts
+- downstream Windows migration docs cover hosted and self-hosted runners while
+  keeping app-specific MSYS2 packages manifest-owned
+- release-gate docs record the Windows runner, MSYS2, `gnustep-cli-new`, WiX,
+  and MSI smoke baseline expected for release readiness
+- the current hosted Windows blocker is documented upstream: MSYS2 `CLANG64`
+  is classified as `os: unknown` by the public bootstrap selector
+
 Current sample verification covers:
 - `build`
 - `stage`

@@ -955,8 +955,9 @@ Current status notes:
 ## Phase 14: Hosted Windows Toolchain Hardening
 Goal: turn the `gnustep-cli-new` Windows/MSI bootstrap path from workflow
 integration into a proven, diagnosable, release-ready hosted-runner path.
-Status: phase 14A through phase 14D implemented; phase 14E through phase 14H
-planned.
+Status: complete. Phase 14A through phase 14H are implemented, with hosted
+Windows release readiness blocked by the upstream `gnustep-cli-new` MSYS2
+CLANG64 selector issue recorded below.
 
 This phase focuses on hosted Windows evidence, path normalization across
 PowerShell, MSYS2, and Windows command contexts, and upstream-quality blocker
@@ -985,8 +986,23 @@ Current status notes:
   `windows-amd64-msys2-clang64` artifacts. The generated
   `windows-gnustep-cli-new` artifact contains the blocker report and command
   logs.
-- next recommended starting point: execute `Phase 14E` as a hosted-runner gate
-  decision after the upstream Windows bootstrap selector is fixed and retested.
+- `Phase 14E` landed as a hosted-runner regression gate contract: the default
+  Windows MSI path runs the `gnustep-cli-new` bootstrap smoke before packaging,
+  fails closed when that smoke fails or is skipped, and preserves diagnostics
+  for release triage.
+- `Phase 14F` landed as the upstream feedback loop in
+  `docs/gnustep-cli-new-upstream-requests.md`, including a minimal Windows
+  MSYS2 CLANG64 reproduction and packager impact statement.
+- `Phase 14G` landed as downstream migration guidance in the consumer and
+  GitHub Actions docs, covering hosted and self-hosted Windows runners and
+  manifest-owned app-specific MSYS2 packages.
+- `Phase 14H` landed as the release readiness baseline in
+  `docs/release-gate.md`, including the runner image, manifest URL, MSYS2
+  bootstrap baseline, WiX baseline, MSI smoke expectation, and release-note
+  guidance.
+- next recommended starting point: retest the hosted Windows gate after the
+  upstream bootstrap selector can detect MSYS2/Windows and install the
+  published `windows-amd64-msys2-clang64` artifacts.
 
 - `Phase 14A`: Hosted Windows bootstrap evidence pass
   Deliverables:

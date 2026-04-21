@@ -42,6 +42,12 @@ validation before MSI packaging. The `msys2-packages` input remains available as
 an additive override or temporary escape hatch while default host setup is
 enabled.
 
+Hosted Windows release packaging should use this default path as the required
+regression gate. Do not add separate hosted-runner steps that install
+`mingw-w64-clang-x86_64-gnustep-*` packages directly; those bypass the
+supported `gnustep-cli-new` evidence path. If the bootstrap smoke fails, the job
+must stop before build, stage, package, signing, or upload.
+
 Default AppImage host packages:
 
 - `ca-certificates`
@@ -113,6 +119,11 @@ The workflow also uploads a dedicated `<artifact-name>-gnustep-cli-new`
 diagnostic artifact containing the selected manifest, setup logs, doctor output,
 and `gnustep-cli-new-blocker-report.md`.
 
+For hosted Windows MSI runs, keep that diagnostic artifact with release
+candidate evidence. It is the handoff point for upstream issues because it
+records `windows-msys2-clang64`, `MSYSTEM=CLANG64`, path conversion output,
+command lookup, and the exact failed bootstrap command logs.
+
 ## Secrets
 Optional signing secrets:
 
@@ -165,6 +176,29 @@ jobs:
       run-smoke: true
       artifact-name: my-app-linux
 ```
+
+Advanced self-hosted Windows example:
+
+```yaml
+jobs:
+  package-windows:
+    uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
+    with:
+      manifest-path: packaging/package.manifest.json
+      backend: msi
+      runs-on-msi: '["self-hosted","windows","msys2-clang64"]'
+      skip-default-host-setup: true
+      preflight-shell: pwsh
+      preflight-command: ./packaging/ci/preflight-msys2-clang64.ps1
+      run-validation: true
+      run-smoke: true
+      artifact-name: my-app-windows
+```
+
+Self-hosted Windows preflight should verify that `gnustep` resolves to the
+intended toolchain and that any app-specific MSYS2 packages are present. Keep
+those packages in `hostDependencies.windows.msys2Packages` so local preflight,
+remote validation, and CI describe the same requirement.
 
 ## Implementation Note
 The reusable workflow checks out:

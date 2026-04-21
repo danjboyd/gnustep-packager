@@ -199,6 +199,8 @@ Packager status:
 
 Source:
 - hosted GitHub Actions validation run `24736846989`
+- retested in hosted validation run `24737776995` with the same Windows
+  selector failure
 - `windows-latest` with `msys2/setup-msys2` using `MSYSTEM=CLANG64`
 - `gnustep-cli-new` public release manifest:
   `https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json`
@@ -262,6 +264,8 @@ Packager status:
 - blocks the hosted Windows MSI path from reaching build/stage/package
 - packager diagnostics now upload `windows-gnustep-cli-new` with a
   ready-to-copy blocker report and host/path context logs
+- release readiness is gated on retesting this path after upstream host
+  detection and Windows artifact extraction are fixed
 
 ## Successful Control Check
 

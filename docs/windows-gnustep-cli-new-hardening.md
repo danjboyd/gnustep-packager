@@ -70,7 +70,7 @@ Confirmed upstream issues should be copied into
 [gnustep-cli-new-upstream-requests.md](gnustep-cli-new-upstream-requests.md)
 with the generated blocker report attached or summarized.
 
-## Current Phase 14A-D Status
+## Current Phase 14 Status
 
 Phase 14A-D are implemented as repo-owned evidence collection and diagnostics.
 Hosted validation run `24736846989` confirmed that the current public
@@ -83,6 +83,30 @@ No matching release artifacts were found for this host.
 
 The uploaded `windows-gnustep-cli-new` artifact contains the blocker report,
 setup log, host context, and bootstrap download log for upstream reproduction.
-Phase 14E should retest this hosted path after the upstream selector can detect
-MSYS2/Windows and install the published `windows-amd64-msys2-clang64`
-artifacts.
+
+Phase 14E-H are implemented as the release gate and handoff layer around that
+evidence:
+
+- Phase 14E: the hosted Windows regression gate is the default
+  `windows-latest` MSI workflow path. It installs only the MSYS2 bootstrap
+  shell, runs the `gnustep-cli-new` bootstrap smoke from `MSYSTEM=CLANG64`
+  before packaging, and fails closed before build/stage/package when the smoke
+  fails.
+- Phase 14F: confirmed upstream blockers are recorded in
+  [gnustep-cli-new-upstream-requests.md](gnustep-cli-new-upstream-requests.md)
+  with minimal reproductions, selected manifest URLs, hosted-run IDs, and
+  packager impact statements.
+- Phase 14G: downstream migration guidance lives in
+  [consumer-setup.md](consumer-setup.md) and [github-actions.md](github-actions.md).
+  Hosted Windows consumers should remove direct GNUstep MSYS2 installation
+  steps, keep app-specific packages under
+  `hostDependencies.windows.msys2Packages`, and rely on the reusable workflow's
+  `gnustep-cli-new` bootstrap smoke.
+- Phase 14H: release readiness is recorded in
+  [release-gate.md](release-gate.md). A release baseline should name the
+  Windows runner image, selected `gnustep-cli-new` manifest, MSYS2 bootstrap
+  package baseline, WiX baseline, and MSI smoke result.
+
+The hosted Windows gate should be retested after the upstream selector can
+detect MSYS2/Windows and install the published
+`windows-amd64-msys2-clang64` artifacts.

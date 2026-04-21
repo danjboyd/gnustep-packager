@@ -230,10 +230,35 @@ Describe "Reusable workflow surface" {
     foreach ($pattern in @(
       "gnustep-cli-new",
       "v0.1.0-dev",
-      "gnustep-cli-new-blocker-report.md"
+      "gnustep-cli-new-blocker-report.md",
+      "windows-latest",
+      "MSYS2",
+      "CLANG64",
+      "WiX baseline",
+      "MSI smoke",
+      "windows-amd64-msys2-clang64"
     )) {
       if ($script:releaseGateDocText -notmatch [regex]::Escape($pattern)) {
         throw "Release gate docs should record gnustep-cli-new baseline and diagnostics: $pattern"
+      }
+    }
+  }
+
+  It "documents the hosted Windows gnustep-cli-new gate and migration path" {
+    foreach ($pattern in @(
+      "fail-closed",
+      "release packaging",
+      "windows-msys2-clang64",
+      "hostDependencies.windows.msys2Packages",
+      "self-hosted Windows",
+      "skip-default-host-setup: true",
+      "preflight-command"
+    )) {
+      if (($script:releaseGateDocText -notmatch [regex]::Escape($pattern)) -and
+          ($script:githubActionsDocText -notmatch [regex]::Escape($pattern)) -and
+          ($script:consumerSetupDocText -notmatch [regex]::Escape($pattern)) -and
+          ($script:windowsHardeningDocText -notmatch [regex]::Escape($pattern))) {
+        throw "Hosted Windows gate or migration docs are missing expected text: $pattern"
       }
     }
   }

@@ -2789,17 +2789,32 @@ function Invoke-GpShellCommand {
     try {
       # Native Windows toolchains regularly emit warnings on stderr even when the
       # process succeeds. Capture both streams as plain text and use only the
-      # native exit code as the success/failure signal.
-      $process = Start-Process `
-        -FilePath $Invocation.FilePath `
-        -ArgumentList $argumentList `
-        -WorkingDirectory $WorkingDirectory `
-        -NoNewWindow `
-        -Wait `
-        -PassThru `
-        -RedirectStandardOutput $stdoutPath `
-        -RedirectStandardError $stderrPath
+      # native exit code as the success/failure signal. ProcessStartInfo keeps
+      # the argument vector intact; Start-Process flattens complex shell command
+      # arguments on some PowerShell hosts.
+      $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+      $startInfo.FileName = $Invocation.FilePath
+      $startInfo.WorkingDirectory = $WorkingDirectory
+      $startInfo.UseShellExecute = $false
+      $startInfo.RedirectStandardOutput = $true
+      $startInfo.RedirectStandardError = $true
+      foreach ($argument in $argumentList) {
+        $startInfo.ArgumentList.Add([string]$argument) | Out-Null
+      }
+
+      $process = [System.Diagnostics.Process]::new()
+      $process.StartInfo = $startInfo
+      if (-not $process.Start()) {
+        throw "Failed to start command: $($Invocation.FilePath)"
+      }
+
+      $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+      $stderrTask = $process.StandardError.ReadToEndAsync()
+      $process.WaitForExit()
       $exitCode = [int]$process.ExitCode
+
+      Set-Content -Path $stdoutPath -Value $stdoutTask.GetAwaiter().GetResult()
+      Set-Content -Path $stderrPath -Value $stderrTask.GetAwaiter().GetResult()
 
       foreach ($path in @($stdoutPath, $stderrPath)) {
         if (-not (Test-Path $path)) {

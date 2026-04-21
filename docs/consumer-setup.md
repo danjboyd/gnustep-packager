@@ -111,6 +111,20 @@ install GNUstep directly through MSYS2 or apt. Keep app-specific prerequisites
 in the manifest, and let the reusable workflow provide the default
 `gnustep-cli-new` toolchain bootstrap.
 
+For hosted Windows runners, the migration target is the reusable MSI workflow
+with default host setup enabled. The workflow installs an MSYS2 `CLANG64`
+bootstrap shell, runs the `gnustep-cli-new` smoke, and only then runs build,
+stage, package, and validation. A failed `gnustep-cli-new` smoke is a release
+gate failure, not a reason to fall back to direct GNUstep MSYS2 package
+installation.
+
+For self-hosted Windows runners, set `runs-on-msi` to your runner labels and
+use `skip-default-host-setup: true` only when the runner already provides the
+expected MSYS2/GNUstep baseline. Add a `preflight-command` that proves the
+selected `gnustep` command and app-specific host packages are present, and keep
+those app-specific packages declared under
+`hostDependencies.windows.msys2Packages`.
+
 Recommended AppImage smoke modes:
 
 - `launch-only` for normal GUI apps that should just start successfully

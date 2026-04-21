@@ -212,6 +212,43 @@ Describe "Shared validation contract" {
     }
   }
 
+  It "preserves shell command arguments that contain spaces and separators" {
+    if ($IsWindows) {
+      return
+    }
+
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-shell-arguments-" + [guid]::NewGuid().ToString("N"))
+    $logPath = Join-Path $tempRoot "shell-command.log"
+    $markerPath = Join-Path $tempRoot "marker.txt"
+    $shellPath = Resolve-GpDefaultPosixShellProgram -Name "bash"
+
+    New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+
+    try {
+      $result = Invoke-GpShellCommand `
+        -Invocation ([pscustomobject]@{
+          FilePath = $shellPath
+          ArgumentList = @(
+            "-lc",
+            "printf 'stdout ok\n'; printf 'marker ok\n' > marker.txt"
+          )
+          ShellKind = "bash"
+        }) `
+        -WorkingDirectory $tempRoot `
+        -LogPath $logPath
+      $logText = Get-Content -Raw -Path $logPath
+      $markerText = Get-Content -Raw -Path $markerPath
+
+      Assert-GpEqual -Actual $result.ExitCode -Expected 0 -Message "Shell command execution should preserve a successful native exit code."
+      Assert-GpMatch -Actual $logText -Pattern "stdout ok" -Message "Shell command logs should include output from the full shell command string."
+      Assert-GpEqual -Actual $markerText.Trim() -Expected "marker ok" -Message "Shell command execution should preserve semicolon-separated commands as one argument."
+    } finally {
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
   It "uses system POSIX shells when PATH contains managed toolchain shims" {
     if ($IsWindows) {
       return
