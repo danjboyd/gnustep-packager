@@ -1770,6 +1770,26 @@ function Escape-GpBashLiteral {
   return ($Value -replace "'", $replacement)
 }
 
+function Resolve-GpDefaultPosixShellProgram {
+  param(
+    [Parameter(Mandatory = $true)]
+    [ValidateSet("bash", "sh")]
+    [string]$Name
+  )
+
+  if ($IsWindows) {
+    return $Name
+  }
+
+  foreach ($candidate in @("/usr/bin/$Name", "/bin/$Name")) {
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return $candidate
+    }
+  }
+
+  return $Name
+}
+
 function Get-GpShellInvocation {
   param(
     [Parameter(Mandatory = $true)]
@@ -1846,7 +1866,7 @@ function Get-GpShellInvocation {
       }
       $parts += $Command
       return [pscustomobject]@{
-        FilePath     = $(if ($ShellConfig.Contains("program")) { [string]$ShellConfig["program"] } else { "bash" })
+        FilePath     = $(if ($ShellConfig.Contains("program")) { [string]$ShellConfig["program"] } else { Resolve-GpDefaultPosixShellProgram -Name "bash" })
         ArgumentList = @("-lc", ($parts -join "; "))
         ShellKind    = $kind
       }
@@ -1864,7 +1884,7 @@ function Get-GpShellInvocation {
       }
       $parts += $Command
       return [pscustomobject]@{
-        FilePath     = $(if ($ShellConfig.Contains("program")) { [string]$ShellConfig["program"] } else { "sh" })
+        FilePath     = $(if ($ShellConfig.Contains("program")) { [string]$ShellConfig["program"] } else { Resolve-GpDefaultPosixShellProgram -Name "sh" })
         ArgumentList = @("-lc", ($parts -join "; "))
         ShellKind    = $kind
       }

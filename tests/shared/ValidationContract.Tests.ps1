@@ -212,6 +212,30 @@ Describe "Shared validation contract" {
     }
   }
 
+  It "uses system POSIX shells when PATH contains managed toolchain shims" {
+    if ($IsWindows) {
+      return
+    }
+
+    $oldPath = $env:PATH
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-shell-path-" + [guid]::NewGuid().ToString("N"))
+
+    try {
+      New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+      Set-Content -Path (Join-Path $tempRoot "bash") -Value "#!/bin/sh`nexit 42`n"
+      $env:PATH = "$tempRoot$([System.IO.Path]::PathSeparator)$oldPath"
+
+      $invocation = Get-GpShellInvocation -ShellConfig @{ kind = "bash" } -Command "printf ok"
+
+      Assert-GpMatch -Actual $invocation.FilePath -Pattern "^/(usr/)?bin/bash$" -Message "Default bash invocation should use the system shell instead of a PATH shim."
+    } finally {
+      $env:PATH = $oldPath
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
   It "realizes packagedDefaults.defaultTheme into the launch contract" {
     $manifestPath = $null
 
