@@ -24,6 +24,7 @@ workflow-resolved log root:
 - `gnustep-cli-new-host-context.log`
 - `gnustep-cli-new-path-context.log`
 - `gnustep-cli-new-selection.log`
+- `gnustep-cli-new-bootstrap-download.log`
 - `gnustep-cli-new-setup.log`
 - `gnustep-cli-new-version.log`
 - `gnustep-cli-new-doctor.json`
@@ -33,7 +34,8 @@ workflow-resolved log root:
 - `gnustep-cli-new-blocker-report.md`
 
 The reusable workflow uploads that directory as the
-`<artifact-name>-gnustep-cli-new` artifact.
+`<artifact-name>-gnustep-cli-new` artifact. The repo validation workflow uploads
+the same directory as `windows-gnustep-cli-new` or `linux-gnustep-cli-new`.
 
 ## Windows-Specific Diagnostics
 

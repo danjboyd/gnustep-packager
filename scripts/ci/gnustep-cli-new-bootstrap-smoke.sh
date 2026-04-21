@@ -106,6 +106,7 @@ write_report() {
       gnustep-cli-new-host-context.log \
       gnustep-cli-new-path-context.log \
       gnustep-cli-new-selection.log \
+      gnustep-cli-new-bootstrap-download.log \
       gnustep-cli-new-setup.log \
       gnustep-cli-new-version.log \
       gnustep-cli-new-doctor.json \
@@ -142,7 +143,8 @@ printf 'gnustep-cli-new manifest: %s\n' "$manifest_url" | tee "$log_root/gnustep
 printf 'gnustep-cli-new bootstrap: %s\n' "$bootstrap_url" | tee -a "$log_root/gnustep-cli-new-selection.log"
 printf 'gnustep-cli-new root: %s\n' "$install_root" | tee -a "$log_root/gnustep-cli-new-selection.log"
 
-curl -fsSL "$bootstrap_url" -o "$bootstrap_path"
+run_logged "$log_root/gnustep-cli-new-bootstrap-download.log" \
+  curl -fsSL "$bootstrap_url" -o "$bootstrap_path"
 chmod +x "$bootstrap_path"
 
 run_logged "$log_root/gnustep-cli-new-setup.log" \

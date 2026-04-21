@@ -73,6 +73,15 @@ jobs:
         run: |
           ./scripts/run-packaging-pipeline.ps1 -Manifest examples/sample-gui/package.manifest.json -Backend msi -RunSmoke
 
+      - name: Upload gnustep-cli-new Diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-gnustep-cli-new
+          path: dist/logs/gnustep-cli-new
+          retention-days: 7
+          if-no-files-found: warn
+
   linux-validation:
     runs-on: ubuntu-latest
     defaults:
@@ -126,3 +135,12 @@ jobs:
       - name: Run Shared Packaging Pipeline
         run: |
           ./scripts/run-packaging-pipeline.ps1 -Manifest examples/sample-linux/package.manifest.json -Backend appimage -RunSmoke
+
+      - name: Upload gnustep-cli-new Diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-gnustep-cli-new
+          path: dist/logs/gnustep-cli-new
+          retention-days: 7
+          if-no-files-found: warn

@@ -113,7 +113,8 @@ Describe "Reusable workflow surface" {
       "-gnustep-cli-new",
       "gnustep-cli-new-blocker-report.md",
       "gnustep-cli-new-host-context.log",
-      "gnustep-cli-new-path-context.log"
+      "gnustep-cli-new-path-context.log",
+      "gnustep-cli-new-bootstrap-download.log"
     )) {
       if (($script:workflowText -notmatch [regex]::Escape($pattern)) -and
           ($script:gnustepCliDocText -notmatch [regex]::Escape($pattern)) -and
@@ -138,6 +139,20 @@ Describe "Reusable workflow surface" {
           ($script:gnustepCliSmokeText -notmatch [regex]::Escape($pattern)) -and
           ($script:windowsHardeningDocText -notmatch [regex]::Escape($pattern))) {
         throw "Windows gnustep-cli-new hardening evidence is missing: $pattern"
+      }
+    }
+  }
+
+  It "uploads repo validation gnustep-cli-new diagnostics for hosted evidence" {
+    foreach ($pattern in @(
+      "windows-gnustep-cli-new",
+      "linux-gnustep-cli-new",
+      "dist/logs/gnustep-cli-new",
+      "actions/upload-artifact@v4"
+    )) {
+      if (($script:validateRepoText -notmatch [regex]::Escape($pattern)) -and
+          ($script:windowsHardeningDocText -notmatch [regex]::Escape($pattern))) {
+        throw "Repo validation should preserve gnustep-cli-new diagnostic evidence: $pattern"
       }
     }
   }

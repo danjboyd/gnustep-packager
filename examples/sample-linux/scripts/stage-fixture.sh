@@ -36,7 +36,12 @@ printf 'GNUstep runtime fixture notice. License: LGPL-2.1-or-later.\n' >"$metada
 printf '# Sample smoke document\n\nThis file is staged for AppImage open-file smoke tests.\n' >"$metadata_smoke/smoke-document.md"
 printf 'fixture stage complete\n' >"$log_root/stage.txt"
 
-base64 -d >"$metadata_icons/sample-linux.png" <<'EOF'
+base64_cmd="${BASE64:-/usr/bin/base64}"
+if [ ! -x "$base64_cmd" ]; then
+  base64_cmd="base64"
+fi
+
+"$base64_cmd" -d >"$metadata_icons/sample-linux.png" <<'EOF'
 iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a0kAAAAASUVORK5CYII=
 EOF
 
