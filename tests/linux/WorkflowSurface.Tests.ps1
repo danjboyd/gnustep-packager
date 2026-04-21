@@ -57,12 +57,12 @@ Describe "Reusable workflow surface" {
     foreach ($pattern in @(
       "Install MSYS2 Bootstrap Shell",
       "Bootstrap And Smoke Test gnustep-cli-new For MSI",
-      "shell: msys2 {0}",
+      "shell: pwsh",
       "GP_GNUSTEP_CLI_MANIFEST_URL",
       "GP_GNUSTEP_CLI_BOOTSTRAP_URL",
       "GP_GNUSTEP_CLI_HOST_KIND",
       "MSYS2_LOCATION",
-      "scripts/ci/gnustep-cli-new-bootstrap-smoke.sh"
+      "gnustep-bootstrap.ps1"
     )) {
       if ($script:workflowText -notmatch [regex]::Escape($pattern)) {
         throw "Reusable MSI workflow is missing gnustep-cli-new integration surface: $pattern"

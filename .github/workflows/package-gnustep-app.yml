@@ -221,34 +221,165 @@ jobs:
 
       - name: Bootstrap And Smoke Test gnustep-cli-new For MSI
         if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup }}
-        shell: msys2 {0}
+        shell: pwsh
         env:
           GP_GNUSTEP_CLI_MANIFEST_URL: ${{ inputs.gnustep-cli-manifest-url }}
           GP_GNUSTEP_CLI_BOOTSTRAP_URL: ${{ inputs.gnustep-cli-bootstrap-url }}
           GP_GNUSTEP_CLI_ROOT: ${{ inputs.gnustep-cli-root }}
-          GP_GNUSTEP_CLI_LOG_ROOT: ${{ steps.manifest.outputs.log_root }}/gnustep-cli-new
-          GP_GNUSTEP_CLI_SMOKE_ROOT: ${{ runner.temp }}/gnustep-cli-new-smoke
+          GP_GNUSTEP_CLI_LOG_ROOT: ${{ steps.manifest.outputs.log_root }}\gnustep-cli-new
+          GP_GNUSTEP_CLI_SMOKE_ROOT: ${{ runner.temp }}\gnustep-cli-new-smoke
           GP_GNUSTEP_CLI_HOST_KIND: windows-msys2-clang64
         run: |
-          set -euo pipefail
-          if [ -z "${GP_GNUSTEP_CLI_ROOT:-}" ]; then
-            GP_GNUSTEP_CLI_ROOT="$(cygpath -u '${{ runner.temp }}')/gnustep-cli-new"
-            export GP_GNUSTEP_CLI_ROOT
-          fi
-          GP_GNUSTEP_CLI_LOG_ROOT="$(cygpath -u "${GP_GNUSTEP_CLI_LOG_ROOT}")"
-          GP_GNUSTEP_CLI_SMOKE_ROOT="$(cygpath -u "${GP_GNUSTEP_CLI_SMOKE_ROOT}")"
-          export GP_GNUSTEP_CLI_LOG_ROOT GP_GNUSTEP_CLI_SMOKE_ROOT
-          ./.gnustep-packager-toolkit/scripts/ci/gnustep-cli-new-bootstrap-smoke.sh
-          {
-            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/bin"
-            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/Tools"
-            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/System/Tools"
-          } >> "$GITHUB_PATH"
-          {
-            echo "GP_GNUSTEP_CLI_ROOT=$(cygpath -w "${GP_GNUSTEP_CLI_ROOT}")"
-            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL}"
-            echo "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}"
-          } >> "$GITHUB_ENV"
+          $ErrorActionPreference = "Stop"
+
+          function Invoke-Logged {
+            param(
+              [Parameter(Mandatory = $true)][string]$LogPath,
+              [Parameter(Mandatory = $true)][scriptblock]$Command
+            )
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LogPath) | Out-Null
+            try {
+              $global:LASTEXITCODE = 0
+              & $Command *>&1 | Tee-Object -FilePath $LogPath
+              if ($global:LASTEXITCODE -ne 0) {
+                throw "command exited with $global:LASTEXITCODE"
+              }
+            }
+            catch {
+              "ERROR: $($_.Exception.Message)" | Tee-Object -FilePath $LogPath -Append
+              throw
+            }
+          }
+
+          function Write-BootstrapReport {
+            param([string]$Status)
+            $reportPath = Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-blocker-report.md"
+            $logFiles = @(
+              "gnustep-cli-new-host-context.log",
+              "gnustep-cli-new-selection.log",
+              "gnustep-cli-new-bootstrap-download.log",
+              "gnustep-cli-new-setup.log",
+              "gnustep-cli-new-path-context.log",
+              "gnustep-cli-new-version.log",
+              "gnustep-cli-new-doctor.json",
+              "gnustep-cli-new-new.json",
+              "gnustep-cli-new-build.json",
+              "gnustep-cli-new-run.json"
+            )
+            $lines = [System.Collections.Generic.List[string]]::new()
+            $lines.Add("# gnustep-cli-new Bootstrap Report")
+            $lines.Add("")
+            $lines.Add("- status: $Status")
+            $lines.Add("- host: $([System.Environment]::OSVersion.VersionString)")
+            $lines.Add("- manifest: $env:GP_GNUSTEP_CLI_MANIFEST_URL")
+            $lines.Add("- bootstrap: $env:GP_GNUSTEP_CLI_BOOTSTRAP_URL")
+            $lines.Add("- install root: $env:GP_GNUSTEP_CLI_ROOT")
+            $lines.Add("- host kind: $env:GP_GNUSTEP_CLI_HOST_KIND")
+            $lines.Add("- log root: $env:GP_GNUSTEP_CLI_LOG_ROOT")
+            $lines.Add("")
+            foreach ($name in $logFiles) {
+              $path = Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT $name
+              if (-not (Test-Path -LiteralPath $path)) { continue }
+              $lines.Add("## $name")
+              $lines.Add("")
+              $lines.Add("``````text")
+              $lines.AddRange([string[]](Get-Content -LiteralPath $path -Tail 120))
+              $lines.Add("``````")
+              $lines.Add("")
+            }
+            Set-Content -Path $reportPath -Value $lines -Encoding UTF8
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:GP_GNUSTEP_CLI_ROOT)) {
+            $env:GP_GNUSTEP_CLI_ROOT = Join-Path '${{ runner.temp }}' 'gnustep-cli-new'
+          }
+          New-Item -ItemType Directory -Force -Path $env:GP_GNUSTEP_CLI_LOG_ROOT | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:GP_GNUSTEP_CLI_SMOKE_ROOT | Out-Null
+
+          @(
+            "timestamp=$([DateTimeOffset]::UtcNow.ToString("o"))",
+            "runner_os=$env:RUNNER_OS",
+            "host_kind=$env:GP_GNUSTEP_CLI_HOST_KIND",
+            "github_workflow=$env:GITHUB_WORKFLOW",
+            "github_run_id=$env:GITHUB_RUN_ID",
+            "github_ref=$env:GITHUB_REF",
+            "install_root=$env:GP_GNUSTEP_CLI_ROOT",
+            "log_root=$env:GP_GNUSTEP_CLI_LOG_ROOT",
+            "smoke_root=$env:GP_GNUSTEP_CLI_SMOKE_ROOT",
+            "msys2_location=${{ steps.msys2.outputs.msys2-location }}",
+            "",
+            "PATH entries:",
+            ($env:PATH -split ';' -join [Environment]::NewLine)
+          ) | Set-Content -Path (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-host-context.log") -Encoding UTF8
+
+          $bootstrapUrl = $env:GP_GNUSTEP_CLI_BOOTSTRAP_URL -replace 'gnustep-bootstrap\.sh$', 'gnustep-bootstrap.ps1'
+          $bootstrapPath = Join-Path $env:GP_GNUSTEP_CLI_SMOKE_ROOT "gnustep-bootstrap.ps1"
+          @(
+            "gnustep-cli-new manifest: $env:GP_GNUSTEP_CLI_MANIFEST_URL",
+            "gnustep-cli-new bootstrap: $bootstrapUrl",
+            "gnustep-cli-new root: $env:GP_GNUSTEP_CLI_ROOT"
+          ) | Tee-Object -FilePath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-selection.log")
+
+          try {
+            Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-bootstrap-download.log") {
+              Invoke-WebRequest -UseBasicParsing -Uri $bootstrapUrl -OutFile $bootstrapPath
+            }
+            Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-setup.log") {
+              & pwsh -NoProfile -ExecutionPolicy Bypass -File $bootstrapPath --json --yes setup --user --root $env:GP_GNUSTEP_CLI_ROOT --manifest $env:GP_GNUSTEP_CLI_MANIFEST_URL
+            }
+
+            $toolPaths = @(
+              (Join-Path $env:GP_GNUSTEP_CLI_ROOT "bin"),
+              (Join-Path $env:GP_GNUSTEP_CLI_ROOT "Tools"),
+              (Join-Path $env:GP_GNUSTEP_CLI_ROOT "System\Tools"),
+              (Join-Path $env:GP_GNUSTEP_CLI_ROOT "usr\bin"),
+              (Join-Path $env:GP_GNUSTEP_CLI_ROOT "clang64\bin")
+            )
+            $env:PATH = ([string]::Join(';', $toolPaths + @($env:PATH)))
+            @(
+              "timestamp=$([DateTimeOffset]::UtcNow.ToString("o"))",
+              "PATH entries:",
+              ($env:PATH -split ';' -join [Environment]::NewLine),
+              "",
+              "command lookup:",
+              "gnustep=$((Get-Command gnustep -ErrorAction SilentlyContinue).Source)",
+              "bash=$((Get-Command bash -ErrorAction SilentlyContinue).Source)",
+              "make=$((Get-Command make -ErrorAction SilentlyContinue).Source)",
+              "clang=$((Get-Command clang -ErrorAction SilentlyContinue).Source)"
+            ) | Set-Content -Path (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-path-context.log") -Encoding UTF8
+
+            Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-version.log") { & gnustep --version }
+            Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-doctor.json") { & gnustep doctor --json --manifest $env:GP_GNUSTEP_CLI_MANIFEST_URL }
+
+            $workRoot = Join-Path $env:GP_GNUSTEP_CLI_SMOKE_ROOT "work"
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $workRoot
+            New-Item -ItemType Directory -Force -Path $workRoot | Out-Null
+            Push-Location $workRoot
+            try {
+              Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-new.json") { & gnustep new cli-tool HelloPackager --json }
+              Push-Location (Join-Path $workRoot "HelloPackager")
+              try {
+                Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-build.json") { & gnustep build --json }
+                Invoke-Logged (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-run.json") { & gnustep run --json }
+              }
+              finally {
+                Pop-Location
+              }
+            }
+            finally {
+              Pop-Location
+            }
+            Write-BootstrapReport "passed"
+          }
+          catch {
+            Write-BootstrapReport "failed"
+            throw
+          }
+
+          $toolPaths | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "GP_GNUSTEP_CLI_ROOT=$env:GP_GNUSTEP_CLI_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "GP_GNUSTEP_CLI_MANIFEST_URL=$env:GP_GNUSTEP_CLI_MANIFEST_URL" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Install Linux AppImage Prerequisites
         if: ${{ inputs.backend == 'appimage' && !inputs.skip-default-host-setup }}

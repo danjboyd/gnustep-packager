@@ -2093,7 +2093,7 @@ function Get-GpMissingAptPackages {
 
   $missing = [System.Collections.Generic.List[string]]::new()
   foreach ($packageName in @($Packages)) {
-    $result = Invoke-GpCapturedProcess -FilePath ([string]$dpkgQuery.Source) -ArgumentList @("-W", "-f=\${Status}", "--", $packageName)
+    $result = Invoke-GpCapturedProcess -FilePath ([string]$dpkgQuery.Source) -ArgumentList @("-W", '-f=${Status}', "--", $packageName)
     if (($result.ExitCode -ne 0) -or ($result.StdOut -notmatch "install ok installed")) {
       $missing.Add($packageName) | Out-Null
     }
