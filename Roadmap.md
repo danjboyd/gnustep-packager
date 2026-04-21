@@ -979,9 +979,14 @@ Current status notes:
 - `Phase 14D` landed as richer blocker-report content for Windows-specific
   failures, including selected host kind, context logs, and exact command logs
   with preserved exit status.
-- next recommended starting point: run the hosted Windows validation workflow
-  against this branch, inspect the uploaded `gnustep-cli-new` diagnostics, and
-  use the result to execute `Phase 14E`.
+- hosted validation run `24736846989` confirmed that the current public
+  `gnustep-cli-new` bootstrap classifies the MSYS2 `CLANG64` shell as
+  `os: unknown`, then fails to select the published
+  `windows-amd64-msys2-clang64` artifacts. The generated
+  `windows-gnustep-cli-new` artifact contains the blocker report and command
+  logs.
+- next recommended starting point: execute `Phase 14E` as a hosted-runner gate
+  decision after the upstream Windows bootstrap selector is fixed and retested.
 
 - `Phase 14A`: Hosted Windows bootstrap evidence pass
   Deliverables:

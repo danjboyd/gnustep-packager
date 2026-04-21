@@ -195,6 +195,74 @@ Packager status:
 - not a blocker if the workflow uses `--json setup`
 - worth fixing upstream before downstream workflow examples rely on JSON output
 
+### 3. Windows MSYS2 CLANG64 Bootstrap Host Detection
+
+Source:
+- hosted GitHub Actions validation run `24736846989`
+- `windows-latest` with `msys2/setup-msys2` using `MSYSTEM=CLANG64`
+- `gnustep-cli-new` public release manifest:
+  `https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json`
+
+Why this matters:
+- `gnustep-packager` uses MSYS2 `CLANG64` as the supported Windows build host
+  for MSI packaging
+- the public manifest includes published Windows artifacts:
+  - `cli-windows-amd64-msys2-clang64`
+  - `toolchain-windows-amd64-msys2-clang64`
+- the bootstrap script must select those artifacts from an MSYS2 shell before
+  the packager can build and validate MSI fixtures from the managed toolchain
+
+Reproduction:
+
+```sh
+export MSYSTEM=CLANG64
+root=/d/a/_temp/gnustep-cli-new
+curl -fsSL \
+  https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/master/scripts/bootstrap/gnustep-bootstrap.sh \
+  -o /tmp/gnustep-bootstrap.sh
+chmod +x /tmp/gnustep-bootstrap.sh
+/tmp/gnustep-bootstrap.sh --json --yes setup --user --root "$root" \
+  --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
+```
+
+Observed result:
+
+```json
+{"schema_version":1,"command":"setup","cli_version":"0.1.0-dev","ok":false,"status":"error","summary":"No matching release artifacts were found for this host.","doctor":{"status":"warning","environment_classification":"no_toolchain","summary":"No preexisting GNUstep toolchain was detected.","os":"unknown"},"plan":{"scope":"user","install_root":"/d/a/_temp/gnustep-cli-new","channel":"stable","selected_release":"0.1.0-dev","selected_artifacts":[],"system_privileges_ok":true},"actions":[{"kind":"report_bug","priority":1,"message":"No supported managed artifact matches this host yet."}]}
+```
+
+The hosted run recorded:
+
+```text
+uname=MINGW64_NT-10.0-26100 ...
+msystem=CLANG64
+runner_os=Windows
+host_kind=windows-msys2-clang64
+```
+
+Expected result:
+- the bootstrap should classify MSYS2 `MINGW64_NT-*` / `MSYSTEM=CLANG64` as a
+  supported Windows host
+- setup should select `cli-windows-amd64-msys2-clang64` and
+  `toolchain-windows-amd64-msys2-clang64`
+- Windows artifacts should be extracted with a format-aware path; the current
+  bootstrap extraction path appears tarball-only, while the Windows manifest
+  entries are `.zip`
+
+Suggested upstream fixes:
+- update bootstrap host detection so MSYS2 shells on Windows report
+  `os=windows`, `arch=amd64`, and `toolchain_flavor=msys2-clang64`
+- update managed target selection to emit `windows-amd64-msys2-clang64` for
+  the supported Windows host
+- add zip extraction support for published Windows artifacts, or publish the
+  Windows CLI and toolchain artifacts in the format the bootstrap currently
+  extracts
+
+Packager status:
+- blocks the hosted Windows MSI path from reaching build/stage/package
+- packager diagnostics now upload `windows-gnustep-cli-new` with a
+  ready-to-copy blocker report and host/path context logs
+
 ## Successful Control Check
 
 On Debian 13, the same public release manifest successfully installs, starts,

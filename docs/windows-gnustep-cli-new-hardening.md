@@ -73,6 +73,16 @@ with the generated blocker report attached or summarized.
 ## Current Phase 14A-D Status
 
 Phase 14A-D are implemented as repo-owned evidence collection and diagnostics.
-The next hardening step is to run the hosted Windows validation workflow against
-the branch and use the uploaded `gnustep-cli-new` diagnostics to decide whether
-Phase 14E is a packager gate change or an upstream blocker retest.
+Hosted validation run `24736846989` confirmed that the current public
+`gnustep-cli-new` bootstrap classifies the MSYS2 `CLANG64` shell as
+`os: unknown`, then fails to select the published Windows artifacts:
+
+```text
+No matching release artifacts were found for this host.
+```
+
+The uploaded `windows-gnustep-cli-new` artifact contains the blocker report,
+setup log, host context, and bootstrap download log for upstream reproduction.
+Phase 14E should retest this hosted path after the upstream selector can detect
+MSYS2/Windows and install the published `windows-amd64-msys2-clang64`
+artifacts.
