@@ -53,6 +53,9 @@ At runtime the launcher:
 - sets configured environment variables according to their assignment policy
 - seeds configured app-domain defaults through the bundled `defaults.exe` only
   when the packaged app has not already stored the key
+- seeds `packagedDefaults.defaultTheme` as `GSTheme` in the packaged app's
+  defaults domain so the first launch can honor the requested theme without a
+  generic global defaults write
 - configures fontconfig when `runtime\etc\fonts\fonts.conf` exists
 - forwards command-line arguments to the inner app
 

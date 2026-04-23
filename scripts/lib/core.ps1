@@ -2730,11 +2730,13 @@ function Invoke-GpPackageContractAssertions {
         if ($Backend -eq "msi") {
           $config = Get-GpMsiConfig -Context $Context
           $configPath = Join-Path $RootPath $config.LauncherConfigName
-          $pattern = [regex]::Escape(("env=ifUnset|GSTheme={0}" -f $themeValue))
-          if ((Test-Path $configPath) -and ((Get-Content -Raw -Path $configPath) -match $pattern)) {
+          $configText = if (Test-Path $configPath) { Get-Content -Raw -Path $configPath } else { "" }
+          $envPattern = [regex]::Escape(("env=ifUnset|GSTheme={0}" -f $themeValue))
+          $seedPattern = [regex]::Escape(("appDefault=GSTheme=""{0}""" -f $themeValue))
+          if (($configText -match $envPattern) -and ($configText -match $seedPattern)) {
             $lines.Add(("OK      {0}: {1}" -f $label, $configPath)) | Out-Null
           } else {
-            $message = ("MISSING {0}: launcher config does not preserve GSTheme={1} at {2}" -f $label, $themeValue, $configPath)
+            $message = ("MISSING {0}: launcher config does not preserve both GSTheme env fallback and seeded GSTheme default at {1}" -f $label, $configPath)
             $lines.Add($message) | Out-Null
             $issues.Add($message) | Out-Null
           }
@@ -2743,10 +2745,12 @@ function Invoke-GpPackageContractAssertions {
           $appRunText = if (Test-Path $appRunPath) { Get-Content -Raw -Path $appRunPath } else { "" }
           $policyPattern = 'if \[ -z "\$\{GSTheme\+x\}" \]; then'
           $valuePattern = [regex]::Escape(("export GSTheme=""{0}""" -f $themeValue))
-          if (($appRunText -match $policyPattern) -and ($appRunText -match $valuePattern)) {
+          $seedPattern = ('write ".+" "GSTheme" "\\"' + [regex]::Escape($themeValue) + '\\""')
+          $toolPattern = 'APP_DEFAULTS_TOOL='
+          if (($appRunText -match $policyPattern) -and ($appRunText -match $valuePattern) -and ($appRunText -match $toolPattern) -and ($appRunText -match $seedPattern)) {
             $lines.Add(("OK      {0}: {1}" -f $label, $appRunPath)) | Out-Null
           } else {
-            $message = ("MISSING {0}: AppRun does not preserve GSTheme={1} at {2}" -f $label, $themeValue, $appRunPath)
+            $message = ("MISSING {0}: AppRun does not preserve both GSTheme env fallback and seeded GSTheme default at {1}" -f $label, $appRunPath)
             $lines.Add($message) | Out-Null
             $issues.Add($message) | Out-Null
           }

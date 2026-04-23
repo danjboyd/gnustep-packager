@@ -106,8 +106,11 @@ Current fields:
 - `appDomain`
 
 `packagedDefaults.defaultTheme` currently realizes a `GSTheme` launch default
-with `policy: ifUnset` when the manifest does not already declare one. If the
-manifest also sets `launch.env.GSTheme`, the values must match.
+with `policy: ifUnset` when the manifest does not already declare one. On
+Windows MSI and Linux AppImage, it also seeds `GSTheme` into the packaged app's
+defaults domain on first launch so the requested theme becomes an effective
+user default without requiring a generic global-domain write. If the manifest
+also sets `launch.env.GSTheme`, the values must match.
 
 `packagedDefaults.appDomain` declares first-run app-domain defaults for the
 packaged app. Current shape:

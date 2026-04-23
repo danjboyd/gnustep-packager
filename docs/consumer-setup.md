@@ -27,7 +27,8 @@ manifest instead of scattering them across backend-specific tests:
 
 - `packagedDefaults.defaultTheme`
   Declares the default `GSTheme` the generated launcher should carry with
-  `ifUnset` semantics.
+  `ifUnset` semantics and, on MSI and AppImage, seed into the packaged app's
+  defaults domain on first launch.
 - `packagedDefaults.appDomain`
   Declares first-run app-domain `NSUserDefaults` values to seed only when the
   packaged app has not already stored that key. This generic mechanism is

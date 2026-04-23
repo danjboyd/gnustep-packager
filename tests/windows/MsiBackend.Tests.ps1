@@ -173,6 +173,7 @@ Describe "MSI backend" {
       Assert-GpMatch -Actual $configText -Pattern "env=GNUSTEP_PATHPREFIX_LIST=\{@runtimeRoot\}" -Message "Launcher config should preserve runtime token expansion."
       Assert-GpMatch -Actual $configText -Pattern "env=ifUnset\|GSTheme=WinUXTheme" -Message "Launcher config should preserve conditional environment defaults."
       Assert-GpMatch -Actual $configText -Pattern "appDefaultsDomain=com\.example\.SampleGNUstepApp" -Message "Launcher config should preserve the packaged app defaults domain."
+      Assert-GpMatch -Actual $configText -Pattern 'appDefault=GSTheme=\"WinUXTheme\"' -Message "Launcher config should seed the packaged theme through GNUstep defaults as well as the env fallback."
       Assert-GpMatch -Actual $configText -Pattern 'appDefault=SampleFirstRunComplete=YES' -Message "Launcher config should serialize boolean app defaults."
       Assert-GpMatch -Actual $configText -Pattern 'appDefault=SamplePreferredWidth=800' -Message "Launcher config should serialize integer app defaults."
       Assert-GpMatch -Actual $configText -Pattern 'appDefault=SampleWelcomeText=\"Packaged sample\"' -Message "Launcher config should serialize string app defaults as quoted GNUstep literals."

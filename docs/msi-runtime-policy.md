@@ -74,6 +74,10 @@ include `runtime/bin/defaults.exe`. The launcher uses that bundled tool to seed
 app-domain defaults on first launch only when the packaged app has not already
 stored the key.
 
+`packagedDefaults.defaultTheme` also uses that packaged defaults tool to seed
+`GSTheme` into the packaged app's defaults domain on first launch, while
+preserving the launcher env fallback for immediate startup behavior.
+
 This mechanism is intentionally scoped to the packaged app's own defaults
 domain. The MSI backend does not provide generic GNUstep global-domain
 preference writes.

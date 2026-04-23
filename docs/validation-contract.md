@@ -65,7 +65,9 @@ Current semantic kinds:
   tree.
 - `default-theme`
   Confirms the declared theme default survives into the generated launcher
-  artifact, such as MSI `.launcher.ini` or AppImage `AppRun`.
+  artifact, including both the launch-time env fallback and the packaged
+  first-launch defaults seeding path in MSI `.launcher.ini` or AppImage
+  `AppRun`.
 - `bundled-theme`
   Confirms a named GNUstep theme payload exists under the packaged runtime
   theme roots without forcing the manifest to spell out backend-specific theme

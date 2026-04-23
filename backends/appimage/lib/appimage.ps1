@@ -612,11 +612,32 @@ function Get-GpAppImageAppDomainDefaults {
   )
 
   $packagedDefaults = Get-GpPackagedDefaults -Manifest $Context.Manifest
-  if ($null -eq $packagedDefaults.AppDomain) {
+  $packageId = [string]$Context.Manifest["package"]["id"]
+  $domainName = if ($null -ne $packagedDefaults.AppDomain -and -not [string]::IsNullOrWhiteSpace([string]$packagedDefaults.AppDomain.Domain)) {
+    [string]$packagedDefaults.AppDomain.Domain
+  } else {
+    $packageId
+  }
+
+  if ($null -eq $packagedDefaults.AppDomain -and [string]::IsNullOrWhiteSpace([string]$packagedDefaults.DefaultTheme)) {
     return $null
   }
 
   $entries = [System.Collections.Generic.List[psobject]]::new()
+  if (-not [string]::IsNullOrWhiteSpace([string]$packagedDefaults.DefaultTheme)) {
+    $themeEntry = [pscustomobject]@{
+      Key = "GSTheme"
+      Type = "string"
+      Value = [string]$packagedDefaults.DefaultTheme
+    }
+    $entries.Add([pscustomobject]@{
+      Key = [string]$themeEntry.Key
+      Type = [string]$themeEntry.Type
+      Value = $themeEntry.Value
+      SerializedValue = Convert-GpPackagedDefaultToGnustepLiteral -Entry $themeEntry
+    }) | Out-Null
+  }
+
   foreach ($entry in @($packagedDefaults.AppDomain.Entries)) {
     $entries.Add([pscustomobject]@{
       Key = [string]$entry.Key
@@ -627,7 +648,7 @@ function Get-GpAppImageAppDomainDefaults {
   }
 
   return [pscustomobject]@{
-    Domain = [string]$packagedDefaults.AppDomain.Domain
+    Domain = $domainName
     Entries = @($entries.ToArray())
   }
 }
@@ -1056,7 +1077,7 @@ function Assert-GpAppImageAppDefaultsPrerequisites {
     }
   }
 
-  throw "packagedDefaults.appDomain requires a bundled defaults tool at usr/runtime/bin/defaults or usr/runtime/bin/defaults.exe inside the AppDir."
+  throw "packagedDefaults.appDomain or packagedDefaults.defaultTheme requires a bundled defaults tool at usr/runtime/bin/defaults or usr/runtime/bin/defaults.exe inside the AppDir."
 }
 
 function Prepare-GpAppDir {

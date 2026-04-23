@@ -39,6 +39,10 @@ defaults tool at `runtime/bin/defaults` or `runtime/bin/defaults.exe`. It uses
 that tool to seed app-domain defaults only when the packaged app has not
 already stored the key.
 
+`packagedDefaults.defaultTheme` also uses that packaged defaults tool to seed
+`GSTheme` into the packaged app's defaults domain on first launch, while still
+preserving the existing `GSTheme` env fallback for launch-time behavior.
+
 This remains scoped to the packaged app's own defaults domain. The AppImage
 backend does not provide generic GNUstep global-domain preference writes.
 

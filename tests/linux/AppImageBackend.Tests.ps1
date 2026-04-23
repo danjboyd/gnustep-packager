@@ -130,6 +130,8 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $appRunText -Pattern 'if \[ -z "\$\{GSTheme\+x\}" \]; then' -Message "AppRun should only seed GSTheme when the user has not already set it."
       Assert-GpMatch -Actual $appRunText -Pattern 'export GSTheme="Adwaita"' -Message "AppRun should preserve the configured default theme value."
       Assert-GpMatch -Actual $appRunText -Pattern 'APP_DEFAULTS_TOOL="\$RUNTIME_ROOT/bin/defaults"' -Message "AppRun should look for a bundled defaults tool when app-domain defaults are declared."
+      Assert-GpMatch -Actual $appRunText -Pattern 'read "com\.example\.SampleGNUstepLinuxApp" "GSTheme"' -Message "AppRun should seed GSTheme through GNUstep defaults as well as the env fallback."
+      Assert-GpMatch -Actual $appRunText -Pattern 'write "com\.example\.SampleGNUstepLinuxApp" "GSTheme" "\\"Adwaita\\""' -Message "AppRun should serialize the packaged theme as a GNUstep defaults write."
       Assert-GpMatch -Actual $appRunText -Pattern 'read "com\.example\.SampleGNUstepLinuxApp" "SampleFirstRunComplete"' -Message "AppRun should seed the configured defaults domain."
       Assert-GpMatch -Actual $appRunText -Pattern 'write "com\.example\.SampleGNUstepLinuxApp" "SamplePreferredWidth" "800"' -Message "AppRun should serialize integer app-domain defaults."
       Assert-GpMatch -Actual $appRunText -Pattern 'write "com\.example\.SampleGNUstepLinuxApp" "SampleWelcomeText" "\\"Packaged sample\\""' -Message "AppRun should serialize string app-domain defaults as GNUstep literals."
@@ -230,12 +232,15 @@ Describe "AppImage backend" {
 
         Assert-GpEqual -Actual $firstRun.ExitCode -Expected 0 -Message "AppRun should succeed when seeding packaged app-domain defaults."
         Assert-GpTrue -Condition (Test-Path $domainPath) -Message "First launch should create a persistent app-domain defaults file."
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $domainPath) -Pattern 'GSTheme="Adwaita"' -Message "First launch should seed the packaged default theme through GNUstep defaults."
         Assert-GpMatch -Actual (Get-Content -Raw -Path $domainPath) -Pattern 'SampleFirstRunComplete=YES' -Message "First launch should seed boolean defaults."
         Assert-GpMatch -Actual (Get-Content -Raw -Path $domainPath) -Pattern 'SamplePreferredWidth=800' -Message "First launch should seed integer defaults."
         Assert-GpMatch -Actual (Get-Content -Raw -Path $domainPath) -Pattern 'SampleWelcomeText="Packaged sample"' -Message "First launch should seed string defaults."
+        Assert-GpMatch -Actual $firstRun.Text -Pattern 'defaults:GSTheme="Adwaita"' -Message "Fixture output should reflect the seeded theme default."
         Assert-GpMatch -Actual $firstRun.Text -Pattern 'defaults:SampleWelcomeText="Packaged sample"' -Message "Fixture output should reflect the seeded app-domain defaults."
 
         Set-Content -Path $domainPath -Value @(
+          'GSTheme="UserTheme"'
           'SampleFirstRunComplete=YES'
           'SamplePreferredWidth=1024'
           'SampleWelcomeText="User override"'
@@ -246,8 +251,10 @@ Describe "AppImage backend" {
         }
 
         Assert-GpEqual -Actual $secondRun.ExitCode -Expected 0 -Message "AppRun should still succeed after the user has already stored defaults."
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $domainPath) -Pattern 'GSTheme="UserTheme"' -Message "Second launch should preserve an existing user-selected theme."
         Assert-GpMatch -Actual (Get-Content -Raw -Path $domainPath) -Pattern 'SamplePreferredWidth=1024' -Message "Second launch should preserve existing user overrides."
         Assert-GpMatch -Actual (Get-Content -Raw -Path $domainPath) -Pattern 'SampleWelcomeText="User override"' -Message "Second launch should not overwrite existing string defaults."
+        Assert-GpMatch -Actual $secondRun.Text -Pattern 'defaults:GSTheme="UserTheme"' -Message "Fixture output should reflect the preserved user-selected theme."
         Assert-GpMatch -Actual $secondRun.Text -Pattern 'defaults:SampleWelcomeText="User override"' -Message "Fixture output should reflect the preserved user override."
       } finally {
         if (Test-Path $tempHome) {
