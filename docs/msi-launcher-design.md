@@ -24,6 +24,7 @@ The launcher config is derived from:
 - `launch.arguments`
 - `launch.pathPrepend`
 - `launch.env`
+- `packagedDefaults.appDomain`
 - `payload.appRoot`
 - `payload.runtimeRoot`
 - `payload.metadataRoot`
@@ -50,12 +51,17 @@ At runtime the launcher:
 - optionally falls back to `backends.msi.fallbackRuntimeRoot`
 - prepends configured runtime paths to `PATH`
 - sets configured environment variables according to their assignment policy
+- seeds configured app-domain defaults through the bundled `defaults.exe` only
+  when the packaged app has not already stored the key
 - configures fontconfig when `runtime\etc\fonts\fonts.conf` exists
 - forwards command-line arguments to the inner app
 
 Launch-environment entries can either always override or only apply when the
 target variable is unset. That lets a package ship defaults such as
 `GSTheme=WinUXTheme` without preventing users from setting their own theme.
+
+Generic packaged defaults remain app-domain only. The launcher does not expose
+generic GNUstep global-domain writes.
 
 ## Why Config-Driven
 This keeps the backend reusable:

@@ -96,6 +96,9 @@ hardening pass:
 - backend-aware reusable GitHub Actions workflows for Windows and Linux with caller-selected runners, preflight hooks, and additive prerequisite inputs
 - fail-by-default MSI runtime-closure enforcement with explicit `warn` and ignore overrides for known optional DLL imports
 - launch-environment assignment policies so packaged defaults such as `GSTheme` can use `ifUnset` instead of always overriding the user
+- Windows MSI and Linux AppImage app-domain packaged-default seeding for
+  first-run `NSUserDefaults` values without generic global GNUstep preference
+  writes
 - MSI and AppImage release-gate documentation
 
 This repo also includes the full phase 10 updater path:
@@ -129,7 +132,7 @@ and validation pass:
 - documented support boundaries for host provisioning and packaging contracts
 - manifest-level semantic package contracts and installed-result assertions
 - declarative packaged defaults such as a default theme carried through
-  generated launchers
+  generated launchers plus MSI and AppImage app-domain first-run defaults
 - backend validation hooks that check packaged or extracted results for drift
 
 This repo now also includes the phase 13 `gnustep-cli-new` integration:

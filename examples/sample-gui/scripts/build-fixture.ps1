@@ -10,7 +10,7 @@ $resolvedRoot = [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path $Ou
 New-Item -ItemType Directory -Force -Path $resolvedRoot | Out-Null
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$sourcePath = Join-Path (Split-Path -Parent $scriptRoot) "src\\SampleGNUstepApp.c"
+$sourcePath = Join-Path (Join-Path (Split-Path -Parent $scriptRoot) "src") "SampleGNUstepApp.c"
 $outputExe = Join-Path $resolvedRoot "SampleGNUstepApp.exe"
 
 $clangCandidates = [System.Collections.Generic.List[string]]::new()

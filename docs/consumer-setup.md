@@ -28,6 +28,10 @@ manifest instead of scattering them across backend-specific tests:
 - `packagedDefaults.defaultTheme`
   Declares the default `GSTheme` the generated launcher should carry with
   `ifUnset` semantics.
+- `packagedDefaults.appDomain`
+  Declares first-run app-domain `NSUserDefaults` values to seed only when the
+  packaged app has not already stored that key. This generic mechanism is
+  currently implemented for Windows MSI and Linux AppImage.
 - `validation.packageContract.requiredContent`
   Declares semantic packaged-content expectations such as notice reports,
   updater runtime config, bundled themes, metadata files, or updater helpers.
@@ -40,6 +44,18 @@ for theme payload presence. They are related but intentionally separate.
 `bundled-theme` currently covers the common GNUstep runtime theme roots under
 `runtime/System/Library/Themes`, `runtime/lib/GNUstep/Themes`, and
 `runtime/share/GNUstep/Themes`.
+
+Use `packagedDefaults.appDomain` for packaged app preferences that should
+persist after first launch. Do not use it for generic GNUstep global defaults.
+
+If a downstream repo currently seeds these preferences itself, migrate by:
+
+1. moving the first-run keys into `packagedDefaults.appDomain.values`
+2. keeping any theme choice under `packagedDefaults.defaultTheme`
+3. staging a real GNUstep `defaults` tool in the packaged runtime so the
+   backend launcher can seed the app domain
+4. removing repo-local first-run seeding code once package validation covers
+   the intended behavior
 
 ## Expected Stage Layout
 
@@ -157,7 +173,12 @@ Recommended updater docs:
 {
   "profiles": ["gnustep-gui", "gnustep-cmark"],
   "packagedDefaults": {
-    "defaultTheme": "WinUXTheme"
+    "defaultTheme": "WinUXTheme",
+    "appDomain": {
+      "values": {
+        "MyGNUstepAppFirstRunComplete": true
+      }
+    }
   },
   "validation": {
     "packageContract": {

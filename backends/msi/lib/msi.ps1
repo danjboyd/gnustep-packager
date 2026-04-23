@@ -388,6 +388,7 @@ function Write-GpMsiArtifactMetadata {
 
   $package = $Context.Manifest["package"]
   $launch = Get-GpLaunchContract -Context $Context
+  $appDefaults = Get-GpMsiAppDomainDefaults -Context $Context
   $profiles = @(Get-GpRequestedProfiles -Manifest $Context.Manifest)
   $sidecars = Get-GpMsiSidecarPaths -Config $Config
   $signing = Get-GpMsiSigningSettings -Config $Config
@@ -453,6 +454,23 @@ function Write-GpMsiArtifactMetadata {
       pathPrepend = [string[]]@($launch.PathPrepend)
       resourceRoots = [string[]]@($launch.ResourceRoots)
       environment = [hashtable](Copy-GpValue -Value $launch.Environment)
+      appDomainDefaults = $(if ($null -ne $appDefaults -and @($appDefaults.Entries).Count -gt 0) {
+        [ordered]@{
+          domain = $appDefaults.Domain
+          entries = @(
+            foreach ($entry in @($appDefaults.Entries)) {
+              [ordered]@{
+                key = $entry.Key
+                type = $entry.Type
+                value = $entry.Value
+                serializedValue = $entry.SerializedValue
+              }
+            }
+          )
+        }
+      } else {
+        $null
+      })
     }
     runtime = [ordered]@{
       fallbackRuntimeRoot = $Config.FallbackRuntimeRoot
@@ -1339,6 +1357,83 @@ function Get-GpLaunchEnvironmentForMsi {
   return $environment
 }
 
+function Convert-GpPackagedDefaultToGnustepLiteral {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Entry
+  )
+
+  switch ([string]$Entry.Type) {
+    "string" {
+      $escaped = ([string]$Entry.Value).Replace('\', '\\').Replace('"', '\"')
+      return ('"{0}"' -f $escaped)
+    }
+    "bool" {
+      if ([bool]$Entry.Value) {
+        return "YES"
+      }
+      return "NO"
+    }
+    "integer" {
+      return [string]$Entry.Value
+    }
+    "number" {
+      return [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0}", $Entry.Value)
+    }
+    default {
+      throw "Unsupported packaged default type for MSI launcher seeding: $($Entry.Type)"
+    }
+  }
+}
+
+function Get-GpMsiAppDomainDefaults {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context
+  )
+
+  $packagedDefaults = Get-GpPackagedDefaults -Manifest $Context.Manifest
+  if ($null -eq $packagedDefaults.AppDomain) {
+    return $null
+  }
+
+  $entries = [System.Collections.Generic.List[psobject]]::new()
+  foreach ($entry in @($packagedDefaults.AppDomain.Entries)) {
+    $entries.Add([pscustomobject]@{
+      Key = [string]$entry.Key
+      Type = [string]$entry.Type
+      Value = $entry.Value
+      SerializedValue = Convert-GpPackagedDefaultToGnustepLiteral -Entry $entry
+    }) | Out-Null
+  }
+
+  return [pscustomobject]@{
+    Domain = [string]$packagedDefaults.AppDomain.Domain
+    Entries = @($entries.ToArray())
+  }
+}
+
+function Assert-GpMsiAppDefaultsPrerequisites {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [string]$InstallRoot
+  )
+
+  $appDefaults = Get-GpMsiAppDomainDefaults -Context $Context
+  if ($null -eq $appDefaults -or @($appDefaults.Entries).Count -eq 0) {
+    return
+  }
+
+  $defaultsPath = Resolve-GpPathRelativeToBase -BasePath $InstallRoot -Path (Join-Path $Config.RuntimeRootRelative "bin/defaults.exe")
+  if (-not (Test-Path $defaultsPath)) {
+    throw ("packagedDefaults.appDomain requires a bundled defaults.exe at {0}. Stage runtime/bin/defaults.exe and include it in payload.runtimeSeedPaths." -f $defaultsPath)
+  }
+}
+
 function Write-GpMsiLauncherConfig {
   param(
     [Parameter(Mandatory = $true)]
@@ -1351,6 +1446,7 @@ function Write-GpMsiLauncherConfig {
 
   $launch = Get-GpLaunchContract -Context $Context
   $environment = Get-GpLaunchEnvironmentForMsi -Context $Context -Config $Config
+  $appDefaults = Get-GpMsiAppDomainDefaults -Context $Context
   $configPath = Join-Path $InstallRoot $Config.LauncherConfigName
   $lines = [System.Collections.Generic.List[string]]::new()
 
@@ -1390,6 +1486,13 @@ function Write-GpMsiLauncherConfig {
     }
   }
 
+  if ($null -ne $appDefaults -and @($appDefaults.Entries).Count -gt 0) {
+    $lines.Add(("appDefaultsDomain={0}" -f $appDefaults.Domain)) | Out-Null
+    foreach ($entry in @($appDefaults.Entries)) {
+      $lines.Add(("appDefault={0}={1}" -f $entry.Key, $entry.SerializedValue)) | Out-Null
+    }
+  }
+
   Set-Content -Path $configPath -Value $lines
   return $configPath
 }
@@ -1416,6 +1519,8 @@ function Prepare-GpMsiInstallTree {
       }
     }
   }
+
+  Assert-GpMsiAppDefaultsPrerequisites -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot
 
   $signing = Get-GpMsiSigningSettings -Config $Config
   $launcherOutputPath = Join-Path $WorkPaths.InstallRoot $Config.LauncherFileName

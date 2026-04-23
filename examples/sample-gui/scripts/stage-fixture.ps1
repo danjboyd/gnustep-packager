@@ -7,16 +7,18 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $resolvedStageRoot = [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path $StageRoot))
-$appRoot = Join-Path $resolvedStageRoot "app\\SampleGNUstepApp.app"
+$appRoot = Join-Path (Join-Path $resolvedStageRoot "app") "SampleGNUstepApp.app"
 $resourceRoot = Join-Path $appRoot "Resources"
-$runtimeBin = Join-Path $resolvedStageRoot "runtime\\bin"
-$runtimeFonts = Join-Path $resolvedStageRoot "runtime\\etc\\fonts"
-$runtimeConfig = Join-Path $resolvedStageRoot "runtime\\config"
-$runtimeTheme = Join-Path $resolvedStageRoot "runtime\\lib\\GNUstep\\Themes\\WinUXTheme.theme"
-$metadataIcons = Join-Path $resolvedStageRoot "metadata\\icons"
-$metadataLicenses = Join-Path $resolvedStageRoot "metadata\\licenses"
+$runtimeRoot = Join-Path $resolvedStageRoot "runtime"
+$runtimeBin = Join-Path $runtimeRoot "bin"
+$runtimeFonts = Join-Path (Join-Path $runtimeRoot "etc") "fonts"
+$runtimeConfig = Join-Path $runtimeRoot "config"
+$runtimeTheme = Join-Path (Join-Path (Join-Path (Join-Path $runtimeRoot "lib") "GNUstep") "Themes") "WinUXTheme.theme"
+$metadataRoot = Join-Path $resolvedStageRoot "metadata"
+$metadataIcons = Join-Path $metadataRoot "icons"
+$metadataLicenses = Join-Path $metadataRoot "licenses"
 $logRoot = Join-Path $resolvedStageRoot "logs"
-$builtExe = [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path "out\\build\\SampleGNUstepApp.exe"))
+$builtExe = [System.IO.Path]::GetFullPath((Join-Path (Join-Path (Get-Location).Path "out/build") "SampleGNUstepApp.exe"))
 $defaultsCandidates = [System.Collections.Generic.List[string]]::new()
 $fontConfigCandidates = [System.Collections.Generic.List[string]]::new()
 if (-not [string]::IsNullOrWhiteSpace($env:MSYS2_LOCATION)) {

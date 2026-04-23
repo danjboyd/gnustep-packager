@@ -679,6 +679,38 @@ function Get-GpPackagedDefaults {
     [System.Collections.IDictionary]$Manifest
   )
 
+  function Get-GpPackagedDefaultScalarType {
+    param(
+      [Parameter(Mandatory = $true)]
+      [AllowNull()]
+      [object]$Value
+    )
+
+    if ($Value -is [string]) {
+      return "string"
+    }
+    if ($Value -is [bool]) {
+      return "bool"
+    }
+    if ($Value -is [byte] -or
+        $Value -is [sbyte] -or
+        $Value -is [int16] -or
+        $Value -is [uint16] -or
+        $Value -is [int32] -or
+        $Value -is [uint32] -or
+        $Value -is [int64] -or
+        $Value -is [uint64]) {
+      return "integer"
+    }
+    if ($Value -is [single] -or
+        $Value -is [double] -or
+        $Value -is [decimal]) {
+      return "number"
+    }
+
+    return $null
+  }
+
   $packagedDefaults = if ($Manifest.Contains("packagedDefaults") -and ($Manifest["packagedDefaults"] -is [System.Collections.IDictionary])) {
     $Manifest["packagedDefaults"]
   } else {
@@ -691,8 +723,47 @@ function Get-GpPackagedDefaults {
     $null
   }
 
+  $packageId = $null
+  if ($Manifest.Contains("package") -and ($Manifest["package"] -is [System.Collections.IDictionary]) -and
+      $Manifest["package"].Contains("id") -and -not [string]::IsNullOrWhiteSpace([string]$Manifest["package"]["id"])) {
+    $packageId = [string]$Manifest["package"]["id"]
+  }
+
+  $appDomainDefaults = $null
+  if ($packagedDefaults.Contains("appDomain") -and ($packagedDefaults["appDomain"] -is [System.Collections.IDictionary])) {
+    $appDomain = $packagedDefaults["appDomain"]
+    $domainName = if ($appDomain.Contains("domain") -and -not [string]::IsNullOrWhiteSpace([string]$appDomain["domain"])) {
+      [string]$appDomain["domain"]
+    } else {
+      $packageId
+    }
+
+    $entries = [System.Collections.Generic.List[psobject]]::new()
+    if ($appDomain.Contains("values") -and ($appDomain["values"] -is [System.Collections.IDictionary])) {
+      foreach ($key in ($appDomain["values"].Keys | Sort-Object)) {
+        $value = $appDomain["values"][$key]
+        $type = Get-GpPackagedDefaultScalarType -Value $value
+        if (-not [string]::IsNullOrWhiteSpace([string]$key) -and -not [string]::IsNullOrWhiteSpace($type)) {
+          $entries.Add([pscustomobject]@{
+            Key = [string]$key
+            Type = $type
+            Value = $value
+          }) | Out-Null
+        }
+      }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($domainName) -and $entries.Count -gt 0) {
+      $appDomainDefaults = [pscustomobject]@{
+        Domain = $domainName
+        Entries = @($entries.ToArray())
+      }
+    }
+  }
+
   return [pscustomobject]@{
     DefaultTheme = $defaultTheme
+    AppDomain = $appDomainDefaults
   }
 }
 
@@ -1039,6 +1110,55 @@ function Test-GpManifest {
           }
           if ($declaredThemePolicy -ne "ifUnset") {
             Add-Issue "launch.env.GSTheme.policy must be 'ifUnset' when packagedDefaults.defaultTheme is declared."
+          }
+        }
+      }
+
+      if ($packagedDefaults.Contains("appDomain")) {
+        if (-not ($packagedDefaults["appDomain"] -is [System.Collections.IDictionary])) {
+          Add-Issue "packagedDefaults.appDomain must be an object when present."
+        } else {
+          $appDomain = $packagedDefaults["appDomain"]
+          if ($appDomain.Contains("domain") -and -not (Test-StringValue $appDomain["domain"])) {
+            Add-Issue "packagedDefaults.appDomain.domain must be a non-empty string when present."
+          }
+
+          if (-not $appDomain.Contains("values")) {
+            Add-Issue "packagedDefaults.appDomain.values must be present when packagedDefaults.appDomain is declared."
+          } elseif (-not ($appDomain["values"] -is [System.Collections.IDictionary])) {
+            Add-Issue "packagedDefaults.appDomain.values must be an object."
+          } elseif (@($appDomain["values"].Keys).Count -eq 0) {
+            Add-Issue "packagedDefaults.appDomain.values must contain at least one key."
+          } else {
+            foreach ($key in @($appDomain["values"].Keys)) {
+              if (-not (Test-StringValue $key)) {
+                Add-Issue "packagedDefaults.appDomain.values keys must be non-empty strings."
+                continue
+              }
+
+              if ([string]$key -eq "GSTheme") {
+                Add-Issue "packagedDefaults.appDomain.values.GSTheme is not supported; use packagedDefaults.defaultTheme instead."
+                continue
+              }
+
+              $value = $appDomain["values"][$key]
+              $supported = ($value -is [string]) -or
+                ($value -is [bool]) -or
+                ($value -is [byte]) -or
+                ($value -is [sbyte]) -or
+                ($value -is [int16]) -or
+                ($value -is [uint16]) -or
+                ($value -is [int32]) -or
+                ($value -is [uint32]) -or
+                ($value -is [int64]) -or
+                ($value -is [uint64]) -or
+                ($value -is [single]) -or
+                ($value -is [double]) -or
+                ($value -is [decimal])
+              if (-not $supported) {
+                Add-Issue ("packagedDefaults.appDomain.values.{0} must be a string, boolean, integer, or number." -f [string]$key)
+              }
+            }
           }
         }
       }

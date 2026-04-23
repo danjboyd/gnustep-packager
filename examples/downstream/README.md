@@ -40,6 +40,10 @@ Recommended adoption order:
 4. Declare semantic packaging intent under `packagedDefaults`,
    `validation.packageContract`, and `validation.installedResult` before adding
    backend-specific path assertions.
+   Keep theme selection under `packagedDefaults.defaultTheme`, and move any
+   packaged first-run app preferences into `packagedDefaults.appDomain`.
+   Stage a real GNUstep `defaults` tool in the packaged runtime when using
+   `appDomain`.
 5. Replace the placeholder `updates.github.*` and backend `updates.feedUrl`
    values with your real repo and feed URLs.
 6. Keep the default `gnustep-cli-new` workflow bootstrap unless you are using a

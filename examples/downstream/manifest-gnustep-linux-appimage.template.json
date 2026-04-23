@@ -41,7 +41,12 @@
     "env": {}
   },
   "packagedDefaults": {
-    "defaultTheme": "Adwaita"
+    "defaultTheme": "Adwaita",
+    "appDomain": {
+      "values": {
+        "MyGNUstepAppFirstRunComplete": true
+      }
+    }
   },
   "outputs": {
     "root": "dist",

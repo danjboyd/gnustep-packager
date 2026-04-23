@@ -253,7 +253,7 @@
         "env": {
           "type": "object",
           "additionalProperties": {
-            "oneOf": [
+            "anyOf": [
               {
                 "type": "string"
               },
@@ -353,6 +353,43 @@
         "defaultTheme": {
           "type": "string",
           "minLength": 1
+        },
+        "appDomain": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "values"
+          ],
+          "properties": {
+            "domain": {
+              "type": "string",
+              "minLength": 1
+            },
+            "values": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              }
+            }
+          }
         }
       }
     },

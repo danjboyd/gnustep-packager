@@ -39,7 +39,12 @@
     "env": {}
   },
   "packagedDefaults": {
-    "defaultTheme": "WinUXTheme"
+    "defaultTheme": "WinUXTheme",
+    "appDomain": {
+      "values": {
+        "MyGNUstepAppFirstRunComplete": true
+      }
+    }
   },
   "outputs": {
     "root": "dist",

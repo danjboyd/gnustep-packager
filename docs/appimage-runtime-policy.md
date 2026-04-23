@@ -34,6 +34,14 @@ exports:
 - `FONTCONFIG_FILE`
 - `FONTCONFIG_PATH`
 
+When `packagedDefaults.appDomain` is declared, `AppRun` also requires a bundled
+defaults tool at `runtime/bin/defaults` or `runtime/bin/defaults.exe`. It uses
+that tool to seed app-domain defaults only when the packaged app has not
+already stored the key.
+
+This remains scoped to the packaged app's own defaults domain. The AppImage
+backend does not provide generic GNUstep global-domain preference writes.
+
 ## Current Boundary
 The backend does not attempt dynamic Linux dependency harvesting. The consumer
 must still stage the runtime tree and any required native dependencies before

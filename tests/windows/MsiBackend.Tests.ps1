@@ -122,6 +122,14 @@ Describe "MSI backend" {
       Assert-GpEqual -Actual $launch.Environment["GSTheme"]["policy"] -Expected "ifUnset" -Message "Launch contract should preserve conditional environment policies."
       Assert-GpEqual -Actual $launch.Environment["GNUSTEP_PATHPREFIX_LIST"]["policy"] -Expected "override" -Message "Plain string launch environment entries should normalize to override."
     }
+
+    It "normalizes packaged app-domain defaults for backend rendering" {
+      $packagedDefaults = Get-GpPackagedDefaults -Manifest $script:transformContext.Manifest
+
+      Assert-GpEqual -Actual $packagedDefaults.AppDomain.Domain -Expected "com.example.SampleGNUstepApp" -Message "App-domain defaults should default to package.id when no explicit domain is declared."
+      Assert-GpEqual -Actual @($packagedDefaults.AppDomain.Entries | ForEach-Object { $_.Key }) -Expected @("SampleFirstRunComplete", "SamplePreferredWidth", "SampleWelcomeText") -Message "App-domain defaults should preserve declared keys."
+      Assert-GpEqual -Actual @($packagedDefaults.AppDomain.Entries | ForEach-Object { $_.Type }) -Expected @("bool", "integer", "string") -Message "App-domain defaults should normalize scalar value types."
+    }
   }
 
   Context "Versioning and transform" {
@@ -164,6 +172,10 @@ Describe "MSI backend" {
       Assert-GpMatch -Actual $configText -Pattern "pathPrepend=runtime/bin" -Message "Launcher config should contain runtime PATH additions."
       Assert-GpMatch -Actual $configText -Pattern "env=GNUSTEP_PATHPREFIX_LIST=\{@runtimeRoot\}" -Message "Launcher config should preserve runtime token expansion."
       Assert-GpMatch -Actual $configText -Pattern "env=ifUnset\|GSTheme=WinUXTheme" -Message "Launcher config should preserve conditional environment defaults."
+      Assert-GpMatch -Actual $configText -Pattern "appDefaultsDomain=com\.example\.SampleGNUstepApp" -Message "Launcher config should preserve the packaged app defaults domain."
+      Assert-GpMatch -Actual $configText -Pattern 'appDefault=SampleFirstRunComplete=YES' -Message "Launcher config should serialize boolean app defaults."
+      Assert-GpMatch -Actual $configText -Pattern 'appDefault=SamplePreferredWidth=800' -Message "Launcher config should serialize integer app defaults."
+      Assert-GpMatch -Actual $configText -Pattern 'appDefault=SampleWelcomeText=\"Packaged sample\"' -Message "Launcher config should serialize string app defaults as quoted GNUstep literals."
     }
 
     It "writes a bundled notice report from compliance entries" {

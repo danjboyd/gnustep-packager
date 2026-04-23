@@ -31,6 +31,7 @@
 | Contracts | Semantic package contract assertions | Supported | `validation.packageContract` currently supports notice reports, updater config, default theme, metadata files, and updater helpers |
 | Contracts | Installed or extracted result assertions | Supported | `validation.installedResult` runs on MSI install roots and extracted AppDir contents |
 | Defaults | Declarative packaged default theme | Supported | `packagedDefaults.defaultTheme` realizes and validates a `GSTheme` default with `ifUnset` policy |
+| Defaults | App-domain packaged defaults | Supported | `packagedDefaults.appDomain` seeds first-run app-domain defaults through the bundled defaults tool on Windows MSI and Linux AppImage; generic GNUstep global-domain writes are out of scope |
 
 ## Validation Scope
 

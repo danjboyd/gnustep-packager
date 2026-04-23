@@ -20,6 +20,11 @@ typedef struct GPEnvEntry {
     int policy;
 } GPEnvEntry;
 
+typedef struct GPAppDefaultEntry {
+    wchar_t key[GP_MAX_KEY];
+    wchar_t value[GP_MAX_PATH];
+} GPAppDefaultEntry;
+
 enum {
     GP_ENV_OVERRIDE = 0,
     GP_ENV_IF_UNSET = 1
@@ -37,6 +42,9 @@ typedef struct GPLauncherConfig {
     int pathPrependCount;
     wchar_t baseArgument[GP_MAX_ITEMS][GP_MAX_PATH];
     int baseArgumentCount;
+    wchar_t appDefaultsDomain[GP_MAX_PATH];
+    GPAppDefaultEntry appDefaults[GP_MAX_ITEMS];
+    int appDefaultsCount;
     GPEnvEntry env[GP_MAX_ITEMS];
     int envCount;
 } GPLauncherConfig;
@@ -285,6 +293,33 @@ static BOOL GPAddEnvEntry(GPLauncherConfig *config, const char *value)
     return TRUE;
 }
 
+static BOOL GPAddAppDefaultEntry(GPLauncherConfig *config, const char *value)
+{
+    char buffer[GP_MAX_LINE];
+    char *key = NULL;
+    char *entryValue = NULL;
+
+    if (config->appDefaultsCount >= GP_MAX_ITEMS) {
+        return FALSE;
+    }
+
+    strncpy(buffer, value, sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = '\0';
+    if (!GPParseKeyValue(buffer, &key, &entryValue)) {
+        return FALSE;
+    }
+
+    if (!GPUtf8ToWide(key, config->appDefaults[config->appDefaultsCount].key, GP_MAX_KEY)) {
+        return FALSE;
+    }
+    if (!GPUtf8ToWide(entryValue, config->appDefaults[config->appDefaultsCount].value, GP_MAX_PATH)) {
+        return FALSE;
+    }
+
+    config->appDefaultsCount++;
+    return TRUE;
+}
+
 static BOOL GPApplyConfigLine(GPLauncherConfig *config, char *line)
 {
     char *key = NULL;
@@ -325,6 +360,12 @@ static BOOL GPApplyConfigLine(GPLauncherConfig *config, char *line)
     }
     if (strcmp(key, "baseArgument") == 0) {
         return GPAddBaseArgument(config, value);
+    }
+    if (strcmp(key, "appDefaultsDomain") == 0) {
+        return GPUtf8ToWide(value, config->appDefaultsDomain, GP_MAX_PATH);
+    }
+    if (strcmp(key, "appDefault") == 0) {
+        return GPAddAppDefaultEntry(config, value);
     }
     if (strcmp(key, "env") == 0) {
         return GPAddEnvEntry(config, value);
@@ -579,6 +620,152 @@ static BOOL GPBuildChildCommandLine(wchar_t *dest,
     return TRUE;
 }
 
+static BOOL GPBuildToolCommandLine(wchar_t *dest,
+                                   size_t destCount,
+                                   const wchar_t *toolPath,
+                                   const wchar_t **args,
+                                   int argCount)
+{
+    int i = 0;
+    size_t used = 0;
+    wchar_t quotedArg[GP_MAX_PATH];
+
+    if (!GPQuoteArgument(quotedArg, GP_MAX_PATH, toolPath)) {
+        return FALSE;
+    }
+
+    used = wcslen(quotedArg);
+    if (used + 1 > destCount) {
+        return FALSE;
+    }
+    wcscpy(dest, quotedArg);
+
+    for (i = 0; i < argCount; i++) {
+      size_t quotedLen = 0;
+      if (!GPQuoteArgument(quotedArg, GP_MAX_PATH, args[i])) {
+          return FALSE;
+      }
+      quotedLen = wcslen(quotedArg);
+      if (used + 1 + quotedLen + 1 > destCount) {
+          return FALSE;
+      }
+      dest[used++] = L' ';
+      wcscpy(dest + used, quotedArg);
+      used += quotedLen;
+    }
+
+    return TRUE;
+}
+
+static BOOL GPRunProcessAndWait(const wchar_t *toolPath,
+                                wchar_t *commandLine,
+                                const wchar_t *workingDirectory,
+                                DWORD creationFlags,
+                                DWORD *exitCodeOut)
+{
+    STARTUPINFOW startupInfo;
+    PROCESS_INFORMATION processInfo;
+    DWORD exitCode = 1;
+
+    ZeroMemory(&startupInfo, sizeof(startupInfo));
+    startupInfo.cb = sizeof(startupInfo);
+    startupInfo.dwFlags = STARTF_USESHOWWINDOW;
+    startupInfo.wShowWindow = SW_HIDE;
+    ZeroMemory(&processInfo, sizeof(processInfo));
+
+    if (!CreateProcessW(toolPath,
+                        commandLine,
+                        NULL,
+                        NULL,
+                        FALSE,
+                        creationFlags | CREATE_UNICODE_ENVIRONMENT,
+                        NULL,
+                        workingDirectory,
+                        &startupInfo,
+                        &processInfo)) {
+        return FALSE;
+    }
+
+    WaitForSingleObject(processInfo.hProcess, INFINITE);
+    if (!GetExitCodeProcess(processInfo.hProcess, &exitCode)) {
+        CloseHandle(processInfo.hThread);
+        CloseHandle(processInfo.hProcess);
+        return FALSE;
+    }
+
+    CloseHandle(processInfo.hThread);
+    CloseHandle(processInfo.hProcess);
+    if (exitCodeOut != NULL) {
+        *exitCodeOut = exitCode;
+    }
+    return TRUE;
+}
+
+static BOOL GPSeedAppDefaults(GPLauncherState *state)
+{
+    wchar_t defaultsPath[GP_MAX_PATH];
+    wchar_t commandLine[GP_MAX_PATH];
+    DWORD exitCode = 1;
+    int i = 0;
+
+    if (state->config.appDefaultsCount == 0) {
+        return TRUE;
+    }
+    if (state->config.appDefaultsDomain[0] == L'\0') {
+        GPSetWideValue(state->errorBuffer, GP_MAX_PATH, L"Packaged app defaults were declared without an app defaults domain.");
+        return FALSE;
+    }
+    if (!GPJoinPath(defaultsPath, GP_MAX_PATH, state->runtimeBin, L"defaults.exe")) {
+        GPSetWideValue(state->errorBuffer, GP_MAX_PATH, L"Unable to resolve the bundled defaults.exe path.");
+        return FALSE;
+    }
+    if (!GPFileExists(defaultsPath)) {
+        swprintf(state->errorBuffer,
+                 GP_MAX_PATH,
+                 L"Packaged app defaults require defaults.exe at %ls.",
+                 defaultsPath);
+        return FALSE;
+    }
+
+    for (i = 0; i < state->config.appDefaultsCount; i++) {
+        const wchar_t *readArgs[3];
+        const wchar_t *writeArgs[4];
+
+        readArgs[0] = L"read";
+        readArgs[1] = state->config.appDefaultsDomain;
+        readArgs[2] = state->config.appDefaults[i].key;
+        if (!GPBuildToolCommandLine(commandLine, GP_MAX_PATH, defaultsPath, readArgs, 3) ||
+            !GPRunProcessAndWait(defaultsPath, commandLine, state->installRoot, CREATE_NO_WINDOW, &exitCode)) {
+            swprintf(state->errorBuffer,
+                     GP_MAX_PATH,
+                     L"Unable to read packaged app default %ls in domain %ls.",
+                     state->config.appDefaults[i].key,
+                     state->config.appDefaultsDomain);
+            return FALSE;
+        }
+        if (exitCode == 0) {
+            continue;
+        }
+
+        writeArgs[0] = L"write";
+        writeArgs[1] = state->config.appDefaultsDomain;
+        writeArgs[2] = state->config.appDefaults[i].key;
+        writeArgs[3] = state->config.appDefaults[i].value;
+        if (!GPBuildToolCommandLine(commandLine, GP_MAX_PATH, defaultsPath, writeArgs, 4) ||
+            !GPRunProcessAndWait(defaultsPath, commandLine, state->installRoot, CREATE_NO_WINDOW, &exitCode) ||
+            exitCode != 0) {
+            swprintf(state->errorBuffer,
+                     GP_MAX_PATH,
+                     L"Unable to seed packaged app default %ls in domain %ls.",
+                     state->config.appDefaults[i].key,
+                     state->config.appDefaultsDomain);
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+
 static BOOL GPApplyEnvironment(const GPLauncherConfig *config,
                                const wchar_t *installRoot,
                                const wchar_t *appRoot,
@@ -713,6 +900,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, i
 
     if (!GPConfigureFontconfig(state->runtimeRoot)) {
         GPShowError(displayName, L"Unable to configure font runtime paths.");
+        goto cleanup;
+    }
+
+    if (!GPSeedAppDefaults(state)) {
+        GPShowError(displayName, state->errorBuffer);
         goto cleanup;
     }
 

@@ -1100,6 +1100,141 @@ Current status notes:
   - a packager release records the Windows toolchain baseline that downstream
     projects should use or compare against
 
+## Phase 15: App-Domain Packaged Defaults
+Goal: add a generic packaged-defaults mechanism that seeds app-domain defaults
+on first launch without turning the packager into a global GNUstep preference
+writer.
+Status: complete. Phase 15A through 15G are implemented.
+
+This phase follows the current semantic `packagedDefaults.defaultTheme` work and
+turns packaged defaults into a more general, backend-neutral launch/runtime
+contract. The generic mechanism should remain scoped to the packaged app's own
+defaults domain. GNUstep global-domain writes such as generic `NSGlobalDomain`
+or `GNUstep`-wide seeding are explicitly out of scope for this phase.
+
+Guardrails:
+- keep the core contract backend-neutral while allowing backend-specific launch
+  helpers to realize first-run defaults
+- only seed app-domain defaults when a key is absent; never overwrite later
+  user changes
+- do not expose a generic manifest surface for cross-app or machine-wide
+  preference writes
+- if `defaultTheme` cannot be implemented as an app-domain default, keep it as
+  a narrow packager-owned semantic instead of broadening the generic contract
+
+Current status notes:
+- `Phase 15A` landed as a schema-backed `packagedDefaults.appDomain` manifest
+  shape with scalar value validation and app-domain-only documentation.
+- `Phase 15B` landed as shared normalization in `scripts/lib/core.ps1`,
+  including typed packaged-default entries, default-domain resolution to
+  `package.id`, and validation that rejects unsupported value types or
+  `GSTheme` under generic app-domain defaults.
+- `Phase 15C` landed as a backend-facing MSI launcher contract with
+  `appDefaultsDomain` plus serialized `appDefault` entries and explicit docs
+  that `defaultTheme` remains a narrow semantic rather than a generic
+  app-domain key.
+- `Phase 15D` landed as Windows launcher seeding through the bundled
+  `runtime/bin/defaults.exe`, plus MSI transform regression coverage for
+  packaged app-domain defaults and prerequisite diagnostics when `defaults.exe`
+  is missing.
+- `Phase 15E` landed as Linux/AppImage parity through generated `AppRun`
+  seeding logic backed by a bundled defaults tool under
+  `runtime/bin/defaults` or `runtime/bin/defaults.exe`.
+- `Phase 15F` landed as behavioral fixture coverage that verifies first-launch
+  defaults are actually seeded and that later user overrides survive later
+  launches rather than being overwritten.
+- `Phase 15G` landed as consumer guidance, template updates, and migration
+  notes for downstream repos moving packaged first-run preferences out of
+  repo-local fallback code and into `packagedDefaults.appDomain`.
+
+- `Phase 15A`: Manifest shape and schema contract
+  Deliverables:
+  - a schema-backed manifest shape for generic packaged app-domain defaults
+    under `packagedDefaults`
+  - validation rules for supported value types and key naming
+  - explicit documentation that generic seeding is app-domain only
+  Exit criteria:
+  - consumers can declare stable first-run app defaults without inventing
+    backend-specific config files
+  - schema and docs make clear that generic GNUstep global-domain seeding is
+    not supported
+
+- `Phase 15B`: Core normalization and merge semantics
+  Deliverables:
+  - shared core helpers that normalize packaged app-domain defaults into a
+    backend-neutral internal contract
+  - layering and conflict rules between semantic defaults such as
+    `defaultTheme`, explicit `launch.env`, and generic app-domain defaults
+  - manifest validation that rejects ambiguous or contradictory declarations
+  Exit criteria:
+  - one resolved packaged-defaults contract feeds all backends
+  - conflicting defaults fail early with precise diagnostics
+
+- `Phase 15C`: Backend realization contract
+  Deliverables:
+  - a backend-facing contract for "seed once if absent" behavior at packaged
+    app launch time
+  - MSI and AppImage design notes describing where first-run seeding logic
+    lives and how it avoids persistent cross-app side effects
+  - a decision on whether `defaultTheme` remains semantic-only or can map into
+    the new contract cleanly
+  Exit criteria:
+  - both backends have a clear realization strategy without introducing
+    backend-specific concepts into shared manifest fields
+  - theme handling is explicitly documented rather than left implicit
+
+- `Phase 15D`: Windows MSI implementation
+  Deliverables:
+  - Windows packaged-launch behavior that seeds declared app-domain defaults on
+    first launch only when the target key is absent
+  - regression coverage around install, first launch, and preserved user
+    overrides on later launches
+  - diagnostics that distinguish launcher failure, seeding failure, and app
+    startup failure
+  Exit criteria:
+  - a fresh MSI install applies declared app-domain defaults for the packaged
+    app on first launch
+  - later user preference changes survive subsequent launches
+
+- `Phase 15E`: Linux AppImage implementation
+  Deliverables:
+  - AppRun or equivalent launch-time logic that realizes the same app-domain
+    first-run defaults contract on Linux
+  - parity coverage showing the same manifest semantics work across MSI and
+    AppImage
+  - documentation of any platform-specific limitations that remain
+  Exit criteria:
+  - AppImage honors the shared app-domain defaults contract without diverging
+    manifest semantics
+  - backend differences are implementation details, not consumer-visible
+    contract drift
+
+- `Phase 15F`: Behavioral validation and fixtures
+  Deliverables:
+  - reference fixtures that exercise packaged app-domain defaults in a small
+    GNUstep app
+  - validation paths that confirm behavioral first-launch results instead of
+    only checking generated config text
+  - installed or extracted result assertions that detect drift between declared
+    defaults and actual runtime behavior
+  Exit criteria:
+  - repo-owned validation catches "launcher config looks right but first launch
+    still behaves wrong" regressions
+  - downstream repos do not need ad hoc checks for packaged first-run defaults
+
+- `Phase 15G`: Consumer guidance and migration
+  Deliverables:
+  - manifest documentation and examples for app-domain packaged defaults
+  - migration guidance for downstream apps currently using repo-local fallback
+    preference seeding
+  - explicit notes about when to use generic app-domain defaults versus narrow
+    semantic fields such as `defaultTheme`
+  Exit criteria:
+  - downstream maintainers can adopt packaged first-run defaults without
+    guessing at backend behavior
+  - docs keep the support boundary clear: app-domain seeding is supported,
+    generic global-domain preference writing is not
+
 ## Suggested Early Execution Order
 Prioritize these subphases first:
 

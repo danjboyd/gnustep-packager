@@ -329,6 +329,63 @@ Describe "Shared validation contract" {
     }
   }
 
+  It "normalizes packagedDefaults.appDomain against package.id by default" {
+    $manifestPath = $null
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest["packagedDefaults"]["appDomain"] = @{
+          values = @{
+            ExampleEnabled = $true
+            ExampleFontSize = 12
+            ExampleTitle = "Packaged sample"
+          }
+        }
+      }
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      $packagedDefaults = Get-GpPackagedDefaults -Manifest $context.Manifest
+
+      Assert-GpEqual -Actual $packagedDefaults.AppDomain.Domain -Expected "com.example.SampleGNUstepApp" -Message "App-domain defaults should default to package.id when no explicit domain is declared."
+      Assert-GpEqual -Actual @($packagedDefaults.AppDomain.Entries | ForEach-Object { $_.Type }) -Expected @("bool", "integer", "string") -Message "App-domain defaults should normalize scalar value types."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+    }
+  }
+
+  It "rejects unsupported packagedDefaults.appDomain values and theme keys" {
+    $manifestPath = $null
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest["packagedDefaults"]["appDomain"] = @{
+          values = @{
+            GSTheme = "WinUITheme"
+            ExampleObject = @{
+              nested = "value"
+            }
+          }
+        }
+      }
+
+      $schemaIssues = @(Test-GpManifestSchema -Path $manifestPath)
+      $context = Get-GpManifestContext -Path $manifestPath
+      $issues = @(Test-GpManifest -Manifest $context.Manifest)
+      $allIssues = @($schemaIssues + $issues)
+
+      Assert-GpMatch -Actual ([string]::Join("`n", $allIssues)) -Pattern "packagedDefaults\.appDomain\.values" -Message "Invalid app-domain defaults should be rejected by schema or shared manifest validation."
+      Assert-GpMatch -Actual ([string]::Join("`n", $allIssues)) -Pattern "GSTheme" -Message "GSTheme should remain a semantic packaged default rather than a generic app-domain key."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+    }
+  }
+
   It "fails shared validation when a semantic stage contract item is missing" {
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-validation-contract-stage-" + [guid]::NewGuid().ToString("N"))
     $stageRoot = Join-Path $tempRoot "stage"

@@ -99,6 +99,13 @@ Describe "AppImage backend" {
       Assert-GpEqual -Actual @($launch.PathPrepend) -Expected @("runtime/bin") -Message "GUI profile should still feed the shared PATH contract on Linux."
       Assert-GpEqual -Actual $launch.Environment["GSTheme"]["policy"] -Expected "ifUnset" -Message "Launch contract should preserve conditional environment defaults on Linux too."
     }
+
+    It "normalizes packaged app-domain defaults for AppImage rendering" {
+      $packagedDefaults = Get-GpPackagedDefaults -Manifest $script:packageContext.Manifest
+
+      Assert-GpEqual -Actual $packagedDefaults.AppDomain.Domain -Expected "com.example.SampleGNUstepLinuxApp" -Message "App-domain defaults should default to package.id on Linux too."
+      Assert-GpEqual -Actual @($packagedDefaults.AppDomain.Entries | ForEach-Object { $_.Type }) -Expected @("bool", "integer", "string") -Message "App-domain defaults should preserve scalar types for AppImage rendering."
+    }
   }
 
   Context "Packaging" {
@@ -122,6 +129,10 @@ Describe "AppImage backend" {
 
       Assert-GpMatch -Actual $appRunText -Pattern 'if \[ -z "\$\{GSTheme\+x\}" \]; then' -Message "AppRun should only seed GSTheme when the user has not already set it."
       Assert-GpMatch -Actual $appRunText -Pattern 'export GSTheme="Adwaita"' -Message "AppRun should preserve the configured default theme value."
+      Assert-GpMatch -Actual $appRunText -Pattern 'APP_DEFAULTS_TOOL="\$RUNTIME_ROOT/bin/defaults"' -Message "AppRun should look for a bundled defaults tool when app-domain defaults are declared."
+      Assert-GpMatch -Actual $appRunText -Pattern 'read "com\.example\.SampleGNUstepLinuxApp" "SampleFirstRunComplete"' -Message "AppRun should seed the configured defaults domain."
+      Assert-GpMatch -Actual $appRunText -Pattern 'write "com\.example\.SampleGNUstepLinuxApp" "SamplePreferredWidth" "800"' -Message "AppRun should serialize integer app-domain defaults."
+      Assert-GpMatch -Actual $appRunText -Pattern 'write "com\.example\.SampleGNUstepLinuxApp" "SampleWelcomeText" "\\"Packaged sample\\""' -Message "AppRun should serialize string app-domain defaults as GNUstep literals."
     }
 
     It "satisfies the semantic AppImage package contract in the AppDir" {
@@ -203,6 +214,46 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $script:validationResult.SmokeOutcome -Pattern "process-" -Message "Launch-only smoke validation should succeed through process startup behavior."
       Assert-GpMatch -Actual $script:launchOnlySmokeLogText -Pattern "Sample GNUstep Linux fixture running" -Message "Smoke validation should capture packaged app output."
       Assert-GpTrue -Condition ([string]::IsNullOrWhiteSpace([string]$script:validationResult.SmokeMarkerPath)) -Message "Launch-only smoke validation should not require a marker file."
+    }
+
+    It "seeds AppImage app-domain defaults on first launch and preserves later user overrides" {
+      $tempHome = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-defaults-home-" + [guid]::NewGuid().ToString("N"))
+      $defaultsRoot = Join-Path $tempHome "GNUstep/Defaults"
+      $domainPath = Join-Path $defaultsRoot "com.example.SampleGNUstepLinuxApp.defaults"
+
+      try {
+        New-Item -ItemType Directory -Force -Path $defaultsRoot | Out-Null
+
+        $firstRun = Invoke-GpAppImageCapturedTool -FilePath $script:packageResult.AppRunPath -ArgumentList @() -Environment @{
+          HOME = $tempHome
+        }
+
+        Assert-GpEqual -Actual $firstRun.ExitCode -Expected 0 -Message "AppRun should succeed when seeding packaged app-domain defaults."
+        Assert-GpTrue -Condition (Test-Path $domainPath) -Message "First launch should create a persistent app-domain defaults file."
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $domainPath) -Pattern 'SampleFirstRunComplete=YES' -Message "First launch should seed boolean defaults."
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $domainPath) -Pattern 'SamplePreferredWidth=800' -Message "First launch should seed integer defaults."
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $domainPath) -Pattern 'SampleWelcomeText="Packaged sample"' -Message "First launch should seed string defaults."
+        Assert-GpMatch -Actual $firstRun.Text -Pattern 'defaults:SampleWelcomeText="Packaged sample"' -Message "Fixture output should reflect the seeded app-domain defaults."
+
+        Set-Content -Path $domainPath -Value @(
+          'SampleFirstRunComplete=YES'
+          'SamplePreferredWidth=1024'
+          'SampleWelcomeText="User override"'
+        )
+
+        $secondRun = Invoke-GpAppImageCapturedTool -FilePath $script:packageResult.AppRunPath -ArgumentList @() -Environment @{
+          HOME = $tempHome
+        }
+
+        Assert-GpEqual -Actual $secondRun.ExitCode -Expected 0 -Message "AppRun should still succeed after the user has already stored defaults."
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $domainPath) -Pattern 'SamplePreferredWidth=1024' -Message "Second launch should preserve existing user overrides."
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $domainPath) -Pattern 'SampleWelcomeText="User override"' -Message "Second launch should not overwrite existing string defaults."
+        Assert-GpMatch -Actual $secondRun.Text -Pattern 'defaults:SampleWelcomeText="User override"' -Message "Fixture output should reflect the preserved user override."
+      } finally {
+        if (Test-Path $tempHome) {
+          Remove-Item -Recurse -Force $tempHome
+        }
+      }
     }
   }
 

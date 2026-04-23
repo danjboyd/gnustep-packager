@@ -69,6 +69,15 @@ GNUstep support assets such as themes, bundles, and fontconfig data should
 already be staged under `runtime/`. The backend preserves them as staged rather
 than reconstructing them through WiX-specific rules.
 
+When `packagedDefaults.appDomain` is declared, the staged runtime must also
+include `runtime/bin/defaults.exe`. The launcher uses that bundled tool to seed
+app-domain defaults on first launch only when the packaged app has not already
+stored the key.
+
+This mechanism is intentionally scoped to the packaged app's own defaults
+domain. The MSI backend does not provide generic GNUstep global-domain
+preference writes.
+
 ## Fallback Runtime
 The launcher prefers the bundled `runtime\` tree. A fallback runtime root may
 be used only when configured through `backends.msi.fallbackRuntimeRoot`.

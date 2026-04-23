@@ -377,6 +377,11 @@ function Get-GpAppImageSmokePlan {
   $arguments = [System.Collections.Generic.List[string]]::new()
   $markerPath = $null
   $documentPath = $null
+  $appDefaults = Get-GpAppImageAppDomainDefaults -Context $Context
+
+  if ($null -ne $appDefaults -and @($appDefaults.Entries).Count -gt 0 -and -not $environment.ContainsKey("HOME")) {
+    $environment["HOME"] = Join-Path $ValidationRoot "home"
+  }
 
   switch ($smoke.Mode) {
     "launch-only" {
@@ -569,6 +574,62 @@ function Get-GpLaunchEnvironmentForAppImage {
 
   Assert-GpAppImageEnvironmentKeys -Environment $environment -Label "AppImage launch"
   return $environment
+}
+
+function Convert-GpPackagedDefaultToGnustepLiteral {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Entry
+  )
+
+  switch ([string]$Entry.Type) {
+    "string" {
+      $escaped = ([string]$Entry.Value).Replace('\', '\\').Replace('"', '\"')
+      return ('"{0}"' -f $escaped)
+    }
+    "bool" {
+      if ([bool]$Entry.Value) {
+        return "YES"
+      }
+      return "NO"
+    }
+    "integer" {
+      return [string]$Entry.Value
+    }
+    "number" {
+      return [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0}", $Entry.Value)
+    }
+    default {
+      throw "Unsupported packaged default type for AppImage AppRun seeding: $($Entry.Type)"
+    }
+  }
+}
+
+function Get-GpAppImageAppDomainDefaults {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context
+  )
+
+  $packagedDefaults = Get-GpPackagedDefaults -Manifest $Context.Manifest
+  if ($null -eq $packagedDefaults.AppDomain) {
+    return $null
+  }
+
+  $entries = [System.Collections.Generic.List[psobject]]::new()
+  foreach ($entry in @($packagedDefaults.AppDomain.Entries)) {
+    $entries.Add([pscustomobject]@{
+      Key = [string]$entry.Key
+      Type = [string]$entry.Type
+      Value = $entry.Value
+      SerializedValue = Convert-GpPackagedDefaultToGnustepLiteral -Entry $entry
+    }) | Out-Null
+  }
+
+  return [pscustomobject]@{
+    Domain = [string]$packagedDefaults.AppDomain.Domain
+    Entries = @($entries.ToArray())
+  }
 }
 
 function Assert-GpAppImageEnvironmentKeys {
@@ -875,6 +936,7 @@ function Write-GpAppImageAppRun {
 
   $launch = Get-GpLaunchContract -Context $Context
   $environment = Get-GpLaunchEnvironmentForAppImage -Context $Context
+  $appDefaults = Get-GpAppImageAppDomainDefaults -Context $Context
   $appRunPath = Join-Path $AppDirRoot "AppRun"
   $lines = [System.Collections.Generic.List[string]]::new()
 
@@ -932,6 +994,29 @@ function Write-GpAppImageAppRun {
     }
   }
 
+  if ($null -ne $appDefaults -and @($appDefaults.Entries).Count -gt 0) {
+    $lines.Add('APP_DEFAULTS_TOOL=""') | Out-Null
+    $lines.Add('if [ -x "$RUNTIME_ROOT/bin/defaults" ]; then') | Out-Null
+    $lines.Add('  APP_DEFAULTS_TOOL="$RUNTIME_ROOT/bin/defaults"') | Out-Null
+    $lines.Add('elif [ -x "$RUNTIME_ROOT/bin/defaults.exe" ]; then') | Out-Null
+    $lines.Add('  APP_DEFAULTS_TOOL="$RUNTIME_ROOT/bin/defaults.exe"') | Out-Null
+    $lines.Add('fi') | Out-Null
+    $lines.Add('if [ -z "$APP_DEFAULTS_TOOL" ]; then') | Out-Null
+    $lines.Add('  printf ''AppRun requires runtime/bin/defaults or runtime/bin/defaults.exe for packaged app defaults.\n'' >&2') | Out-Null
+    $lines.Add('  exit 41') | Out-Null
+    $lines.Add('fi') | Out-Null
+
+    foreach ($entry in @($appDefaults.Entries)) {
+      $keyLiteral = Convert-GpAppImageValueToShellExpression -Value $entry.Key
+      $valueLiteral = Convert-GpAppImageValueToShellExpression -Value $entry.SerializedValue
+      $domainLiteral = Convert-GpAppImageValueToShellExpression -Value $appDefaults.Domain
+
+      $lines.Add(('if ! "$APP_DEFAULTS_TOOL" read ' + $domainLiteral + ' ' + $keyLiteral + ' >/dev/null 2>&1; then')) | Out-Null
+      $lines.Add(('  "$APP_DEFAULTS_TOOL" write ' + $domainLiteral + ' ' + $keyLiteral + ' ' + $valueLiteral + ' >/dev/null 2>&1')) | Out-Null
+      $lines.Add('fi') | Out-Null
+    }
+  }
+
   if (@($launch.Arguments).Count -gt 0) {
     $baseArguments = @(
       foreach ($argument in @($launch.Arguments)) {
@@ -947,6 +1032,31 @@ function Write-GpAppImageAppRun {
   Set-GpUnixExecutable -Path $appRunPath
   Write-GpAppImageLogLine -LogPath $LogPath -Message ("Generated AppRun: {0}" -f $appRunPath)
   return $appRunPath
+}
+
+function Assert-GpAppImageAppDefaultsPrerequisites {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [string]$AppDirRoot
+  )
+
+  $appDefaults = Get-GpAppImageAppDomainDefaults -Context $Context
+  if ($null -eq $appDefaults -or @($appDefaults.Entries).Count -eq 0) {
+    return
+  }
+
+  foreach ($candidate in @(
+    (Join-Path $AppDirRoot "usr/runtime/bin/defaults"),
+    (Join-Path $AppDirRoot "usr/runtime/bin/defaults.exe")
+  )) {
+    if (Test-Path $candidate) {
+      return
+    }
+  }
+
+  throw "packagedDefaults.appDomain requires a bundled defaults tool at usr/runtime/bin/defaults or usr/runtime/bin/defaults.exe inside the AppDir."
 }
 
 function Prepare-GpAppDir {
@@ -972,6 +1082,8 @@ function Prepare-GpAppDir {
       }
     }
   }
+
+  Assert-GpAppImageAppDefaultsPrerequisites -Context $Context -AppDirRoot $WorkPaths.AppDirRoot
 
   $mimeEntries = @(Get-GpAppImageMimeEntries -Context $Context -Config $Config)
   $mimePackagePath = Write-GpAppImageMimePackage -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -MimeEntries $mimeEntries -LogPath $LogPath
@@ -1134,6 +1246,7 @@ function Write-GpAppImageArtifactMetadata {
   )
 
   $launch = Get-GpLaunchContract -Context $Context
+  $appDefaults = Get-GpAppImageAppDomainDefaults -Context $Context
   $hostEnvironment = Get-GpHostEnvironment
   $profiles = @(Get-GpRequestedProfiles -Manifest $Context.Manifest)
   $sidecars = Get-GpAppImageSidecarPaths -Config $Config
@@ -1202,6 +1315,23 @@ function Write-GpAppImageArtifactMetadata {
       pathPrepend = [string[]]@($launch.PathPrepend)
       resourceRoots = [string[]]@($launch.ResourceRoots)
       environment = [hashtable](Copy-GpValue -Value (Get-GpLaunchEnvironmentForAppImage -Context $Context))
+      appDomainDefaults = $(if ($null -ne $appDefaults -and @($appDefaults.Entries).Count -gt 0) {
+        [ordered]@{
+          domain = $appDefaults.Domain
+          entries = @(
+            foreach ($entry in @($appDefaults.Entries)) {
+              [ordered]@{
+                key = $entry.Key
+                type = $entry.Type
+                value = $entry.Value
+                serializedValue = $entry.SerializedValue
+              }
+            }
+          )
+        }
+      } else {
+        $null
+      })
     }
     desktop = [ordered]@{
       desktopEntryName = $Config.DesktopEntryName

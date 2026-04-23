@@ -28,4 +28,12 @@ if [ -n "${GP_FIXTURE_EXPECT_ARG0_BASENAME:-}" ]; then
   fi
 fi
 
+if [ -n "${GP_FIXTURE_DEFAULTS_DOMAIN:-}" ] && [ -n "${HOME:-}" ]; then
+  defaults_file="${HOME}/GNUstep/Defaults/${GP_FIXTURE_DEFAULTS_DOMAIN}.defaults"
+  if [ -f "$defaults_file" ]; then
+    printf 'defaults_file=%s\n' "$defaults_file"
+    sed 's/^/defaults:/' "$defaults_file"
+  fi
+fi
+
 printf 'Sample GNUstep Linux fixture running\n'

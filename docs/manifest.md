@@ -103,10 +103,28 @@ launch/runtime artifacts and later validate against packaged results.
 
 Current fields:
 - `defaultTheme`
+- `appDomain`
 
 `packagedDefaults.defaultTheme` currently realizes a `GSTheme` launch default
 with `policy: ifUnset` when the manifest does not already declare one. If the
 manifest also sets `launch.env.GSTheme`, the values must match.
+
+`packagedDefaults.appDomain` declares first-run app-domain defaults for the
+packaged app. Current shape:
+
+- `domain`
+  Optional explicit defaults domain. When omitted, the packager uses
+  `package.id`.
+- `values`
+  Required object of scalar defaults to seed only when the key is absent.
+  Supported value types are string, boolean, integer, and number.
+
+Current boundary:
+- generic app-domain seeding is currently implemented for Windows MSI and Linux
+  AppImage
+- generic GNUstep global-domain seeding is not supported
+- `GSTheme` is still a narrow semantic under `packagedDefaults.defaultTheme`,
+  not a generic `appDomain.values` key
 
 ## `hostDependencies`
 Declares app-specific host/build prerequisites that the shared tooling may

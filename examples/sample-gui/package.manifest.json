@@ -52,7 +52,14 @@
     }
   },
   "packagedDefaults": {
-    "defaultTheme": "WinUXTheme"
+    "defaultTheme": "WinUXTheme",
+    "appDomain": {
+      "values": {
+        "SampleFirstRunComplete": true,
+        "SamplePreferredWidth": 800,
+        "SampleWelcomeText": "Packaged sample"
+      }
+    }
   },
   "outputs": {
     "root": "dist",

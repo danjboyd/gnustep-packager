@@ -28,6 +28,49 @@ chmod +x "$app_root/SampleGNUstepLinuxApp"
 printf 'fixture plist\n' >"$app_root/Info-gnustep.plist"
 printf '#!/bin/sh\nprintf "GNUstep runtime helper\\n"\n' >"$runtime_bin/gnustep-env.sh"
 chmod +x "$runtime_bin/gnustep-env.sh"
+cat >"$runtime_bin/defaults" <<'EOF'
+#!/bin/sh
+set -eu
+
+if [ "$#" -lt 3 ]; then
+  printf 'usage: defaults <read|write> <domain> <key> [value]\n' >&2
+  exit 64
+fi
+
+command_name="$1"
+domain="$2"
+key="$3"
+store_root="${HOME}/GNUstep/Defaults"
+store_path="${store_root}/${domain}.defaults"
+mkdir -p "$store_root"
+touch "$store_path"
+
+case "$command_name" in
+  read)
+    if grep -Fq "${key}=" "$store_path"; then
+      grep -F "${key}=" "$store_path" | tail -n 1 | sed "s/^${key}=//"
+      exit 0
+    fi
+    exit 1
+    ;;
+  write)
+    if [ "$#" -ne 4 ]; then
+      printf 'usage: defaults write <domain> <key> <value>\n' >&2
+      exit 64
+    fi
+    value="$4"
+    temp_path="${store_path}.tmp"
+    grep -Fv "${key}=" "$store_path" >"$temp_path" || true
+    printf '%s=%s\n' "$key" "$value" >>"$temp_path"
+    mv "$temp_path" "$store_path"
+    ;;
+  *)
+    printf 'unsupported defaults command: %s\n' "$command_name" >&2
+    exit 64
+    ;;
+esac
+EOF
+chmod +x "$runtime_bin/defaults"
 printf 'GSTheme=LinuxTheme\n' >"$runtime_config/theme.conf"
 printf 'GNUstep theme fixture\n' >"$runtime_theme_root/theme.txt"
 printf '<fontconfig></fontconfig>\n' >"$runtime_fonts/fonts.conf"

@@ -42,6 +42,7 @@
     "workingDirectory": "app/SampleGNUstepLinuxApp.app",
     "arguments": [],
     "env": {
+      "GP_FIXTURE_DEFAULTS_DOMAIN": "com.example.SampleGNUstepLinuxApp",
       "GP_FIXTURE_NAME": "SampleGNUstepLinuxApp",
       "GSTheme": {
         "value": "Adwaita",
@@ -50,7 +51,14 @@
     }
   },
   "packagedDefaults": {
-    "defaultTheme": "Adwaita"
+    "defaultTheme": "Adwaita",
+    "appDomain": {
+      "values": {
+        "SampleFirstRunComplete": true,
+        "SamplePreferredWidth": 800,
+        "SampleWelcomeText": "Packaged sample"
+      }
+    }
   },
   "outputs": {
     "root": "dist",
