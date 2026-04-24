@@ -172,7 +172,10 @@ switch ($Command) {
         Write-Host "Backend validation completed. Log: $backendLogPath"
       }
     } else {
-      Invoke-GpThemeProvisioning -Context $context -DryRun:$DryRun | Out-Null
+      $themeInputs = @(Get-GpThemeInputs -Manifest $manifestData)
+      if ($themeInputs.Count -gt 0) {
+        Write-Host "Shared validation checks the current staged layout only. Use -Backend for backend-aware theme validation or run provision/package with the target backend first."
+      }
       $result = Invoke-GpSharedValidation -Context $context -DryRun:$DryRun
       if ($DryRun) {
         $result | ConvertTo-Json -Depth 20

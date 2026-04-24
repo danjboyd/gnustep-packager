@@ -186,7 +186,11 @@ checkouts, temporary install roots, and logs belong under declared `outputs`
 roots. Successful provisioning writes
 `metadata/gnustep-packager-theme-report.json` into the staged payload with
 source/ref, resolved commit when available, staged path, executable, info plist,
-and resource inventory details.
+and resource inventory details. When that report is current for the active
+theme inputs, later package commands reuse the staged theme payload instead of
+building the same theme a second time. AppImage theme input provisioning is not
+implemented yet; required AppImage theme inputs fail early with an explicit
+unsupported-backend diagnostic.
 
 ## `hostDependencies`
 Declares app-specific host/build prerequisites that the shared tooling may

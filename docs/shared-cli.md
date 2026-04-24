@@ -65,6 +65,11 @@ path.
 - `validate`
   Run shared validation and optionally dispatch to backend validation
 
+Shared `validate` without `-Backend` checks the staged layout that already
+exists. It does not resolve backend/platform-filtered theme inputs by itself.
+Use `provision -Backend msi`, `package -Backend msi`, or `validate -Backend
+msi` when checking backend-aware theme behavior.
+
 The shared pipeline wrapper runs `host-preflight` before build by default. Use
 `-InstallHostDependencies` to allow package-manager realization, or
 `-SkipHostPreflight` when intentionally bypassing that step.

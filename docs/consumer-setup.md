@@ -82,9 +82,11 @@ should stage the app payload and app-owned resources; the packager-owned
 report.
 
 Generic `bundled-theme` validation checks the theme bundle directory, known
-backend executable conventions, and theme resource metadata when present. For
-app-specific expectations, add a narrow `theme-resource` assertion instead of
-listing every normal theme asset:
+backend executable conventions, and theme resource metadata. Required, default,
+or packager-provisioned themes must include `Resources/Info-gnustep.plist`; a
+DLL-only `.theme` bundle is not release-valid. For app-specific expectations,
+add a narrow `theme-resource` assertion instead of listing every normal theme
+asset:
 
 ```json
 {
@@ -93,6 +95,11 @@ listing every normal theme asset:
   "path": "Resources/ThemeImages/GSSwitch.png"
 }
 ```
+
+Shared `validate` without `-Backend` only checks the staged layout currently on
+disk. Backend/platform-filtered theme inputs are provisioned and checked through
+backend-aware commands such as `provision -Backend msi`, `package -Backend
+msi`, or `validate -Backend msi`.
 
 Use `packagedDefaults.appDomain` for packaged app preferences that should
 persist after first launch. Do not use it for generic GNUstep global defaults.

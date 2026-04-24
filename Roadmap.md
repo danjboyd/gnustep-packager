@@ -1239,7 +1239,7 @@ Current status notes:
 Goal: let downstream GNUstep applications declare required packaged themes while
 `gnustep-packager` owns theme source resolution, build, staging, structural
 validation, default-theme consistency, diagnostics, and consumer migration.
-Status: complete. Phase 16A through 16I are implemented.
+Status: complete. Phase 16A through 16M are implemented.
 
 This phase moves generic GNUstep theme packaging concerns out of downstream app
 repos. The staged payload remains the single source of truth for MSI and
@@ -1286,6 +1286,22 @@ Current status notes:
 - `Phase 16I` landed as downstream template and documentation updates showing
   `WinUITheme` as a required Windows default theme input, plus regression
   coverage that keeps the template valid and checks the migration guidance.
+- downstream ObjcMarkdown review confirmed the Windows/MSI migration path is a
+  strong first pass, but the feature should not be closed until DLL-only theme
+  bundles fail structural validation, duplicate provisioning is avoided, the
+  backend-aware validation behavior is explicit, and AppImage provisioning is
+  either implemented or cleanly scoped as unsupported.
+- `Phase 16J` landed as strict incomplete-theme rejection for required,
+  default, or packager-provisioned themes, so a DLL-only Windows theme bundle
+  no longer satisfies the semantic theme contract.
+- `Phase 16K` landed as staged report-based provisioning idempotence so a
+  current theme payload is reused instead of rebuilt by a later package step.
+- `Phase 16L` landed as explicit CLI and docs guidance that shared validation
+  checks the current staged layout, while backend-aware theme behavior requires
+  backend-scoped provision, package, or validation commands.
+- `Phase 16M` landed as an explicit AppImage support boundary: required
+  AppImage theme inputs fail early with a deliberate unsupported-backend
+  diagnostic until Linux provisioning is implemented in a later phase.
 
 - `Phase 16A`: Theme input manifest contract
   Deliverables:
@@ -1415,6 +1431,71 @@ Current status notes:
     theme without custom fetch/build/install/copy scripts
   - repo-owned tests catch incomplete theme bundles and default-theme drift
     before downstream release pipelines encounter them
+
+- `Phase 16J`: Strict incomplete-theme rejection
+  Deliverables:
+  - update structural `bundled-theme` validation so required/default or
+    packager-provisioned themes fail when a `.theme` bundle contains only the
+    backend executable and omits `Resources/Info-gnustep.plist`
+  - regression coverage proving a DLL-only Windows theme bundle fails package
+    and installed-result validation with a precise diagnostic
+  - clear policy for compatibility fixtures or legacy manually-staged themes
+    that intentionally lack a GNUstep resources directory
+  Exit criteria:
+  - a package cannot satisfy a required/default bundled-theme contract by
+    shipping only `<Theme>.dll`
+  - missing `Resources/Info-gnustep.plist` is reported as an incomplete theme
+    bundle before release artifacts are accepted
+
+- `Phase 16K`: Provisioning idempotence and duplicate-build avoidance
+  Deliverables:
+  - pipeline behavior that avoids rebuilding the same active theme inputs twice
+    when `run-packaging-pipeline.ps1` runs `provision` and the backend
+    `package` command is invoked afterward
+  - a durable per-stage provisioning marker or report check that records the
+    theme input name, source, requested ref, resolved commit, and staged bundle
+    path used to determine whether provisioning is already current
+  - command-line policy for direct `package` invocations, including when they
+    auto-provision and when callers may explicitly skip or force provisioning
+  Exit criteria:
+  - the normal shared pipeline builds each active theme input at most once
+    before packaging
+  - direct backend package commands remain safe for users who skip the wrapper
+  - stale or changed theme inputs trigger reprovisioning instead of silently
+    reusing old staged bundles
+
+- `Phase 16L`: Backend-aware validation behavior and documentation
+  Deliverables:
+  - explicit documentation that shared `validate` without `-Backend` checks the
+    current staged layout and does not imply backend/platform-specific theme
+    provisioning
+  - CLI or validation diagnostics that point users toward `provision -Backend
+    msi`, `package -Backend msi`, or `validate -Backend msi` when active theme
+    inputs are platform-filtered
+  - regression coverage for Windows-only theme inputs showing the difference
+    between shared validation and backend-aware validation paths
+  Exit criteria:
+  - downstream users can predict when theme provisioning and structural
+    backend checks run
+  - validation failures do not imply that a platform-filtered theme was ignored
+    silently
+
+- `Phase 16M`: AppImage theme provisioning support boundary
+  Deliverables:
+  - either implement Linux/AppImage theme input provisioning using the managed
+    GNUstep toolchain path or document AppImage theme provisioning as an
+    explicit unsupported follow-up with clear required-theme failure behavior
+  - if implemented, Linux source resolution, build/install, staged bundle
+    collection, structural validation, and payload-report parity with the MSI
+    path
+  - AppImage fixture or integration coverage for at least one declared Linux
+    theme input, including final extracted-result validation
+  Exit criteria:
+  - the cross-backend support boundary for `themeInputs` is explicit and
+    test-backed
+  - a required AppImage theme input either provisions successfully through the
+    documented Linux path or fails early with a deliberate unsupported-backend
+    diagnostic
 
 ## Suggested Early Execution Order
 Prioritize these subphases first:

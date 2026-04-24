@@ -77,7 +77,9 @@ Current semantic kinds:
   `runtime/share/GNUstep/Themes/<Theme>.theme`. Validation also checks known
   backend executable conventions, such as `<Theme>.dll` for MSI, and validates
   `Resources/Info-gnustep.plist` plus `GSThemeImages` references when a theme
-  resources directory is present.
+  resources directory is present. Required, default, or packager-provisioned
+  theme inputs must include `Resources/Info-gnustep.plist`; shipping only the
+  theme executable is an incomplete bundle.
 - `theme-resource`
   Confirms a downstream-specific file exists inside a bundled theme without
   requiring the manifest to list every normal theme resource.

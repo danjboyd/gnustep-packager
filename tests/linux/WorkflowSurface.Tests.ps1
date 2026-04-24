@@ -11,6 +11,7 @@ Describe "Reusable workflow surface" {
     $script:gnustepCliDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/gnustep-cli-new-integration.md")
     $script:windowsHardeningDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/windows-gnustep-cli-new-hardening.md")
     $script:releaseGateDocText = Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/release-gate.md")
+    $script:cliText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/gnustep-packager.ps1")
     $script:downstreamMsiText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/package-msi.yml")
     $script:downstreamAppImageText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/package-appimage.yml")
     $script:downstreamReleaseText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/package-release-with-updates.yml")
@@ -218,6 +219,20 @@ Describe "Reusable workflow surface" {
       if (($script:consumerSetupDocText -notmatch [regex]::Escape($pattern)) -and
           ((Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/README.md")) -notmatch [regex]::Escape($pattern))) {
         throw "Consumer or downstream docs are missing theme migration guidance: $pattern"
+      }
+    }
+  }
+
+  It "documents and surfaces backend-aware theme validation behavior" {
+    foreach ($pattern in @(
+      "Shared validation checks the current staged layout only",
+      "Use -Backend for backend-aware theme validation",
+      "provision -Backend msi"
+    )) {
+      if (($script:cliText -notmatch [regex]::Escape($pattern)) -and
+          ($script:consumerSetupDocText -notmatch [regex]::Escape($pattern)) -and
+          ((Get-Content -Raw -Path (Join-Path $script:repoRoot "docs/shared-cli.md")) -notmatch [regex]::Escape($pattern))) {
+        throw "Backend-aware theme validation guidance is missing: $pattern"
       }
     }
   }

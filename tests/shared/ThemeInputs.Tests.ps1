@@ -341,6 +341,157 @@ Describe "Theme input contract" {
     }
   }
 
+  It "fails required theme input validation when a Windows theme bundle is DLL-only" {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-dll-only-" + [guid]::NewGuid().ToString("N"))
+    $stageRoot = Join-Path $tempRoot "stage"
+    $themeBundle = Join-Path $stageRoot "runtime/lib/GNUstep/Themes/DllOnlyTheme.theme"
+    $manifestPath = $null
+
+    New-Item -ItemType Directory -Force -Path $themeBundle | Out-Null
+    Set-Content -Path (Join-Path $themeBundle "DllOnlyTheme.dll") -Value "fixture executable"
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest.Remove("packagedDefaults")
+        $manifest["payload"]["stageRoot"] = $stageRoot
+        $manifest["outputs"]["root"] = (Join-Path $tempRoot "dist")
+        $manifest["outputs"]["packageRoot"] = (Join-Path $tempRoot "dist\\packages")
+        $manifest["outputs"]["logRoot"] = (Join-Path $tempRoot "dist\\logs")
+        $manifest["outputs"]["tempRoot"] = (Join-Path $tempRoot "dist\\tmp")
+        $manifest["outputs"]["validationRoot"] = (Join-Path $tempRoot "dist\\validation")
+        $manifest["themeInputs"] = @(
+          @{
+            name = "DllOnlyTheme"
+            workspacePath = (Join-Path $tempRoot "DllOnlyThemeSource")
+            platforms = @("windows")
+            required = $true
+            default = $true
+          }
+        )
+        $manifest["validation"]["packageContract"] = @{
+          requiredContent = @()
+        }
+      }
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      $contract = Invoke-GpPackageContractAssertions -Context $context -Scope stage -Backend "msi" -LogPath (Join-Path $tempRoot "dll-only-contract.log")
+      $contractText = [string]::Join("`n", @($contract.Lines))
+
+      Assert-GpTrue -Condition $contract.HasIssues -Message "Required theme inputs should not pass validation with only a DLL."
+      Assert-GpMatch -Actual $contractText -Pattern "Resources/Info-gnustep\.plist is missing" -Message "DLL-only required themes should fail with a missing Info-gnustep.plist diagnostic."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
+  It "reuses a current theme payload report instead of provisioning twice" {
+    $manifestPath = $null
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-reuse-" + [guid]::NewGuid().ToString("N"))
+    $workspace = Join-Path $tempRoot "ReuseThemeSource"
+    $themeBundle = Join-Path $workspace "ReuseTheme.theme"
+    $resources = Join-Path $themeBundle "Resources"
+
+    New-Item -ItemType Directory -Force -Path $resources | Out-Null
+    Set-Content -Path (Join-Path $themeBundle "ReuseTheme.dll") -Value "fixture executable"
+    Set-Content -Path (Join-Path $resources "Info-gnustep.plist") -Value "{ NSExecutable = ReuseTheme; }"
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest.Remove("packagedDefaults")
+        $manifest["payload"]["stageRoot"] = (Join-Path $tempRoot "stage")
+        $manifest["outputs"]["root"] = (Join-Path $tempRoot "dist")
+        $manifest["outputs"]["packageRoot"] = (Join-Path $tempRoot "dist\\packages")
+        $manifest["outputs"]["logRoot"] = (Join-Path $tempRoot "dist\\logs")
+        $manifest["outputs"]["tempRoot"] = (Join-Path $tempRoot "dist\\tmp")
+        $manifest["outputs"]["validationRoot"] = (Join-Path $tempRoot "dist\\validation")
+        $manifest["themeInputs"] = @(
+          @{
+            name = "ReuseTheme"
+            workspacePath = $workspace
+            platforms = @("linux")
+            required = $true
+            default = $false
+            build = @{
+              command = "Write-Host theme-build"
+            }
+          }
+        )
+      }
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      $stageRoot = Resolve-GpManifestPath -Context $context -RelativePath $context.Manifest["payload"]["stageRoot"]
+      New-Item -ItemType Directory -Force -Path (Join-Path $stageRoot "app") | Out-Null
+      New-Item -ItemType Directory -Force -Path (Join-Path $stageRoot "runtime") | Out-Null
+      New-Item -ItemType Directory -Force -Path (Join-Path $stageRoot "metadata") | Out-Null
+
+      $first = Invoke-GpThemeProvisioning -Context $context
+      $second = Invoke-GpThemeProvisioning -Context $context
+      $secondLog = Get-Content -Raw -Path $second.LogPath
+
+      Assert-GpTrue -Condition (-not $first.Reused) -Message "The first provisioning pass should build/copy the theme."
+      Assert-GpTrue -Condition $second.Reused -Message "The second provisioning pass should reuse the current staged report."
+      Assert-GpMatch -Actual $secondLog -Pattern "REUSE\s+theme payload report is current" -Message "Reuse diagnostics should explain why provisioning was skipped."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
+  It "fails required AppImage theme inputs with an explicit unsupported-backend diagnostic" {
+    $manifestPath = $null
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-appimage-" + [guid]::NewGuid().ToString("N"))
+    $threw = $false
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest.Remove("packagedDefaults")
+        $manifest["outputs"]["root"] = (Join-Path $tempRoot "dist")
+        $manifest["outputs"]["packageRoot"] = (Join-Path $tempRoot "dist\\packages")
+        $manifest["outputs"]["logRoot"] = (Join-Path $tempRoot "dist\\logs")
+        $manifest["outputs"]["tempRoot"] = (Join-Path $tempRoot "dist\\tmp")
+        $manifest["outputs"]["validationRoot"] = (Join-Path $tempRoot "dist\\validation")
+        $manifest["themeInputs"] = @(
+          @{
+            name = "Adwaita"
+            repo = "https://example.invalid/adwaita-theme.git"
+            platforms = @("linux")
+            required = $true
+            default = $true
+          }
+        )
+      }
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      try {
+        Invoke-GpThemeProvisioning -Context $context -Backend "appimage" -DryRun | Out-Null
+      } catch {
+        $threw = $true
+        Assert-GpMatch -Actual $_.Exception.Message -Pattern "Theme input provisioning for AppImage is not implemented yet" -Message "Required AppImage theme inputs should fail with an explicit support-boundary diagnostic."
+      }
+
+      Assert-GpTrue -Condition $threw -Message "Required AppImage theme input provisioning should fail until Phase 16M implements Linux support."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
   It "ships the downstream GNUstep GUI template with a required default WinUITheme input" {
     $context = Get-GpManifestContext -Path $script:downstreamGuiTemplatePath
     $issues = @()

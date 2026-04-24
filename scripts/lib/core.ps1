@@ -660,6 +660,24 @@ function Get-GpThemeInputs {
   return @($items.ToArray())
 }
 
+function Get-GpThemeInputByName {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest,
+    [Parameter(Mandatory = $true)]
+    [string]$Name,
+    [string]$Backend
+  )
+
+  foreach ($theme in @(Get-GpThemeInputs -Manifest $Manifest -Backend $Backend -ActiveOnly)) {
+    if ([string]$theme.Name -eq $Name) {
+      return $theme
+    }
+  }
+
+  return $null
+}
+
 function Apply-GpDeclarativeThemeDefaults {
   param(
     [Parameter(Mandatory = $true)]
@@ -2691,7 +2709,7 @@ function Get-GpLaunchContract {
   $manifest = $Context.Manifest
   $payload = $manifest["payload"]
   $launch = $manifest["launch"]
-  $stageRoot = Resolve-GpManifestPath -Context $Context -RelativePath $payload["stageRoot"]
+  $stageRoot = Resolve-GpManifestPath -Context $Context -RelativePath $Context.Manifest["payload"]["stageRoot"]
   $combinedResourceRoots = @()
 
   foreach ($item in @($payload["resourceRoots"])) {
@@ -2790,6 +2808,7 @@ function Get-GpPackageContractDeclarations {
       Value = $(if ($item.Contains("value")) { [string]$item["value"] } else { $null })
       Name = $(if ($item.Contains("name")) { [string]$item["name"] } else { $null })
       Theme = $(if ($item.Contains("theme")) { [string]$item["theme"] } else { $null })
+      StrictTheme = $false
       Source = ("validation.{0}.requiredContent[{1}]" -f $SectionName, $index)
     }) | Out-Null
     $index += 1
@@ -2821,6 +2840,7 @@ function Get-GpPackageContractDeclarations {
         Value = $null
         Name = [string]$theme.Name
         Theme = $null
+        StrictTheme = $true
         Source = $theme.Source
       }) | Out-Null
       $null = $declaredThemeNames.Add([string]$theme.Name)
@@ -2933,6 +2953,59 @@ function Get-GpThemeBundleResourceInventory {
   return [string[]]@($items.ToArray() | Sort-Object)
 }
 
+function Get-GpThemePayloadReportRelativePath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest
+  )
+
+  $payload = $Manifest["payload"]
+  $metadataRootRelative = if ($payload.Contains("metadataRoot") -and -not [string]::IsNullOrWhiteSpace([string]$payload["metadataRoot"])) {
+    [string]$payload["metadataRoot"]
+  } else {
+    "metadata"
+  }
+
+  return (Join-Path $metadataRootRelative "gnustep-packager-theme-report.json")
+}
+
+function Get-GpThemePayloadReportPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context
+  )
+
+  $stageRoot = Resolve-GpManifestPath -Context $Context -RelativePath $Context.Manifest["payload"]["stageRoot"]
+  return Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path (Get-GpThemePayloadReportRelativePath -Manifest $Context.Manifest)
+}
+
+function Get-GpProvisionedThemeNamesFromPayload {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest,
+    [Parameter(Mandatory = $true)]
+    [string]$PayloadRoot
+  )
+
+  $reportPath = Resolve-GpPathRelativeToBase -BasePath $PayloadRoot -Path (Get-GpThemePayloadReportRelativePath -Manifest $Manifest)
+  if (-not (Test-Path $reportPath)) {
+    return @()
+  }
+
+  try {
+    $report = Get-GpJsonFile -Path $reportPath
+    $names = [System.Collections.Generic.List[string]]::new()
+    foreach ($theme in @($report["themes"])) {
+      if ($theme -is [System.Collections.IDictionary] -and $theme.Contains("name") -and -not [string]::IsNullOrWhiteSpace([string]$theme["name"])) {
+        $names.Add([string]$theme["name"]) | Out-Null
+      }
+    }
+    return [string[]]@($names.ToArray())
+  } catch {
+    return @()
+  }
+}
+
 function Get-GpThemeImageReferences {
   param(
     [Parameter(Mandatory = $true)]
@@ -2965,7 +3038,8 @@ function Test-GpThemeBundleStructure {
     [string]$ThemePath,
     [Parameter(Mandatory = $true)]
     [string]$ThemeName,
-    [string]$Backend
+    [string]$Backend,
+    [switch]$RequireResources
   )
 
   $lines = [System.Collections.Generic.List[string]]::new()
@@ -3023,6 +3097,8 @@ function Test-GpThemeBundleStructure {
     } else {
       $issues.Add("Resources/Info-gnustep.plist is missing") | Out-Null
     }
+  } elseif ($RequireResources) {
+    $issues.Add("Resources/Info-gnustep.plist is missing") | Out-Null
   }
 
   $resources = @(Get-GpThemeBundleResourceInventory -ThemePath $ThemePath)
@@ -3094,6 +3170,10 @@ function Invoke-GpPackageContractAssertions {
   $declarations = @(Get-GpPackageContractDeclarations -Context $Context -SectionName $sectionName -Backend $Backend)
   $payloadRoot = if ($Scope -eq "stage") { $launch.StageRoot } elseif (-not [string]::IsNullOrWhiteSpace($Backend)) { Get-GpAppPayloadRoot -RootPath $RootPath -Backend $Backend } else { $RootPath }
   $phaseLabel = if ($Scope -eq "stage") { "stage contract" } elseif ($Scope -eq "package") { "$Backend package contract" } else { "$Backend installed-result contract" }
+  $provisionedThemeNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  foreach ($provisionedThemeName in @(Get-GpProvisionedThemeNamesFromPayload -Manifest $manifest -PayloadRoot $payloadRoot)) {
+    $null = $provisionedThemeNames.Add([string]$provisionedThemeName)
+  }
 
   foreach ($entry in @($declarations)) {
     $label = if (-not [string]::IsNullOrWhiteSpace([string]$entry.Name)) { $entry.Name } else { $entry.Kind }
@@ -3112,7 +3192,9 @@ function Invoke-GpPackageContractAssertions {
 
         if ($matchedPaths.Count -gt 0) {
           $lines.Add(("OK      {0} [{1}] -> matched {2}" -f $bundledThemeLabel, $entry.Source, ([string]::Join(", ", @($matchedPaths.ToArray()))))) | Out-Null
-          $structure = Test-GpThemeBundleStructure -ThemePath $matchedPaths[0] -ThemeName $entry.Name -Backend $Backend
+          $themeInput = Get-GpThemeInputByName -Manifest $manifest -Name ([string]$entry.Name) -Backend $Backend
+          $requiresThemeResources = ([bool]$entry.StrictTheme) -or $provisionedThemeNames.Contains([string]$entry.Name) -or ($null -ne $themeInput -and ($themeInput.Required -or $themeInput.Default))
+          $structure = Test-GpThemeBundleStructure -ThemePath $matchedPaths[0] -ThemeName $entry.Name -Backend $Backend -RequireResources:$requiresThemeResources
           foreach ($structureLine in @($structure.Lines)) {
             $lines.Add($structureLine) | Out-Null
           }
@@ -3691,15 +3773,10 @@ function Write-GpThemePayloadReport {
     [string]$Backend
   )
 
-  $payload = $Context.Manifest["payload"]
-  $stageRoot = Resolve-GpManifestPath -Context $Context -RelativePath $payload["stageRoot"]
-  $metadataRootRelative = if ($payload.Contains("metadataRoot") -and -not [string]::IsNullOrWhiteSpace([string]$payload["metadataRoot"])) {
-    [string]$payload["metadataRoot"]
-  } else {
-    "metadata"
-  }
+  $stageRoot = Resolve-GpManifestPath -Context $Context -RelativePath $Context.Manifest["payload"]["stageRoot"]
+  $metadataRootRelative = Split-Path -Parent (Get-GpThemePayloadReportRelativePath -Manifest $Context.Manifest)
   $metadataRoot = Ensure-GpDirectory -Path (Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $metadataRootRelative)
-  $reportPath = Join-Path $metadataRoot "gnustep-packager-theme-report.json"
+  $reportPath = Get-GpThemePayloadReportPath -Context $Context
   $items = @()
 
   foreach ($theme in @($Themes)) {
@@ -3744,6 +3821,91 @@ function Write-GpThemePayloadReport {
   return $reportPath
 }
 
+function Get-GpThemeProvisioningCurrentResult {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [object[]]$Themes,
+    [string]$Backend
+  )
+
+  $reportPath = Get-GpThemePayloadReportPath -Context $Context
+  if (-not (Test-Path $reportPath)) {
+    return $null
+  }
+
+  try {
+    $report = Get-GpJsonFile -Path $reportPath
+    $reportedThemes = @($report["themes"])
+    $results = [System.Collections.Generic.List[psobject]]::new()
+    foreach ($theme in @($Themes)) {
+      $match = $null
+      foreach ($reportedTheme in @($reportedThemes)) {
+        if (-not ($reportedTheme -is [System.Collections.IDictionary])) {
+          continue
+        }
+        if ([string]$reportedTheme["name"] -eq [string]$theme.Name -and [string]$reportedTheme["backend"] -eq [string]$Backend) {
+          $match = $reportedTheme
+          break
+        }
+      }
+
+      if ($null -eq $match) {
+        return $null
+      }
+
+      $source = if ($match.Contains("source") -and ($match["source"] -is [System.Collections.IDictionary])) {
+        $match["source"]
+      } else {
+        @{}
+      }
+      $reportedRef = if ($source.Contains("ref")) { [string]$source["ref"] } else { $null }
+      if ([string]$theme.Ref -ne $reportedRef) {
+        return $null
+      }
+      if (-not [string]::IsNullOrWhiteSpace([string]$theme.Repo) -and [string]$theme.Repo -ne [string]$source["repo"]) {
+        return $null
+      }
+      if (-not [string]::IsNullOrWhiteSpace([string]$theme.WorkspacePath) -and [string]$theme.WorkspacePath -ne [string]$source["workspacePath"]) {
+        return $null
+      }
+
+      $stagedRelativePath = if ($match.Contains("stagedPath")) { [string]$match["stagedPath"] } else { $null }
+      if ([string]::IsNullOrWhiteSpace($stagedRelativePath)) {
+        return $null
+      }
+
+      $stageRoot = Resolve-GpManifestPath -Context $Context -RelativePath $Context.Manifest["payload"]["stageRoot"]
+      $stagedPath = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $stagedRelativePath
+      if (-not (Test-Path $stagedPath -PathType Container)) {
+        return $null
+      }
+
+      $results.Add([pscustomobject]@{
+        Name = $theme.Name
+        Repo = $theme.Repo
+        WorkspacePath = $theme.WorkspacePath
+        SourcePath = $(if ($source.Contains("sourcePath")) { [string]$source["sourcePath"] } else { $null })
+        RequestedRef = $theme.Ref
+        ResolvedCommit = $(if ($source.Contains("resolvedCommit")) { [string]$source["resolvedCommit"] } else { $null })
+        Required = $theme.Required
+        Default = $theme.Default
+        StagedPath = $stagedPath
+        DryRun = $false
+        Reused = $true
+      }) | Out-Null
+    }
+
+    return [pscustomobject]@{
+      Themes = @($results.ToArray())
+      ReportPath = $reportPath
+    }
+  } catch {
+    return $null
+  }
+}
+
 function Invoke-GpThemeProvisioning {
   param(
     [Parameter(Mandatory = $true)]
@@ -3773,7 +3935,24 @@ function Invoke-GpThemeProvisioning {
     return [pscustomobject]@{
       Themes = @()
       LogPath = $LogPath
+      ReportPath = $null
       DryRun = [bool]$DryRun
+      Reused = $false
+    }
+  }
+
+  if (-not $DryRun) {
+    $current = Get-GpThemeProvisioningCurrentResult -Context $Context -Themes $themes -Backend $Backend
+    if ($null -ne $current) {
+      $lines.Add(("REUSE   theme payload report is current: {0}" -f $current.ReportPath)) | Out-Null
+      Set-Content -Path $LogPath -Value $lines
+      return [pscustomobject]@{
+        Themes = @($current.Themes)
+        LogPath = $LogPath
+        ReportPath = $current.ReportPath
+        DryRun = $false
+        Reused = $true
+      }
     }
   }
 
@@ -3781,7 +3960,7 @@ function Invoke-GpThemeProvisioning {
     $lines.Add(("THEME   {0} required={1} default={2}" -f $theme.Name, $theme.Required, $theme.Default)) | Out-Null
     try {
       if ($Backend -eq "appimage") {
-        $message = "Theme input provisioning for AppImage is not implemented yet."
+        $message = "Theme input provisioning for AppImage is not implemented yet. Stage the theme manually or track Phase 16M for AppImage support."
         if ($theme.Required) {
           throw $message
         }
@@ -3867,6 +4046,7 @@ function Invoke-GpThemeProvisioning {
     LogPath = $LogPath
     ReportPath = $reportPath
     DryRun = [bool]$DryRun
+    Reused = $false
   }
 }
 
