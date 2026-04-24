@@ -16,6 +16,7 @@ The package manifest tells `gnustep-packager`:
 - `payload`
 - `launch`
 - `packagedDefaults`
+- `themeInputs`
 - `outputs`
 - `hostDependencies`
 - `validation`
@@ -129,6 +130,64 @@ Current boundary:
 - `GSTheme` is still a narrow semantic under `packagedDefaults.defaultTheme`,
   not a generic `appDomain.values` key
 
+## `themeInputs`
+Declares packaging-time GNUstep theme sources that the packager should
+provision into the staged runtime before validation and backend packaging.
+
+Important fields:
+- `name`
+  GNUstep theme name, such as `WinUITheme`.
+- `repo`
+  Git URL for the theme source. Either `repo` or `workspacePath` is required.
+- `ref`
+  Branch, tag, or commit to check out. Release builds should use a tag or
+  commit and record the resolved commit in package logs.
+- `platforms`
+  Platform or backend filter. Current values are `windows`, `linux`, `msi`,
+  and `appimage`.
+- `required`
+  When `true`, provisioning failures stop packaging. Optional themes warn and
+  continue.
+- `default`
+  Marks the preferred packaged default theme. If exactly one default theme
+  input is declared and `packagedDefaults.defaultTheme` is absent, the packager
+  derives `packagedDefaults.defaultTheme` from it. If both are present, they
+  must match.
+- `workspacePath`
+  Optional local checkout override for developer workflows.
+- `build`
+  Optional command, install command, and environment overrides for advanced
+  theme builds.
+
+Example:
+
+```json
+{
+  "themeInputs": [
+    {
+      "name": "WinUITheme",
+      "repo": "https://github.com/danjboyd/plugins-themes-winuitheme.git",
+      "ref": "v0.1.0",
+      "platforms": ["windows"],
+      "required": true,
+      "default": true
+    }
+  ],
+  "packagedDefaults": {
+    "defaultTheme": "WinUITheme"
+  }
+}
+```
+
+The first realization path targets Windows/MSYS2 `CLANG64` plus the managed
+`gnustep-cli-new` toolchain. Theme provisioning runs after the app's stage
+command and before shared validation and backend packaging. Generated source
+checkouts, temporary install roots, and logs belong under declared `outputs`
+roots. Successful provisioning writes
+`metadata/gnustep-packager-theme-report.json` into the staged payload with
+source/ref, resolved commit when available, staged path, executable, info plist,
+and resource inventory details.
+
 ## `hostDependencies`
 Declares app-specific host/build prerequisites that the shared tooling may
 verify or install before build and packaging steps begin.
@@ -168,6 +227,7 @@ Current semantic contract kinds:
 - `update-runtime-config`
 - `default-theme`
 - `bundled-theme`
+- `theme-resource`
 - `metadata-file`
 - `updater-helper`
 
@@ -185,6 +245,10 @@ unusual packaged results that are easier to assert as concrete paths.
   `runtime/System/Library/Themes/<Theme>.theme`,
   `runtime/lib/GNUstep/Themes/<Theme>.theme`, and
   `runtime/share/GNUstep/Themes/<Theme>.theme`.
+- `theme-resource`
+  Confirms a named file inside a bundled theme exists. This is an optional
+  app-specific assertion; ordinary theme resources are covered by structural
+  bundled-theme validation and do not need to be listed one by one.
 
 ## `updates`
 Declares shared release-discovery settings for packaged apps.

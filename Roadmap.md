@@ -1235,6 +1235,187 @@ Current status notes:
   - docs keep the support boundary clear: app-domain seeding is supported,
     generic global-domain preference writing is not
 
+## Phase 16: First-Class GNUstep Theme Inputs
+Goal: let downstream GNUstep applications declare required packaged themes while
+`gnustep-packager` owns theme source resolution, build, staging, structural
+validation, default-theme consistency, diagnostics, and consumer migration.
+Status: complete. Phase 16A through 16I are implemented.
+
+This phase moves generic GNUstep theme packaging concerns out of downstream app
+repos. The staged payload remains the single source of truth for MSI and
+AppImage backends, but the packager becomes responsible for composing declared
+theme inputs into that staged payload before shared validation and backend
+packaging run.
+
+Guardrails:
+- keep `themeInputs` backend-neutral even though the first implementation
+  targets Windows/MSYS2 `CLANG64` plus `gnustep-cli-new`
+- keep `packagedDefaults.defaultTheme` as the single effective default-theme
+  contract; `themeInputs[].default` may derive it but must not contradict it
+- preserve complete `.theme` bundles, including arbitrary future resources,
+  instead of copying only the theme executable
+- keep app-specific theme assertions optional; normal GNUstep theme structure
+  should be validated generically
+
+Current status notes:
+- `Phase 16A` landed as a schema-backed `themeInputs` manifest contract with
+  source selection, platform filters, required/default flags, workspace
+  overrides, and limited build overrides.
+- `Phase 16B` landed as default-theme normalization, conflict validation, and
+  automatic bundled-theme contract declarations for required or default theme
+  inputs.
+- `Phase 16C` landed as a shared `provision` pipeline step that runs after app
+  staging and before validation/package in the shared wrapper, while backend
+  package commands also invoke theme provisioning before packaging.
+- `Phase 16D` landed as the first Windows/MSYS2 realization path: theme
+  sources can be cloned or reused, checked out at the requested ref, built
+  through the managed GNUstep shell environment, installed into a temporary
+  GNUstep user root, and copied as complete `.theme` bundles into stage.
+- `Phase 16E` landed as complete bundle copy behavior that preserves arbitrary
+  files under the installed `.theme` directory and stages under the stable
+  `runtime/lib/GNUstep/Themes` root.
+- `Phase 16F` landed as structural `bundled-theme` validation for known
+  backend executable conventions plus `Resources/Info-gnustep.plist` and
+  `GSThemeImages` resource references when theme resources are present.
+- `Phase 16G` landed as an optional `theme-resource` semantic assertion for
+  downstream app-specific files inside bundled themes.
+- `Phase 16H` landed as a staged
+  `metadata/gnustep-packager-theme-report.json` payload report with source,
+  ref, resolved commit, staged path, executable, info plist, and resource
+  inventory details.
+- `Phase 16I` landed as downstream template and documentation updates showing
+  `WinUITheme` as a required Windows default theme input, plus regression
+  coverage that keeps the template valid and checks the migration guidance.
+
+- `Phase 16A`: Theme input manifest contract
+  Deliverables:
+  - schema-backed `themeInputs` manifest section with fields for `name`,
+    `repo`, `ref`, `platforms`, `required`, `default`, `workspacePath`, and
+    limited build overrides
+  - validation rules for required fields, platform applicability, one default
+    theme per active platform, and `repo` versus `workspacePath` source
+    selection
+  - release-build guidance for recording exact resolved commits instead of
+    relying only on branch names
+  Exit criteria:
+  - a downstream manifest can declare required and optional GNUstep themes
+    without repo-local theme provisioning scripts
+  - invalid or contradictory theme declarations fail before build or package
+    work starts
+
+- `Phase 16B`: Default-theme integration and automatic contracts
+  Deliverables:
+  - normalization rules that connect `themeInputs[].default` with
+    `packagedDefaults.defaultTheme`
+  - early failure when `packagedDefaults.defaultTheme` names a theme that is
+    neither declared in active `themeInputs` nor already present in a supported
+    staged runtime theme root
+  - automatic semantic package and installed-result assertions for required
+    and default bundled themes
+  Exit criteria:
+  - the packaged default theme has one effective source of truth
+  - downstream manifests do not need to repeat normal required-theme assertions
+    under `validation.packageContract.requiredContent`
+
+- `Phase 16C`: Shared theme provisioning pipeline step
+  Deliverables:
+  - a packager-owned stage augmentation step that runs after app staging and
+    before shared validation and backend packaging
+  - source checkout or reuse logic for `repo`, `ref`, and `workspacePath`
+    inputs, with required-theme failures and optional-theme warnings
+  - output discipline that keeps source checkouts, build roots, install roots,
+    temporary manifests, and logs under declared `dist/` output roots
+  Exit criteria:
+  - downstream app stage commands can produce only the app payload while the
+    packager composes declared theme inputs into the same staged payload
+  - local and CI packaging use the same theme provisioning path
+
+- `Phase 16D`: Windows/MSYS2 GNUstep theme build and install realization
+  Deliverables:
+  - Windows `CLANG64` theme build/install implementation using the managed
+    `gnustep-cli-new` GNUstep toolchain environment
+  - handling for MSYS2 path conversion, `GNUSTEP_MAKEFILES`, compiler
+    overrides such as `CC`, `OBJC_CC`, `CXX`, and `OBJCXX`, and known
+    GNUstep/MSYS2 compatibility flags when required
+  - collection of the installed `.theme` bundle from the user GNUstep theme
+    root into the staged runtime theme root
+  Exit criteria:
+  - a hosted Windows MSI build can fetch or reuse `WinUITheme`, build it with
+    the managed toolchain, install it, and stage the complete theme bundle
+    without downstream repo-local scripts
+  - failures identify the theme input, source ref, command, and toolchain
+    context involved
+
+- `Phase 16E`: Complete theme bundle staging
+  Deliverables:
+  - staging logic that preserves complete `.theme` directories, including
+    executable files, `Resources/Info-gnustep.plist`, image directories, tiles,
+    localization files, metadata, and future theme resources
+  - stable supported runtime theme root selection for staged theme bundles
+  - regression coverage proving resource directories survive stage
+    augmentation and backend transforms
+  Exit criteria:
+  - packaged output cannot appear to ship a theme by including only
+    `<Theme>.dll` while omitting resources required for correct rendering
+  - arbitrary files inside the installed `.theme` bundle survive into the
+    packaged runtime
+
+- `Phase 16F`: Structural bundled-theme validation
+  Deliverables:
+  - stronger `bundled-theme` validation that checks the theme directory,
+    platform executable, `Resources/Info-gnustep.plist` when expected, and
+    coherent principal-class or executable metadata when available
+  - validation that `GSThemeImages` resource references resolve to packaged
+    files
+  - phase-aware checks across stage, package transform, and installed or
+    extracted result roots
+  Exit criteria:
+  - missing theme resources fail validation before release artifacts are
+    accepted
+  - diagnostics distinguish content missing from stage, lost during backend
+    transform, or lost after install or extraction
+
+- `Phase 16G`: Theme-specific assertion escape hatch
+  Deliverables:
+  - optional `theme-resource` semantic assertion for downstream app-specific
+    requirements such as a named image under a declared theme bundle
+  - manifest validation for `theme`, `path`, and applicable assertion fields
+  - backend-neutral resolution against supported runtime theme roots
+  Exit criteria:
+  - downstream apps can assert important theme-specific files without listing
+    every normal theme resource
+  - generic theme validation remains sufficient for ordinary complete bundle
+    checks
+
+- `Phase 16H`: Theme payload diagnostics and metadata report
+  Deliverables:
+  - generated theme payload report in logs and/or staged metadata listing
+    bundled themes, source repo or workspace path, requested ref, resolved
+    commit, required/default flags, staged path, executable, and resource
+    inventory
+  - backend package logs that summarize theme provisioning and validation
+    results
+  - diagnostic retention in CI artifacts for failed theme provisioning or
+    validation runs
+  Exit criteria:
+  - UAT and release triage can classify missing theme asset issues from
+    package logs without manually unpacking the MSI or AppImage
+  - release artifacts can be traced back to the exact theme source commit used
+
+- `Phase 16I`: Consumer migration, examples, and regression coverage
+  Deliverables:
+  - updated manifest docs, consumer setup guidance, and downstream examples
+    showing `WinUITheme` as a required Windows theme and packaged default
+  - migration notes for removing ObjcMarkdown-style repo-local theme scripts
+  - regression coverage for manifest validation, theme provisioning dry-runs,
+    Windows theme staging, structural validation failures, and final
+    installed-result assertions
+  Exit criteria:
+  - a downstream app can declare `WinUITheme` as a required Windows default
+    theme without custom fetch/build/install/copy scripts
+  - repo-owned tests catch incomplete theme bundles and default-theme drift
+    before downstream release pipelines encounter them
+
 ## Suggested Early Execution Order
 Prioritize these subphases first:
 

@@ -73,6 +73,8 @@ EOF
 chmod +x "$runtime_bin/defaults"
 printf 'GSTheme=LinuxTheme\n' >"$runtime_config/theme.conf"
 printf 'GNUstep theme fixture\n' >"$runtime_theme_root/theme.txt"
+printf '#!/bin/sh\nprintf "Adwaita theme fixture\\n"\n' >"$runtime_theme_root/Adwaita"
+chmod +x "$runtime_theme_root/Adwaita"
 printf '<fontconfig></fontconfig>\n' >"$runtime_fonts/fonts.conf"
 printf 'SampleGNUstepLinuxApp fixture license notice. License: MIT.\n' >"$metadata_licenses/SampleGNUstepLinuxApp.txt"
 printf 'GNUstep runtime fixture notice. License: LGPL-2.1-or-later.\n' >"$metadata_licenses/GNUstep-runtime.txt"

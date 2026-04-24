@@ -44,10 +44,14 @@ Recommended adoption order:
    packaged first-run app preferences into `packagedDefaults.appDomain`.
    Stage a real GNUstep `defaults` tool in the packaged runtime when using
    `appDomain`.
-5. Replace the placeholder `updates.github.*` and backend `updates.feedUrl`
+5. For externally built GNUstep themes, declare `themeInputs` in the manifest
+   instead of adding repo-local fetch/build/install/copy scripts. Required or
+   default theme inputs automatically produce bundled-theme validation
+   contracts.
+6. Replace the placeholder `updates.github.*` and backend `updates.feedUrl`
    values with your real repo and feed URLs.
-6. Keep the default `gnustep-cli-new` workflow bootstrap unless you are using a
+7. Keep the default `gnustep-cli-new` workflow bootstrap unless you are using a
    self-hosted runner with an explicit preflight.
-7. Add real `compliance.runtimeNotices` entries for shipped runtime contents.
-8. Run `scripts/run-packaging-pipeline.ps1 -Backend <msi|appimage> -RunSmoke`
+8. Add real `compliance.runtimeNotices` entries for shipped runtime contents.
+9. Run `scripts/run-packaging-pipeline.ps1 -Backend <msi|appimage> -RunSmoke`
    locally.

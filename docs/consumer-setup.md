@@ -46,6 +46,54 @@ for theme payload presence. They are related but intentionally separate.
 `runtime/System/Library/Themes`, `runtime/lib/GNUstep/Themes`, and
 `runtime/share/GNUstep/Themes`.
 
+For themes built from external GNUstep theme repositories, prefer declaring
+`themeInputs` instead of adding app-local fetch, build, install, and copy
+scripts. A required Windows theme can be declared as:
+
+```json
+{
+  "themeInputs": [
+    {
+      "name": "WinUITheme",
+      "repo": "https://github.com/danjboyd/plugins-themes-winuitheme.git",
+      "ref": "v0.1.0",
+      "platforms": ["windows"],
+      "required": true,
+      "default": true
+    }
+  ],
+  "packagedDefaults": {
+    "defaultTheme": "WinUITheme"
+  }
+}
+```
+
+The shared pipeline provisions active theme inputs after the application stage
+step and before validation or backend packaging. Required themes fail the run if
+they cannot be resolved, built, installed, or staged. Optional themes warn and
+continue. Local development checkouts can be used with `workspacePath` without
+requiring submodules.
+
+After migrating to `themeInputs`, remove downstream scripts whose only purpose
+is to clone a theme repo, run `make install GNUSTEP_INSTALLATION_DOMAIN=USER`,
+or copy `<Theme>.theme` into `dist/stage/runtime`. The application stage step
+should stage the app payload and app-owned resources; the packager-owned
+`provision` step stages declared theme bundles and emits the theme payload
+report.
+
+Generic `bundled-theme` validation checks the theme bundle directory, known
+backend executable conventions, and theme resource metadata when present. For
+app-specific expectations, add a narrow `theme-resource` assertion instead of
+listing every normal theme asset:
+
+```json
+{
+  "kind": "theme-resource",
+  "theme": "WinUITheme",
+  "path": "Resources/ThemeImages/GSSwitch.png"
+}
+```
+
 Use `packagedDefaults.appDomain` for packaged app preferences that should
 persist after first launch. Do not use it for generic GNUstep global defaults.
 

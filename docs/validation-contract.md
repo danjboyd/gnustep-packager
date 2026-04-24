@@ -74,7 +74,13 @@ Current semantic kinds:
   paths. The current candidate set includes
   `runtime/System/Library/Themes/<Theme>.theme`,
   `runtime/lib/GNUstep/Themes/<Theme>.theme`, and
-  `runtime/share/GNUstep/Themes/<Theme>.theme`.
+  `runtime/share/GNUstep/Themes/<Theme>.theme`. Validation also checks known
+  backend executable conventions, such as `<Theme>.dll` for MSI, and validates
+  `Resources/Info-gnustep.plist` plus `GSThemeImages` references when a theme
+  resources directory is present.
+- `theme-resource`
+  Confirms a downstream-specific file exists inside a bundled theme without
+  requiring the manifest to list every normal theme resource.
 - `metadata-file`
   Confirms a staged metadata file survives packaging.
 - `updater-helper`
@@ -117,7 +123,12 @@ Example:
     },
     "installedResult": {
       "requiredContent": [
-        { "kind": "notice-report" }
+        { "kind": "notice-report" },
+        {
+          "kind": "theme-resource",
+          "theme": "WinUXTheme",
+          "path": "Resources/ThemeImages/GSSwitch.png"
+        }
       ],
       "requiredPaths": [
         "metadata/icons/app.png"

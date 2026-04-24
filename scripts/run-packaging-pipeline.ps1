@@ -7,6 +7,7 @@ param(
   [switch]$SkipHostPreflight,
   [switch]$SkipBuild,
   [switch]$SkipStage,
+  [switch]$SkipProvision,
   [switch]$SkipSharedValidation,
   [switch]$SkipPackage,
   [switch]$SkipBackendValidation,
@@ -65,6 +66,10 @@ if (-not $SkipBuild) {
 
 if (-not $SkipStage) {
   Invoke-GpPipelineStep -CommandName "stage"
+}
+
+if (-not $SkipProvision) {
+  Invoke-GpPipelineStep -CommandName "provision" -BackendName $Backend
 }
 
 if (-not $SkipSharedValidation) {

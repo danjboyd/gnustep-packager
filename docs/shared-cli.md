@@ -12,6 +12,7 @@ The initial command set is:
 - `host-preflight`
 - `build`
 - `stage`
+- `provision`
 - `package`
 - `validate`
 
@@ -27,8 +28,9 @@ For local and CI parity, the repo also provides:
 
 - `scripts/run-packaging-pipeline.ps1`
 
-That wrapper runs the normal build, stage, package, and validate sequence
-through the same CLI surface rather than inventing a separate CI-only path.
+That wrapper runs the normal build, stage, provision, package, and validate
+sequence through the same CLI surface rather than inventing a separate CI-only
+path.
 
 ## Command Intent
 - `manifest-check`
@@ -52,6 +54,10 @@ through the same CLI surface rather than inventing a separate CI-only path.
 
 - `stage`
   Run the consumer repo stage command
+
+- `provision`
+  Compose packager-owned inputs such as declared GNUstep `themeInputs` into the
+  staged payload before validation and backend packaging
 
 - `package`
   Resolve a backend and dispatch to its package handler

@@ -14,6 +14,7 @@ Describe "Reusable workflow surface" {
     $script:downstreamMsiText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/package-msi.yml")
     $script:downstreamAppImageText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/package-appimage.yml")
     $script:downstreamReleaseText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/package-release-with-updates.yml")
+    $script:downstreamGuiTemplateText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/manifest-gnustep-gui.template.json")
     $script:gnustepCliSmokeText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/ci/gnustep-cli-new-bootstrap-smoke.sh")
     $script:coreText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/lib/core.ps1")
     $script:otvmRemoteText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/ci/otvm-windows-remote.ps1")
@@ -193,6 +194,30 @@ Describe "Reusable workflow surface" {
           ($script:windowsHardeningDocText -notmatch [regex]::Escape($pattern)) -and
           ($script:gnustepCliDocText -notmatch [regex]::Escape($pattern))) {
         throw "Updated docs do not mention expected workflow or smoke-mode surface: $pattern"
+      }
+    }
+  }
+
+  It "documents the theme input migration path in downstream examples" {
+    foreach ($pattern in @(
+      "themeInputs",
+      "WinUITheme",
+      "plugins-themes-winuitheme",
+      '"defaultTheme": "WinUITheme"'
+    )) {
+      if ($script:downstreamGuiTemplateText -notmatch [regex]::Escape($pattern)) {
+        throw "Downstream GUI template is missing expected theme input example: $pattern"
+      }
+    }
+
+    foreach ($pattern in @(
+      "themeInputs",
+      "repo-local fetch/build/install/copy scripts",
+      "bundled-theme validation"
+    )) {
+      if (($script:consumerSetupDocText -notmatch [regex]::Escape($pattern)) -and
+          ((Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/README.md")) -notmatch [regex]::Escape($pattern))) {
+        throw "Consumer or downstream docs are missing theme migration guidance: $pattern"
       }
     }
   }

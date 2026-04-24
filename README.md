@@ -161,9 +161,21 @@ This repo now also includes the phase 14 hosted Windows hardening pass:
 - the current hosted Windows blocker is documented upstream: MSYS2 `CLANG64`
   is classified as `os: unknown` by the public bootstrap selector
 
+This repo now also includes the first phase 16 theme-input contract work:
+
+- `themeInputs` lets manifests declare packaging-time GNUstep theme sources
+- the shared pipeline has a `provision` step that can compose active theme
+  inputs into the staged runtime before validation and backend packaging
+- Windows/MSYS2 theme provisioning uses the managed GNUstep toolchain path,
+  builds and installs themes into a temporary GNUstep user root, then stages
+  complete `.theme` bundles
+- bundled theme validation checks known executable conventions and resource
+  metadata, and provisioning emits a staged theme payload report
+
 Current sample verification covers:
 - `build`
 - `stage`
+- `provision`
 - `package -Backend msi`
 - `validate -Backend msi -RunSmoke`
 - `package -Backend appimage`
@@ -204,6 +216,7 @@ Examples:
 ./scripts/gnustep-packager.ps1 -Command resolve-manifest
 ./scripts/gnustep-packager.ps1 -Command build
 ./scripts/gnustep-packager.ps1 -Command stage
+./scripts/gnustep-packager.ps1 -Command provision -Backend msi
 ./scripts/gnustep-packager.ps1 -Command validate
 ./scripts/gnustep-packager.ps1 -Command package -Backend msi
 ./scripts/gnustep-packager.ps1 -Command validate -Backend msi -RunSmoke

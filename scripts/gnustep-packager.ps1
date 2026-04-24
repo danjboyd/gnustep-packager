@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("manifest-check", "resolve-manifest", "describe", "launch-plan", "backend-list", "host-preflight", "build", "stage", "package", "validate")]
+  [ValidateSet("manifest-check", "resolve-manifest", "describe", "launch-plan", "backend-list", "host-preflight", "build", "stage", "provision", "package", "validate")]
   [string]$Command = "describe",
   [string]$Manifest = "examples/sample-gui/package.manifest.json",
   [string]$Backend,
@@ -86,6 +86,7 @@ switch ($Command) {
     $hostDependencies = Get-GpHostDependencies -Context $context
     Write-Host "Host dependencies (windows/msys2): $(@($hostDependencies.WindowsMsys2Packages).Count)"
     Write-Host "Host dependencies (linux/apt): $(@($hostDependencies.LinuxAptPackages).Count)"
+    Write-Host "Theme inputs: $(@(Get-GpThemeInputs -Manifest $manifestData).Count)"
     if ($summary.UpdatesEnabled) {
       Write-Host "Updates: enabled ($($summary.UpdateChannel))"
     } else {
@@ -126,8 +127,24 @@ switch ($Command) {
     break
   }
 
+  "provision" {
+    $backendName = if (-not [string]::IsNullOrWhiteSpace($Backend)) {
+      Resolve-GpBackendName -Manifest $manifestData -RequestedBackend $Backend
+    } else {
+      $null
+    }
+    $result = Invoke-GpThemeProvisioning -Context $context -Backend $backendName -DryRun:$DryRun
+    if ($DryRun) {
+      $result | ConvertTo-Json -Depth 20
+    } else {
+      Write-Host "Theme provisioning completed. Log: $($result.LogPath)"
+    }
+    break
+  }
+
   "package" {
     $backendName = Resolve-GpBackendName -Manifest $manifestData -RequestedBackend $Backend
+    Invoke-GpThemeProvisioning -Context $context -Backend $backendName -DryRun:$DryRun | Out-Null
     $backendScript = Join-Path $context.ToolRoot ("backends\\{0}\\package.ps1" -f $backendName)
     if (-not (Test-Path $backendScript)) {
       throw "Backend package script not found: $backendScript"
@@ -155,6 +172,7 @@ switch ($Command) {
         Write-Host "Backend validation completed. Log: $backendLogPath"
       }
     } else {
+      Invoke-GpThemeProvisioning -Context $context -DryRun:$DryRun | Out-Null
       $result = Invoke-GpSharedValidation -Context $context -DryRun:$DryRun
       if ($DryRun) {
         $result | ConvertTo-Json -Depth 20

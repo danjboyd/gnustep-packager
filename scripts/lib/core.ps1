@@ -317,6 +317,7 @@ function Resolve-GpManifestData {
 
   $defaults = Get-GpDefaultManifest -Profiles (Get-GpRequestedProfiles -Manifest $Manifest)
   $resolved = Merge-GpHashtable -Base $defaults -Overlay $Manifest
+  $resolved = Apply-GpDeclarativeThemeDefaults -Manifest $resolved
   return (Apply-GpDeclarativePackagedDefaults -Manifest $resolved)
 }
 
@@ -551,6 +552,146 @@ function Get-GpHostDependencyPlan {
     HostPlatform = $platform
     Groups = @($groups.ToArray())
   }
+}
+
+function Get-GpThemeTargetPlatform {
+  param(
+    [string]$Backend
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($Backend)) {
+    $platform = Get-GpBackendRequiredPlatform -Backend $Backend
+    if (-not [string]::IsNullOrWhiteSpace($platform)) {
+      return $platform
+    }
+  }
+
+  return Get-GpHostPlatform
+}
+
+function Test-GpThemeInputApplies {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$ThemeInput,
+    [string]$Backend,
+    [string]$Platform
+  )
+
+  $targetPlatform = if (-not [string]::IsNullOrWhiteSpace($Platform)) {
+    $Platform
+  } else {
+    Get-GpThemeTargetPlatform -Backend $Backend
+  }
+
+  $platforms = @()
+  if ($ThemeInput.Contains("platforms")) {
+    $platforms = @($ThemeInput["platforms"])
+  }
+
+  foreach ($item in @($platforms)) {
+    if (-not ($item -is [string])) {
+      continue
+    }
+
+    $value = ([string]$item).Trim().ToLowerInvariant()
+    if ($value -eq $targetPlatform) {
+      return $true
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Backend) -and $value -eq $Backend.ToLowerInvariant()) {
+      return $true
+    }
+  }
+
+  return $false
+}
+
+function Get-GpThemeInputs {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest,
+    [string]$Backend,
+    [string]$Platform,
+    [switch]$ActiveOnly
+  )
+
+  $items = [System.Collections.Generic.List[psobject]]::new()
+  if (-not $Manifest.Contains("themeInputs")) {
+    return @()
+  }
+
+  $index = 0
+  foreach ($item in @($Manifest["themeInputs"])) {
+    if (-not ($item -is [System.Collections.IDictionary])) {
+      $index += 1
+      continue
+    }
+
+    $applies = Test-GpThemeInputApplies -ThemeInput $item -Backend $Backend -Platform $Platform
+    if ($ActiveOnly -and -not $applies) {
+      $index += 1
+      continue
+    }
+
+    $build = if ($item.Contains("build") -and ($item["build"] -is [System.Collections.IDictionary])) {
+      $item["build"]
+    } else {
+      @{}
+    }
+
+    $items.Add([pscustomobject]@{
+      Index = $index
+      Name = $(if ($item.Contains("name")) { [string]$item["name"] } else { $null })
+      Repo = $(if ($item.Contains("repo")) { [string]$item["repo"] } else { $null })
+      Ref = $(if ($item.Contains("ref")) { [string]$item["ref"] } else { $null })
+      Platforms = [string[]]@($item["platforms"])
+      Required = [bool]($item.Contains("required") -and $item["required"])
+      Default = [bool]($item.Contains("default") -and $item["default"])
+      WorkspacePath = $(if ($item.Contains("workspacePath")) { [string]$item["workspacePath"] } else { $null })
+      BuildCommand = $(if ($build.Contains("command")) { [string]$build["command"] } else { $null })
+      InstallCommand = $(if ($build.Contains("installCommand")) { [string]$build["installCommand"] } else { $null })
+      BuildEnvironment = $(if ($build.Contains("environment") -and ($build["environment"] -is [System.Collections.IDictionary])) { [hashtable](Copy-GpValue -Value $build["environment"]) } else { @{} })
+      Applies = [bool]$applies
+      Source = ("themeInputs[{0}]" -f $index)
+    }) | Out-Null
+    $index += 1
+  }
+
+  return @($items.ToArray())
+}
+
+function Apply-GpDeclarativeThemeDefaults {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest
+  )
+
+  $resolved = Copy-GpValue -Value $Manifest
+  $packagedDefaults = if ($resolved.Contains("packagedDefaults") -and ($resolved["packagedDefaults"] -is [System.Collections.IDictionary])) {
+    $resolved["packagedDefaults"]
+  } else {
+    @{}
+  }
+
+  if ($packagedDefaults.Contains("defaultTheme") -and -not [string]::IsNullOrWhiteSpace([string]$packagedDefaults["defaultTheme"])) {
+    return $resolved
+  }
+
+  $defaults = [System.Collections.Generic.List[string]]::new()
+  foreach ($theme in @(Get-GpThemeInputs -Manifest $resolved)) {
+    if ($theme.Default -and -not [string]::IsNullOrWhiteSpace([string]$theme.Name) -and -not $defaults.Contains([string]$theme.Name)) {
+      $defaults.Add([string]$theme.Name) | Out-Null
+    }
+  }
+
+  if ($defaults.Count -eq 1) {
+    if (-not $resolved.Contains("packagedDefaults") -or -not ($resolved["packagedDefaults"] -is [System.Collections.IDictionary])) {
+      $resolved["packagedDefaults"] = @{}
+    }
+    $resolved["packagedDefaults"]["defaultTheme"] = $defaults[0]
+  }
+
+  return $resolved
 }
 
 function Get-GpWorkflowHostSetupPlan {
@@ -909,7 +1050,7 @@ function Test-GpManifest {
     }
 
     $kind = [string]$Item["kind"]
-    $validKinds = @("notice-report", "update-runtime-config", "default-theme", "metadata-file", "updater-helper", "bundled-theme")
+    $validKinds = @("notice-report", "update-runtime-config", "default-theme", "metadata-file", "updater-helper", "bundled-theme", "theme-resource")
     if ($kind -notin $validKinds) {
       Add-Issue "$Label.kind must be one of: $([string]::Join(', ', $validKinds))."
     }
@@ -926,12 +1067,25 @@ function Test-GpManifest {
       Add-Issue "$Label.path must be a non-empty string when present."
     }
 
+    if ($Item.Contains("theme") -and -not (Test-StringValue $Item["theme"])) {
+      Add-Issue "$Label.theme must be a non-empty string when present."
+    }
+
     if ($kind -eq "metadata-file" -and (-not $Item.Contains("path") -or -not (Test-StringValue $Item["path"]))) {
       Add-Issue "$Label.path is required when $Label.kind is metadata-file."
     }
 
     if ($kind -eq "bundled-theme" -and (-not $Item.Contains("name") -or -not (Test-StringValue $Item["name"]))) {
       Add-Issue "$Label.name is required when $Label.kind is bundled-theme."
+    }
+
+    if ($kind -eq "theme-resource") {
+      if (-not $Item.Contains("theme") -or -not (Test-StringValue $Item["theme"])) {
+        Add-Issue "$Label.theme is required when $Label.kind is theme-resource."
+      }
+      if (-not $Item.Contains("path") -or -not (Test-StringValue $Item["path"])) {
+        Add-Issue "$Label.path is required when $Label.kind is theme-resource."
+      }
     }
   }
 
@@ -1074,6 +1228,101 @@ function Test-GpManifest {
     }
   }
 
+  if ($Manifest.Contains("themeInputs")) {
+    if (-not ($Manifest["themeInputs"] -is [System.Collections.IEnumerable]) -or ($Manifest["themeInputs"] -is [string])) {
+      Add-Issue "themeInputs must be an array when present."
+    } else {
+      $themeIndex = 0
+      $defaultByPlatform = @{}
+      foreach ($themeInput in @($Manifest["themeInputs"])) {
+        $label = "themeInputs[$themeIndex]"
+        if (-not ($themeInput -is [System.Collections.IDictionary])) {
+          Add-Issue "$label must be an object."
+          $themeIndex += 1
+          continue
+        }
+
+        if (-not $themeInput.Contains("name") -or -not (Test-StringValue $themeInput["name"])) {
+          Add-Issue "$label.name must be a non-empty string."
+        }
+
+        $hasRepo = $themeInput.Contains("repo") -and (Test-StringValue $themeInput["repo"])
+        $hasWorkspacePath = $themeInput.Contains("workspacePath") -and (Test-StringValue $themeInput["workspacePath"])
+        if (-not $hasRepo -and -not $hasWorkspacePath) {
+          Add-Issue "$label must declare either repo or workspacePath."
+        }
+
+        if ($themeInput.Contains("repo") -and -not (Test-StringValue $themeInput["repo"])) {
+          Add-Issue "$label.repo must be a non-empty string when present."
+        }
+        if ($themeInput.Contains("ref") -and -not (Test-StringValue $themeInput["ref"])) {
+          Add-Issue "$label.ref must be a non-empty string when present."
+        }
+        if ($themeInput.Contains("workspacePath") -and -not (Test-StringValue $themeInput["workspacePath"])) {
+          Add-Issue "$label.workspacePath must be a non-empty string when present."
+        }
+        if (-not $themeInput.Contains("required") -or -not ($themeInput["required"] -is [bool])) {
+          Add-Issue "$label.required must be a boolean."
+        }
+        if ($themeInput.Contains("default") -and -not ($themeInput["default"] -is [bool])) {
+          Add-Issue "$label.default must be a boolean when present."
+        }
+
+        if (-not $themeInput.Contains("platforms")) {
+          Add-Issue "$label.platforms must contain at least one platform."
+        } else {
+          $platformValues = @($themeInput["platforms"])
+          if ($platformValues.Count -eq 0) {
+            Add-Issue "$label.platforms must contain at least one platform."
+          }
+          foreach ($platformValue in $platformValues) {
+            if (-not (Test-StringValue $platformValue)) {
+              Add-Issue "$label.platforms must contain non-empty strings."
+              continue
+            }
+            if ([string]$platformValue -notin @("windows", "linux", "msi", "appimage")) {
+              Add-Issue "$label.platforms entries must be one of: windows, linux, msi, appimage."
+            }
+            if ($themeInput.Contains("default") -and $themeInput["default"]) {
+              $platformKey = [string]$platformValue
+              if ($defaultByPlatform.ContainsKey($platformKey)) {
+                Add-Issue ("Only one default theme input may apply to platform '{0}'." -f $platformKey)
+              } else {
+                $defaultByPlatform[$platformKey] = [string]$themeInput["name"]
+              }
+            }
+          }
+        }
+
+        if ($themeInput.Contains("build")) {
+          if (-not ($themeInput["build"] -is [System.Collections.IDictionary])) {
+            Add-Issue "$label.build must be an object when present."
+          } else {
+            $build = $themeInput["build"]
+            foreach ($buildKey in @("command", "installCommand")) {
+              if ($build.Contains($buildKey) -and -not (Test-StringValue $build[$buildKey])) {
+                Add-Issue "$label.build.$buildKey must be a non-empty string when present."
+              }
+            }
+            if ($build.Contains("environment")) {
+              if (-not ($build["environment"] -is [System.Collections.IDictionary])) {
+                Add-Issue "$label.build.environment must be an object when present."
+              } else {
+                foreach ($environmentKey in @($build["environment"].Keys)) {
+                  if (-not (Test-StringValue $environmentKey) -or -not ($build["environment"][$environmentKey] -is [string])) {
+                    Add-Issue "$label.build.environment entries must be string keys and string values."
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        $themeIndex += 1
+      }
+    }
+  }
+
   if ($Manifest.Contains("packagedDefaults")) {
     if (-not ($Manifest["packagedDefaults"] -is [System.Collections.IDictionary])) {
       Add-Issue "packagedDefaults must be an object when present."
@@ -1161,6 +1410,42 @@ function Test-GpManifest {
             }
           }
         }
+      }
+    }
+  }
+
+  $resolvedDefaultTheme = $null
+  if ($Manifest.Contains("packagedDefaults") -and ($Manifest["packagedDefaults"] -is [System.Collections.IDictionary]) -and
+      $Manifest["packagedDefaults"].Contains("defaultTheme") -and (Test-StringValue $Manifest["packagedDefaults"]["defaultTheme"])) {
+    $resolvedDefaultTheme = [string]$Manifest["packagedDefaults"]["defaultTheme"]
+  }
+  if (-not [string]::IsNullOrWhiteSpace($resolvedDefaultTheme) -and $Manifest.Contains("themeInputs")) {
+    $themeDefaults = @(Get-GpThemeInputs -Manifest $Manifest | Where-Object { $_.Default })
+    foreach ($themeDefault in @($themeDefaults)) {
+      if ([string]$themeDefault.Name -ne $resolvedDefaultTheme) {
+        Add-Issue "packagedDefaults.defaultTheme must match the default theme input when both are present."
+      }
+    }
+
+    $declaredThemeNames = @(Get-GpThemeInputs -Manifest $Manifest | ForEach-Object { [string]$_.Name } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    $hasDeclaredDefaultTheme = $resolvedDefaultTheme -in $declaredThemeNames
+    if (-not $hasDeclaredDefaultTheme) {
+      $stageRoot = if ($Manifest.Contains("payload") -and ($Manifest["payload"] -is [System.Collections.IDictionary]) -and $Manifest["payload"].Contains("stageRoot") -and (Test-StringValue $Manifest["payload"]["stageRoot"])) {
+        Resolve-GpPathRelativeToBase -BasePath (Get-Location).Path -Path ([string]$Manifest["payload"]["stageRoot"])
+      } else {
+        $null
+      }
+      $stagedThemePresent = $false
+      if (-not [string]::IsNullOrWhiteSpace($stageRoot)) {
+        foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $resolvedDefaultTheme)) {
+          if (Test-Path (Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $candidate)) {
+            $stagedThemePresent = $true
+            break
+          }
+        }
+      }
+      if (-not $stagedThemePresent) {
+        Add-Issue "packagedDefaults.defaultTheme must name a declared themeInputs entry or an already staged bundled theme."
       }
     }
   }
@@ -2472,13 +2757,15 @@ function Get-GpPackageContractDeclarations {
     [Parameter(Mandatory = $true)]
     [psobject]$Context,
     [ValidateSet("packageContract", "installedResult")]
-    [string]$SectionName = "packageContract"
+    [string]$SectionName = "packageContract",
+    [string]$Backend
   )
 
   $manifest = $Context.Manifest
   $section = Get-GpValidationSection -Manifest $manifest -SectionName $SectionName
   $declarations = [System.Collections.Generic.List[psobject]]::new()
   $autoKinds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $declaredThemeNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
   $index = 0
   foreach ($item in @($section["requiredContent"])) {
@@ -2494,11 +2781,15 @@ function Get-GpPackageContractDeclarations {
     }
 
     $null = $autoKinds.Add($kind)
+    if ($kind -eq "bundled-theme" -and $item.Contains("name") -and -not [string]::IsNullOrWhiteSpace([string]$item["name"])) {
+      $null = $declaredThemeNames.Add([string]$item["name"])
+    }
     $declarations.Add([pscustomobject]@{
       Kind = $kind
       Path = $(if ($item.Contains("path")) { [string]$item["path"] } else { $null })
       Value = $(if ($item.Contains("value")) { [string]$item["value"] } else { $null })
       Name = $(if ($item.Contains("name")) { [string]$item["name"] } else { $null })
+      Theme = $(if ($item.Contains("theme")) { [string]$item["theme"] } else { $null })
       Source = ("validation.{0}.requiredContent[{1}]" -f $SectionName, $index)
     }) | Out-Null
     $index += 1
@@ -2513,6 +2804,27 @@ function Get-GpPackageContractDeclarations {
       Name = "defaultTheme"
       Source = "packagedDefaults.defaultTheme"
     }) | Out-Null
+  }
+
+  $contextBackend = if (-not [string]::IsNullOrWhiteSpace($Backend)) {
+    $Backend
+  } elseif ($Context.PSObject.Properties["Backend"]) {
+    [string]$Context.Backend
+  } else {
+    $null
+  }
+  foreach ($theme in @(Get-GpThemeInputs -Manifest $manifest -Backend $contextBackend -ActiveOnly)) {
+    if (($theme.Required -or $theme.Default) -and -not [string]::IsNullOrWhiteSpace([string]$theme.Name) -and -not $declaredThemeNames.Contains([string]$theme.Name)) {
+      $declarations.Add([pscustomobject]@{
+        Kind = "bundled-theme"
+        Path = $null
+        Value = $null
+        Name = [string]$theme.Name
+        Theme = $null
+        Source = $theme.Source
+      }) | Out-Null
+      $null = $declaredThemeNames.Add([string]$theme.Name)
+    }
   }
 
   return @($declarations.ToArray())
@@ -2577,6 +2889,170 @@ function Get-GpBundledThemeCandidatePaths {
   )
 }
 
+function Get-GpThemeExecutableCandidates {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ThemePath,
+    [Parameter(Mandatory = $true)]
+    [string]$ThemeName,
+    [string]$Backend
+  )
+
+  if ($Backend -eq "msi") {
+    return [string[]]@((Join-Path $ThemePath ("{0}.dll" -f $ThemeName)))
+  }
+
+  if ($Backend -eq "appimage") {
+    return [string[]]@(
+      (Join-Path $ThemePath $ThemeName),
+      (Join-Path $ThemePath ("lib{0}.so" -f $ThemeName)),
+      (Join-Path $ThemePath ("{0}.so" -f $ThemeName))
+    )
+  }
+
+  return [string[]]@()
+}
+
+function Get-GpThemeBundleResourceInventory {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ThemePath
+  )
+
+  if (-not (Test-Path $ThemePath)) {
+    return @()
+  }
+
+  $rootLength = $ThemePath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar).Length
+  $items = [System.Collections.Generic.List[string]]::new()
+  foreach ($file in @(Get-ChildItem -Path $ThemePath -File -Recurse -ErrorAction SilentlyContinue)) {
+    $relative = $file.FullName.Substring($rootLength).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $items.Add(($relative -replace "\\", "/")) | Out-Null
+  }
+
+  return [string[]]@($items.ToArray() | Sort-Object)
+}
+
+function Get-GpThemeImageReferences {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$InfoPath
+  )
+
+  if (-not (Test-Path $InfoPath)) {
+    return @()
+  }
+
+  $text = Get-Content -Raw -Path $InfoPath
+  if ($text -notmatch "GSThemeImages") {
+    return @()
+  }
+
+  $references = [System.Collections.Generic.List[string]]::new()
+  foreach ($match in [regex]::Matches($text, "[A-Za-z0-9_.\-/]+\.png|[A-Za-z0-9_.\-/]+\.tiff|[A-Za-z0-9_.\-/]+\.jpg|[A-Za-z0-9_.\-/]+\.jpeg|[A-Za-z0-9_.\-/]+\.gif")) {
+    $value = [string]$match.Value
+    if (-not $references.Contains($value)) {
+      $references.Add($value) | Out-Null
+    }
+  }
+
+  return [string[]]@($references.ToArray())
+}
+
+function Test-GpThemeBundleStructure {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ThemePath,
+    [Parameter(Mandatory = $true)]
+    [string]$ThemeName,
+    [string]$Backend
+  )
+
+  $lines = [System.Collections.Generic.List[string]]::new()
+  $issues = [System.Collections.Generic.List[string]]::new()
+
+  if (-not (Test-Path $ThemePath -PathType Container)) {
+    $issues.Add("theme directory is missing") | Out-Null
+    return [pscustomobject]@{
+      Lines = @("MISSING theme directory: $ThemePath")
+      Issues = @($issues.ToArray())
+      Executable = $null
+      InfoPath = $null
+      Resources = @()
+    }
+  }
+
+  $lines.Add(("OK      theme directory: {0}" -f $ThemePath)) | Out-Null
+  $executable = $null
+  $executableCandidates = @(Get-GpThemeExecutableCandidates -ThemePath $ThemePath -ThemeName $ThemeName -Backend $Backend)
+  if ($executableCandidates.Count -gt 0) {
+    foreach ($candidate in $executableCandidates) {
+      if (Test-Path $candidate -PathType Leaf) {
+        $executable = $candidate
+        break
+      }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($executable)) {
+      $issues.Add(("theme executable is missing; checked {0}" -f ([string]::Join(", ", $executableCandidates)))) | Out-Null
+    } else {
+      $lines.Add(("OK      theme executable: {0}" -f $executable)) | Out-Null
+    }
+  }
+
+  $resourcesRoot = Join-Path $ThemePath "Resources"
+  $infoPath = Join-Path $resourcesRoot "Info-gnustep.plist"
+  if (Test-Path $resourcesRoot -PathType Container) {
+    if (Test-Path $infoPath -PathType Leaf) {
+      $lines.Add(("OK      theme info: {0}" -f $infoPath)) | Out-Null
+      $infoText = Get-Content -Raw -Path $infoPath
+      if ($infoText -match "NSExecutable" -and $infoText -notmatch [regex]::Escape($ThemeName)) {
+        $issues.Add("Resources/Info-gnustep.plist declares NSExecutable metadata that does not mention the theme name") | Out-Null
+      }
+      if ($infoText -match "NSPrincipalClass" -and [string]::IsNullOrWhiteSpace(($infoText -replace "(?s).*NSPrincipalClass.*", "$&"))) {
+        $issues.Add("Resources/Info-gnustep.plist contains empty NSPrincipalClass metadata") | Out-Null
+      }
+      foreach ($reference in @(Get-GpThemeImageReferences -InfoPath $infoPath)) {
+        $candidate = Join-Path $resourcesRoot $reference
+        if (-not (Test-Path $candidate -PathType Leaf)) {
+          $issues.Add(("GSThemeImages resource is missing: {0}" -f $reference)) | Out-Null
+        } else {
+          $lines.Add(("OK      theme image: {0}" -f $reference)) | Out-Null
+        }
+      }
+    } else {
+      $issues.Add("Resources/Info-gnustep.plist is missing") | Out-Null
+    }
+  }
+
+  $resources = @(Get-GpThemeBundleResourceInventory -ThemePath $ThemePath)
+  return [pscustomobject]@{
+    Lines = @($lines.ToArray())
+    Issues = @($issues.ToArray())
+    Executable = $executable
+    InfoPath = $(if (Test-Path $infoPath -PathType Leaf) { $infoPath } else { $null })
+    Resources = [string[]]@($resources)
+  }
+}
+
+function Find-GpBundledThemePath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PayloadRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$ThemeName
+  )
+
+  foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $ThemeName)) {
+    $candidatePath = Resolve-GpPathRelativeToBase -BasePath $PayloadRoot -Path $candidate
+    if (Test-Path $candidatePath -PathType Container) {
+      return $candidatePath
+    }
+  }
+
+  return $null
+}
+
 function Get-GpDefaultThemeContractValue {
   param(
     [Parameter(Mandatory = $true)]
@@ -2615,7 +3091,7 @@ function Invoke-GpPackageContractAssertions {
   $sectionName = if ($Scope -eq "installed") { "installedResult" } else { "packageContract" }
   $lines = [System.Collections.Generic.List[string]]::new()
   $issues = [System.Collections.Generic.List[string]]::new()
-  $declarations = @(Get-GpPackageContractDeclarations -Context $Context -SectionName $sectionName)
+  $declarations = @(Get-GpPackageContractDeclarations -Context $Context -SectionName $sectionName -Backend $Backend)
   $payloadRoot = if ($Scope -eq "stage") { $launch.StageRoot } elseif (-not [string]::IsNullOrWhiteSpace($Backend)) { Get-GpAppPayloadRoot -RootPath $RootPath -Backend $Backend } else { $RootPath }
   $phaseLabel = if ($Scope -eq "stage") { "stage contract" } elseif ($Scope -eq "package") { "$Backend package contract" } else { "$Backend installed-result contract" }
 
@@ -2636,8 +3112,37 @@ function Invoke-GpPackageContractAssertions {
 
         if ($matchedPaths.Count -gt 0) {
           $lines.Add(("OK      {0} [{1}] -> matched {2}" -f $bundledThemeLabel, $entry.Source, ([string]::Join(", ", @($matchedPaths.ToArray()))))) | Out-Null
+          $structure = Test-GpThemeBundleStructure -ThemePath $matchedPaths[0] -ThemeName $entry.Name -Backend $Backend
+          foreach ($structureLine in @($structure.Lines)) {
+            $lines.Add($structureLine) | Out-Null
+          }
+          foreach ($structureIssue in @($structure.Issues)) {
+            $message = ("INVALID {0} [{1}] -> {2}" -f $bundledThemeLabel, $entry.Source, $structureIssue)
+            $lines.Add($message) | Out-Null
+            $issues.Add($message) | Out-Null
+          }
         } else {
           $message = ("MISSING {0} [{1}] -> checked {2}" -f $bundledThemeLabel, $entry.Source, ([string]::Join(", ", @($candidatePaths.ToArray()))))
+          $lines.Add($message) | Out-Null
+          $issues.Add($message) | Out-Null
+        }
+      }
+
+      "theme-resource" {
+        $themeName = if (-not [string]::IsNullOrWhiteSpace([string]$entry.Theme)) { [string]$entry.Theme } else { [string]$entry.Name }
+        $themePath = Find-GpBundledThemePath -PayloadRoot $payloadRoot -ThemeName $themeName
+        if ([string]::IsNullOrWhiteSpace($themePath)) {
+          $message = ("MISSING theme-resource:{0}:{1} [{2}] -> no bundled theme found" -f $themeName, $entry.Path, $entry.Source)
+          $lines.Add($message) | Out-Null
+          $issues.Add($message) | Out-Null
+          continue
+        }
+
+        $resourcePath = Resolve-GpPathRelativeToBase -BasePath $themePath -Path $entry.Path
+        if (Test-Path $resourcePath -PathType Leaf) {
+          $lines.Add(("OK      theme-resource:{0}:{1} -> {2}" -f $themeName, $entry.Path, $resourcePath)) | Out-Null
+        } else {
+          $message = ("MISSING theme-resource:{0}:{1} [{2}] -> {3}" -f $themeName, $entry.Path, $entry.Source, $resourcePath)
           $lines.Add($message) | Out-Null
           $issues.Add($message) | Out-Null
         }
@@ -2976,6 +3481,392 @@ function Invoke-GpShellCommand {
     WorkingDirectory = $WorkingDirectory
     LogPath = $LogPath
     DryRun = $false
+  }
+}
+
+function Invoke-GpGitCommand {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$ArgumentList,
+    [string]$WorkingDirectory
+  )
+
+  $git = Get-Command git -ErrorAction SilentlyContinue
+  if ($null -eq $git -or [string]::IsNullOrWhiteSpace([string]$git.Source)) {
+    throw "git was not found. Theme inputs that use repo require git."
+  }
+
+  $result = Invoke-GpCapturedProcess -FilePath ([string]$git.Source) -ArgumentList @($ArgumentList) -WorkingDirectory $WorkingDirectory
+  if ($result.ExitCode -ne 0) {
+    $detail = @($result.StdOut, $result.StdErr) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    throw ("git {0} failed. {1}" -f ([string]::Join(" ", @($ArgumentList))), ([string]::Join(" ", $detail)).Trim())
+  }
+
+  return $result
+}
+
+function Resolve-GpThemeSourcePath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Theme,
+    [string]$SourceRoot,
+    [switch]$DryRun
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace([string]$Theme.WorkspacePath)) {
+    return Resolve-GpManifestPath -Context $Context -RelativePath ([string]$Theme.WorkspacePath)
+  }
+
+  $path = Join-Path $SourceRoot $Theme.Name
+  if ($DryRun) {
+    return $path
+  }
+
+  if (-not (Test-Path $path)) {
+    Invoke-GpGitCommand -ArgumentList @("clone", "--", [string]$Theme.Repo, $path) | Out-Null
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace([string]$Theme.Ref)) {
+    Invoke-GpGitCommand -WorkingDirectory $path -ArgumentList @("fetch", "--tags", "--prune") | Out-Null
+    Invoke-GpGitCommand -WorkingDirectory $path -ArgumentList @("checkout", "--", [string]$Theme.Ref) | Out-Null
+  }
+
+  return $path
+}
+
+function Get-GpGitResolvedCommit {
+  param(
+    [string]$Path
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path (Join-Path $Path ".git"))) {
+    return $null
+  }
+
+  try {
+    $result = Invoke-GpGitCommand -WorkingDirectory $Path -ArgumentList @("rev-parse", "HEAD")
+    return $result.StdOut.Trim()
+  } catch {
+    return $null
+  }
+}
+
+function Get-GpThemeBuildShellConfig {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Theme,
+    [Parameter(Mandatory = $true)]
+    [string]$InstallRoot,
+    [string]$Backend
+  )
+
+  $manifestShell = $Context.Manifest["pipeline"]["shell"]
+  $targetPlatform = Get-GpThemeTargetPlatform -Backend $Backend
+  $shell = if ($manifestShell["kind"] -eq "msys2-bash" -or $targetPlatform -ne "windows") {
+    Copy-GpValue -Value $manifestShell
+  } else {
+    @{
+      kind = "msys2-bash"
+      bootstrapCommands = @()
+      environment = @{}
+    }
+    if ($manifestShell.Contains("msysRoot")) {
+      $shell["msysRoot"] = [string]$manifestShell["msysRoot"]
+    }
+  }
+
+  if (-not $shell.Contains("environment") -or -not ($shell["environment"] -is [System.Collections.IDictionary])) {
+    $shell["environment"] = @{}
+  }
+
+  foreach ($key in @($Theme.BuildEnvironment.Keys)) {
+    $shell["environment"][$key] = [string]$Theme.BuildEnvironment[$key]
+  }
+
+  $installRootForShell = if ($shell["kind"] -in @("bash", "sh", "msys2-bash")) {
+    Convert-GpNativePathToPosix -Path $InstallRoot
+  } else {
+    $InstallRoot
+  }
+  $shell["environment"]["GNUSTEP_USER_ROOT"] = $installRootForShell
+
+  if (-not $shell["environment"].Contains("CC")) { $shell["environment"]["CC"] = "clang" }
+  if (-not $shell["environment"].Contains("OBJC_CC")) { $shell["environment"]["OBJC_CC"] = "clang" }
+  if (-not $shell["environment"].Contains("CXX")) { $shell["environment"]["CXX"] = "clang++" }
+  if (-not $shell["environment"].Contains("OBJCXX")) { $shell["environment"]["OBJCXX"] = "clang++" }
+  if (-not $shell["environment"].Contains("CFLAGS")) { $shell["environment"]["CFLAGS"] = "-DHAVE_MODE_T=1" }
+  if (-not $shell["environment"].Contains("OBJCFLAGS")) { $shell["environment"]["OBJCFLAGS"] = "-DHAVE_MODE_T=1" }
+  if (-not $shell["environment"].Contains("GNUSTEP_MAKEFILES") -and -not [string]::IsNullOrWhiteSpace($env:GNUSTEP_MAKEFILES)) {
+    $shell["environment"]["GNUSTEP_MAKEFILES"] = $env:GNUSTEP_MAKEFILES
+  }
+
+  return $shell
+}
+
+function Get-GpThemeBuildCommand {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Theme
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace([string]$Theme.BuildCommand)) {
+    return [string]$Theme.BuildCommand
+  }
+
+  $installCommand = if (-not [string]::IsNullOrWhiteSpace([string]$Theme.InstallCommand)) {
+    [string]$Theme.InstallCommand
+  } else {
+    "make install GNUSTEP_INSTALLATION_DOMAIN=USER"
+  }
+
+  return ("make clean; make; {0}" -f $installCommand)
+}
+
+function Find-GpInstalledThemeBundle {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Roots,
+    [Parameter(Mandatory = $true)]
+    [string]$ThemeName
+  )
+
+  $leaf = ("{0}.theme" -f $ThemeName)
+  foreach ($root in @($Roots)) {
+    if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path $root)) {
+      continue
+    }
+
+    foreach ($match in @(Get-ChildItem -Path $root -Directory -Recurse -Filter $leaf -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+      return [string]$match.FullName
+    }
+  }
+
+  return $null
+}
+
+function Copy-GpThemeBundleToStage {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [string]$ThemeName,
+    [Parameter(Mandatory = $true)]
+    [string]$BundlePath
+  )
+
+  $stageRoot = Resolve-GpManifestPath -Context $Context -RelativePath $Context.Manifest["payload"]["stageRoot"]
+  $themeRoot = Ensure-GpDirectory -Path (Join-Path $stageRoot "runtime/lib/GNUstep/Themes")
+  $destination = Join-Path $themeRoot ("{0}.theme" -f $ThemeName)
+  if (Test-Path $destination) {
+    Remove-Item -Recurse -Force $destination
+  }
+  Copy-Item -Recurse -Force $BundlePath $destination
+  return $destination
+}
+
+function Convert-GpPathToRelative {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$BasePath,
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $base = $BasePath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+  $baseUri = [System.Uri]::new($base)
+  $pathUri = [System.Uri]::new($Path)
+  return ([System.Uri]::UnescapeDataString($baseUri.MakeRelativeUri($pathUri).ToString()) -replace "/", [System.IO.Path]::DirectorySeparatorChar)
+}
+
+function Write-GpThemePayloadReport {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [object[]]$Themes,
+    [string]$Backend
+  )
+
+  $payload = $Context.Manifest["payload"]
+  $stageRoot = Resolve-GpManifestPath -Context $Context -RelativePath $payload["stageRoot"]
+  $metadataRootRelative = if ($payload.Contains("metadataRoot") -and -not [string]::IsNullOrWhiteSpace([string]$payload["metadataRoot"])) {
+    [string]$payload["metadataRoot"]
+  } else {
+    "metadata"
+  }
+  $metadataRoot = Ensure-GpDirectory -Path (Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $metadataRootRelative)
+  $reportPath = Join-Path $metadataRoot "gnustep-packager-theme-report.json"
+  $items = @()
+
+  foreach ($theme in @($Themes)) {
+    $stagedPath = [string]$theme.StagedPath
+    $structure = if (-not [string]::IsNullOrWhiteSpace($stagedPath) -and (Test-Path $stagedPath)) {
+      Test-GpThemeBundleStructure -ThemePath $stagedPath -ThemeName ([string]$theme.Name) -Backend $Backend
+    } else {
+      $null
+    }
+    $items += [ordered]@{
+      name = [string]$theme.Name
+      source = [ordered]@{
+        repo = $theme.Repo
+        workspacePath = $theme.WorkspacePath
+        sourcePath = $theme.SourcePath
+        ref = $theme.RequestedRef
+        resolvedCommit = $theme.ResolvedCommit
+      }
+      required = [bool]$theme.Required
+      default = [bool]$theme.Default
+      backend = $Backend
+      stagedPath = $(if (-not [string]::IsNullOrWhiteSpace($stagedPath)) { Convert-GpPathToRelative -BasePath $stageRoot -Path $stagedPath } else { $null })
+      executable = $(if ($null -ne $structure) { $structure.Executable } else { $null })
+      info = $(if ($null -ne $structure) { $structure.InfoPath } else { $null })
+      resources = $(if ($null -ne $structure) { @($structure.Resources) } else { @() })
+      validationIssues = $(if ($null -ne $structure) { @($structure.Issues) } else { @() })
+    }
+  }
+
+  $document = [ordered]@{
+    formatVersion = 1
+    generatedAt = (Get-Date).ToString("o")
+    package = [ordered]@{
+      id = [string]$Context.Manifest["package"]["id"]
+      name = [string]$Context.Manifest["package"]["name"]
+      version = [string]$Context.Manifest["package"]["version"]
+    }
+    themes = @($items)
+  }
+
+  $document | ConvertTo-Json -Depth 20 | Set-Content -Path $reportPath -Encoding utf8
+  return $reportPath
+}
+
+function Invoke-GpThemeProvisioning {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [string]$Backend,
+    [string]$LogPath,
+    [switch]$DryRun
+  )
+
+  if ([string]::IsNullOrWhiteSpace($LogPath)) {
+    $LogPath = New-GpCommandLogPath -Context $Context -CommandName "provision-themes"
+  }
+
+  Ensure-GpDirectory -Path (Split-Path -Parent $LogPath) | Out-Null
+  $outputPaths = Get-GpOutputPaths -Context $Context
+  $sourceRoot = Ensure-GpDirectory -Path (Join-Path $outputPaths.TempRoot "theme-inputs/sources")
+  $installBaseRoot = Ensure-GpDirectory -Path (Join-Path $outputPaths.TempRoot "theme-inputs/install")
+  $lines = [System.Collections.Generic.List[string]]::new()
+  $results = [System.Collections.Generic.List[psobject]]::new()
+  $issues = [System.Collections.Generic.List[string]]::new()
+  $themes = @(Get-GpThemeInputs -Manifest $Context.Manifest -Backend $Backend -ActiveOnly)
+
+  $lines.Add(("[{0}] theme provisioning backend={1} dryRun={2}" -f (Get-Date).ToString("o"), $(if ([string]::IsNullOrWhiteSpace($Backend)) { "(host)" } else { $Backend }), [bool]$DryRun)) | Out-Null
+  if ($themes.Count -eq 0) {
+    $lines.Add("No active theme inputs apply.") | Out-Null
+    Set-Content -Path $LogPath -Value $lines
+    return [pscustomobject]@{
+      Themes = @()
+      LogPath = $LogPath
+      DryRun = [bool]$DryRun
+    }
+  }
+
+  foreach ($theme in @($themes)) {
+    $lines.Add(("THEME   {0} required={1} default={2}" -f $theme.Name, $theme.Required, $theme.Default)) | Out-Null
+    try {
+      if ($Backend -eq "appimage") {
+        $message = "Theme input provisioning for AppImage is not implemented yet."
+        if ($theme.Required) {
+          throw $message
+        }
+        $lines.Add(("WARN    {0}: {1}" -f $theme.Name, $message)) | Out-Null
+        continue
+      }
+
+      $sourcePath = Resolve-GpThemeSourcePath -Context $Context -Theme $theme -SourceRoot $sourceRoot -DryRun:$DryRun
+      $installRoot = Join-Path $installBaseRoot $theme.Name
+      $resolvedCommit = if ($DryRun) { $null } else { Get-GpGitResolvedCommit -Path $sourcePath }
+      $buildCommand = Get-GpThemeBuildCommand -Theme $theme
+      $lines.Add(("SOURCE  {0}" -f $sourcePath)) | Out-Null
+      if (-not [string]::IsNullOrWhiteSpace([string]$theme.Repo)) { $lines.Add(("REPO    {0}" -f $theme.Repo)) | Out-Null }
+      if (-not [string]::IsNullOrWhiteSpace([string]$theme.Ref)) { $lines.Add(("REF     {0}" -f $theme.Ref)) | Out-Null }
+      if (-not [string]::IsNullOrWhiteSpace($resolvedCommit)) { $lines.Add(("COMMIT  {0}" -f $resolvedCommit)) | Out-Null }
+      $lines.Add(("BUILD   {0}" -f $buildCommand)) | Out-Null
+
+      if ($DryRun) {
+        $results.Add([pscustomobject]@{
+          Name = $theme.Name
+          Repo = $theme.Repo
+          WorkspacePath = $theme.WorkspacePath
+          SourcePath = $sourcePath
+          RequestedRef = $theme.Ref
+          ResolvedCommit = $resolvedCommit
+          Required = $theme.Required
+          Default = $theme.Default
+          StagedPath = $null
+          DryRun = $true
+        }) | Out-Null
+        continue
+      }
+
+      Ensure-GpDirectory -Path $installRoot | Out-Null
+      $shellConfig = Get-GpThemeBuildShellConfig -Context $Context -Theme $theme -InstallRoot $installRoot -Backend $Backend
+      $invocation = Get-GpShellInvocation -ShellConfig $shellConfig -Command $buildCommand
+      $themeLogPath = New-GpCommandLogPath -Context $Context -CommandName ("provision-theme-" + $theme.Name)
+      Invoke-GpShellCommand -Invocation $invocation -WorkingDirectory $sourcePath -LogPath $themeLogPath | Out-Null
+
+      $bundlePath = Find-GpInstalledThemeBundle -Roots @($installRoot, $sourcePath) -ThemeName $theme.Name
+      if ([string]::IsNullOrWhiteSpace($bundlePath)) {
+        throw ("Theme bundle {0}.theme was not found after build/install. Checked {1} and {2}." -f $theme.Name, $installRoot, $sourcePath)
+      }
+
+      $stagedPath = Copy-GpThemeBundleToStage -Context $Context -ThemeName $theme.Name -BundlePath $bundlePath
+      $lines.Add(("STAGED  {0}" -f $stagedPath)) | Out-Null
+      $results.Add([pscustomobject]@{
+        Name = $theme.Name
+        Repo = $theme.Repo
+        WorkspacePath = $theme.WorkspacePath
+        SourcePath = $sourcePath
+        RequestedRef = $theme.Ref
+        ResolvedCommit = $resolvedCommit
+        Required = $theme.Required
+        Default = $theme.Default
+        StagedPath = $stagedPath
+        DryRun = $false
+      }) | Out-Null
+    } catch {
+      $message = ("{0}: {1}" -f $theme.Name, $_.Exception.Message)
+      if ($theme.Required) {
+        $lines.Add(("FAIL    {0}" -f $message)) | Out-Null
+        $issues.Add($message) | Out-Null
+      } else {
+        $lines.Add(("WARN    {0}" -f $message)) | Out-Null
+      }
+    }
+  }
+
+  Set-Content -Path $LogPath -Value $lines
+  if ($issues.Count -gt 0) {
+    throw ("Theme provisioning failed: {0}. See log: {1}" -f ([string]::Join("; ", @($issues.ToArray()))), $LogPath)
+  }
+
+  $reportPath = $null
+  if (-not $DryRun -and $results.Count -gt 0) {
+    $reportPath = Write-GpThemePayloadReport -Context $Context -Themes @($results.ToArray()) -Backend $Backend
+    Add-Content -Path $LogPath -Value ("REPORT  {0}" -f $reportPath)
+  }
+
+  return [pscustomobject]@{
+    Themes = @($results.ToArray())
+    LogPath = $LogPath
+    ReportPath = $reportPath
+    DryRun = [bool]$DryRun
   }
 }
 

@@ -38,8 +38,20 @@
     "workingDirectory": ".",
     "env": {}
   },
+  "themeInputs": [
+    {
+      "name": "WinUITheme",
+      "repo": "https://github.com/danjboyd/plugins-themes-winuitheme.git",
+      "ref": "v0.1.0",
+      "platforms": [
+        "windows"
+      ],
+      "required": true,
+      "default": true
+    }
+  ],
   "packagedDefaults": {
-    "defaultTheme": "WinUXTheme",
+    "defaultTheme": "WinUITheme",
     "appDomain": {
       "values": {
         "MyGNUstepAppFirstRunComplete": true
