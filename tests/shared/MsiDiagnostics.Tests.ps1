@@ -99,6 +99,8 @@ Describe "MSI diagnostics helpers" {
     $systemDlls = @(
       "dwrite.dll",
       "gdiplus.dll",
+      "dnsapi.dll",
+      "iphlpapi.dll",
       "msimg32.dll",
       "opengl32.dll",
       "usp10.dll",

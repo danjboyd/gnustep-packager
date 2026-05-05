@@ -720,12 +720,14 @@ function Test-GpMsiSystemDllName {
     "comctl32.dll",
     "comdlg32.dll",
     "crypt32.dll",
+    "dnsapi.dll",
     "dwrite.dll",
     "dwmapi.dll",
     "gdi32.dll",
     "gdi32full.dll",
     "gdiplus.dll",
     "imm32.dll",
+    "iphlpapi.dll",
     "kernel32.dll",
     "msimg32.dll",
     "msi.dll",
@@ -2044,7 +2046,13 @@ function Invoke-GpMsiValidation {
   foreach ($line in @(Get-GpMsiMissingDependencySummaryLines -Analysis $installedRuntimeAudit)) {
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed runtime audit: {0}" -f $line)
   }
-  if (@($installedRuntimeAudit.MissingRecords).Count -gt 0) {
+  $installedRuntimeClosure = Resolve-GpMsiRuntimeClosureResult `
+    -UnresolvedDependencies @($installedRuntimeAudit.MissingDependencyNames) `
+    -IgnoredDependencies @($config.IgnoredRuntimeDependencies)
+  if (@($installedRuntimeClosure.IgnoredDependencies).Count -gt 0) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed runtime audit ignored unresolved dependencies: {0}" -f ([string]::Join(", ", @($installedRuntimeClosure.IgnoredDependencies))))
+  }
+  if (@($installedRuntimeClosure.UnresolvedDependencies).Count -gt 0) {
     $auditMessage = Get-GpMsiInstalledRuntimeAuditFailureMessage -Analysis $installedRuntimeAudit
     throw "$auditMessage See $(Get-GpMsiDiagnosticsDocPath)."
   }
