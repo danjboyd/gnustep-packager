@@ -1419,13 +1419,15 @@ function Get-GpMsiAppDomainDefaults {
     }) | Out-Null
   }
 
-  foreach ($entry in @($packagedDefaults.AppDomain.Entries)) {
-    $entries.Add([pscustomobject]@{
-      Key = [string]$entry.Key
-      Type = [string]$entry.Type
-      Value = $entry.Value
-      SerializedValue = Convert-GpPackagedDefaultToGnustepLiteral -Entry $entry
-    }) | Out-Null
+  if ($null -ne $packagedDefaults.AppDomain) {
+    foreach ($entry in @($packagedDefaults.AppDomain.Entries)) {
+      $entries.Add([pscustomobject]@{
+        Key = [string]$entry.Key
+        Type = [string]$entry.Type
+        Value = $entry.Value
+        SerializedValue = Convert-GpPackagedDefaultToGnustepLiteral -Entry $entry
+      }) | Out-Null
+    }
   }
 
   return [pscustomobject]@{
