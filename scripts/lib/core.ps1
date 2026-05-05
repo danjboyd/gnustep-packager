@@ -3651,7 +3651,7 @@ function Get-GpThemeBuildShellConfig {
   $shell = if ($manifestShell["kind"] -eq "msys2-bash" -or $targetPlatform -ne "windows") {
     Copy-GpValue -Value $manifestShell
   } else {
-    @{
+    $shell = @{
       kind = "msys2-bash"
       bootstrapCommands = @()
       environment = @{}
@@ -3659,6 +3659,7 @@ function Get-GpThemeBuildShellConfig {
     if ($manifestShell.Contains("msysRoot")) {
       $shell["msysRoot"] = [string]$manifestShell["msysRoot"]
     }
+    $shell
   }
 
   if (-not $shell.Contains("environment") -or -not ($shell["environment"] -is [System.Collections.IDictionary])) {
