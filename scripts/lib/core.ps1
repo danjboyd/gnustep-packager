@@ -3675,7 +3675,7 @@ function Get-GpThemeBuildShellConfig {
   } else {
     $InstallRoot
   }
-  $shell["environment"]["GNUSTEP_USER_ROOT"] = $installRootForShell
+  $shell["environment"]["GNUSTEP_HOME"] = $installRootForShell
 
   if (-not $shell["environment"].Contains("CC")) { $shell["environment"]["CC"] = "clang" }
   if (-not $shell["environment"].Contains("OBJC_CC")) { $shell["environment"]["OBJC_CC"] = "clang" }
