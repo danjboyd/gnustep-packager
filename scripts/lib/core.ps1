@@ -2335,6 +2335,7 @@ function Get-GpShellInvocation {
 
     "bash" {
       $parts = @()
+      $parts += "export PATH='/clang64/bin:/usr/bin:/bin':`$PATH"
       foreach ($key in $environment.Keys) {
         $parts += "export $key='$(Escape-GpBashLiteral -Value ([string]$environment[$key]))'"
       }
@@ -2370,9 +2371,10 @@ function Get-GpShellInvocation {
     }
 
     "msys2-bash" {
-      $msysRoot = if ($ShellConfig.Contains("msysRoot")) { [string]$ShellConfig["msysRoot"] } else { "C:\msys64" }
+      $msysRoot = if ($ShellConfig.Contains("msysRoot")) { [string]$ShellConfig["msysRoot"] } else { Resolve-GpDefaultMsysRoot }
       $envExe = Join-Path $msysRoot "usr\bin\env.exe"
       $parts = @()
+      $parts += "export PATH='/clang64/bin:/usr/bin:/bin':`$PATH"
       foreach ($key in $environment.Keys) {
         $parts += "export $key='$(Escape-GpBashLiteral -Value ([string]$environment[$key]))'"
       }
@@ -2391,6 +2393,32 @@ function Get-GpShellInvocation {
   }
 
   throw "Unsupported shell kind: $kind"
+}
+
+function Resolve-GpDefaultMsysRoot {
+  $candidates = [System.Collections.Generic.List[string]]::new()
+
+  if (-not [string]::IsNullOrWhiteSpace($env:MSYS2_LOCATION)) {
+    $candidates.Add($env:MSYS2_LOCATION) | Out-Null
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:GP_GNUSTEP_CLI_ROOT)) {
+    $candidates.Add($env:GP_GNUSTEP_CLI_ROOT) | Out-Null
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+    $candidates.Add((Join-Path $env:LOCALAPPDATA "gnustep-cli")) | Out-Null
+  }
+  $candidates.Add("C:\msys64") | Out-Null
+
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    if (Test-Path -LiteralPath (Join-Path $candidate "usr\bin\env.exe")) {
+      return $candidate
+    }
+  }
+
+  return "C:\msys64"
 }
 
 function Invoke-GpCapturedProcess {
@@ -3612,7 +3640,7 @@ function Resolve-GpThemeSourcePath {
 
   if (-not [string]::IsNullOrWhiteSpace([string]$Theme.Ref)) {
     Invoke-GpGitCommand -WorkingDirectory $path -ArgumentList @("fetch", "--tags", "--prune") | Out-Null
-    Invoke-GpGitCommand -WorkingDirectory $path -ArgumentList @("checkout", "--", [string]$Theme.Ref) | Out-Null
+    Invoke-GpGitCommand -WorkingDirectory $path -ArgumentList @("checkout", [string]$Theme.Ref, "--") | Out-Null
   }
 
   return $path
