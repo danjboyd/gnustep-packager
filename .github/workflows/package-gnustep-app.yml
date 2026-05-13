@@ -91,6 +91,8 @@ on:
         type: string
         default: ""
     secrets:
+      consumer_checkout_token:
+        required: false
       sign_pfx_base64:
         required: false
       sign_pfx_password:
@@ -127,6 +129,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          token: ${{ secrets.consumer_checkout_token || github.token }}
 
       - name: Resolve Packager Checkout
         id: packager
