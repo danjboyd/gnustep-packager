@@ -523,6 +523,33 @@ Describe "Theme input contract" {
     }
   }
 
+  It "passes HAVE_MODE_T to theme builds the way gnustep-make keeps it" {
+    $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+      param($manifest)
+      $manifest["themeInputs"] = @(
+        @{
+          name = "WinUITheme"
+          repo = "https://github.com/danjboyd/plugins-themes-winuitheme.git"
+          ref = "main"
+          platforms = @("windows")
+          required = $true
+        }
+      )
+    }
+    try {
+      $context = Get-GpManifestContext -Path $manifestPath
+      $theme = @(Get-GpThemeInputs -Manifest $context.Manifest -Backend "msi" -ActiveOnly)[0]
+      $shell = Get-GpThemeBuildShellConfig -Context $context -Theme $theme -InstallRoot ([System.IO.Path]::GetTempPath()) -Backend "msi"
+      foreach ($name in @("ADDITIONAL_OBJCFLAGS", "ADDITIONAL_CPPFLAGS")) {
+        Assert-GpMatch -Actual ([string]$shell["environment"][$name]) -Pattern "-DHAVE_MODE_T" -Message "$name should carry HAVE_MODE_T: gnustep-make appends to it, unlike OBJCFLAGS."
+      }
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+    }
+  }
+
   It "ships the downstream GNUstep GUI template with a required default WinUITheme input" {
     $context = Get-GpManifestContext -Path $script:downstreamGuiTemplatePath
     $issues = @()

@@ -3714,6 +3714,11 @@ function Get-GpThemeBuildShellConfig {
   if (-not $shell["environment"].Contains("OBJCXX")) { $shell["environment"]["OBJCXX"] = "clang++" }
   if (-not $shell["environment"].Contains("CFLAGS")) { $shell["environment"]["CFLAGS"] = "-DHAVE_MODE_T=1" }
   if (-not $shell["environment"].Contains("OBJCFLAGS")) { $shell["environment"]["OBJCFLAGS"] = "-DHAVE_MODE_T=1" }
+  # gnustep-make replaces CFLAGS/OBJCFLAGS from its own configuration but appends to these, which
+  # is how the gnustep CLI passes HAVE_MODE_T: without it, MSYS2 CLANG64's libdispatch headers
+  # redefine mode_t and every theme fails to compile.
+  if (-not $shell["environment"].Contains("ADDITIONAL_OBJCFLAGS")) { $shell["environment"]["ADDITIONAL_OBJCFLAGS"] = "-DHAVE_MODE_T=1" }
+  if (-not $shell["environment"].Contains("ADDITIONAL_CPPFLAGS")) { $shell["environment"]["ADDITIONAL_CPPFLAGS"] = "-DHAVE_MODE_T=1" }
   if (-not $shell["environment"].Contains("GNUSTEP_MAKEFILES") -and -not [string]::IsNullOrWhiteSpace($env:GNUSTEP_MAKEFILES)) {
     $shell["environment"]["GNUSTEP_MAKEFILES"] = $env:GNUSTEP_MAKEFILES
   }
