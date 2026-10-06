@@ -3118,7 +3118,12 @@ function Test-GpThemeBundleStructure {
         $issues.Add("Resources/Info-gnustep.plist contains empty NSPrincipalClass metadata") | Out-Null
       }
       foreach ($reference in @(Get-GpThemeImageReferences -InfoPath $infoPath)) {
+        # GNUstep looks theme images up in Resources/ThemeImages (-[NSImage _pathForThemeImage...]),
+        # so a bare name such as GSRadio.png lives there; a reference may also be a path under Resources.
         $candidate = Join-Path $resourcesRoot $reference
+        if (-not (Test-Path $candidate -PathType Leaf)) {
+          $candidate = Join-Path (Join-Path $resourcesRoot "ThemeImages") $reference
+        }
         if (-not (Test-Path $candidate -PathType Leaf)) {
           $issues.Add(("GSThemeImages resource is missing: {0}" -f $reference)) | Out-Null
         } else {

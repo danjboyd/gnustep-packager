@@ -341,6 +341,64 @@ Describe "Theme input contract" {
     }
   }
 
+  It "finds GSThemeImages named by file in Resources/ThemeImages, where GNUstep loads them" {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-images-" + [guid]::NewGuid().ToString("N"))
+    $stageRoot = Join-Path $tempRoot "stage"
+    $themeBundle = Join-Path $stageRoot "runtime/lib/GNUstep/Themes/NamedTheme.theme"
+    $resources = Join-Path $themeBundle "Resources"
+    $themeImages = Join-Path $resources "ThemeImages"
+    $manifestPath = $null
+
+    New-Item -ItemType Directory -Force -Path $themeImages | Out-Null
+    Set-Content -Path (Join-Path $themeBundle "NamedTheme.dll") -Value "fixture executable"
+    Set-Content -Path (Join-Path $themeImages "GSRadio.png") -Value "fixture image"
+    # As WinUITheme declares them: GNUstep image names mapped to file names in ThemeImages.
+    Set-Content -Path (Join-Path $resources "Info-gnustep.plist") -Value @"
+{
+  NSExecutable = NamedTheme;
+  GSThemeImages = {
+    GSRadio = "GSRadio.png";
+    NSRadioButton = "GSRadio.png";
+  };
+}
+"@
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest.Remove("packagedDefaults")
+        $manifest["payload"]["stageRoot"] = $stageRoot
+        $manifest["outputs"]["root"] = (Join-Path $tempRoot "dist")
+        $manifest["outputs"]["packageRoot"] = (Join-Path $tempRoot "dist\\packages")
+        $manifest["outputs"]["logRoot"] = (Join-Path $tempRoot "dist\\logs")
+        $manifest["outputs"]["tempRoot"] = (Join-Path $tempRoot "dist\\tmp")
+        $manifest["outputs"]["validationRoot"] = (Join-Path $tempRoot "dist\\validation")
+        $manifest["validation"]["packageContract"] = @{
+          requiredContent = @(
+            @{
+              kind = "bundled-theme"
+              name = "NamedTheme"
+            }
+          )
+        }
+      }
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      $contract = Invoke-GpPackageContractAssertions -Context $context -Scope stage -Backend "msi" -LogPath (Join-Path $tempRoot "named-theme-contract.log")
+      $contractText = [string]::Join("`n", @($contract.Lines))
+
+      Assert-GpTrue -Condition (-not $contract.HasIssues) -Message "Theme images named by file should be found in Resources/ThemeImages. $contractText"
+      Assert-GpMatch -Actual $contractText -Pattern "OK      theme image: GSRadio\.png" -Message "The found image should be reported."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
   It "fails required theme input validation when a Windows theme bundle is DLL-only" {
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-dll-only-" + [guid]::NewGuid().ToString("N"))
     $stageRoot = Join-Path $tempRoot "stage"
