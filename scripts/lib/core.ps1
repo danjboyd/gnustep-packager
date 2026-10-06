@@ -2395,14 +2395,17 @@ function Get-GpShellInvocation {
   throw "Unsupported shell kind: $kind"
 }
 
+# The MSYS2-style root whose shell runs packager-owned commands such as theme builds. The managed
+# gnustep-cli-new root (GP_GNUSTEP_CLI_ROOT) comes first: it carries the GNUstep toolchain, make
+# and gnustep-config. MSYS2_LOCATION is often only the bootstrap shell, without them.
 function Resolve-GpDefaultMsysRoot {
   $candidates = [System.Collections.Generic.List[string]]::new()
 
-  if (-not [string]::IsNullOrWhiteSpace($env:MSYS2_LOCATION)) {
-    $candidates.Add($env:MSYS2_LOCATION) | Out-Null
-  }
   if (-not [string]::IsNullOrWhiteSpace($env:GP_GNUSTEP_CLI_ROOT)) {
     $candidates.Add($env:GP_GNUSTEP_CLI_ROOT) | Out-Null
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:MSYS2_LOCATION)) {
+    $candidates.Add($env:MSYS2_LOCATION) | Out-Null
   }
   if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
     $candidates.Add((Join-Path $env:LOCALAPPDATA "gnustep-cli")) | Out-Null

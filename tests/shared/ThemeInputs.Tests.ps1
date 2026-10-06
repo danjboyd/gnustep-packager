@@ -492,6 +492,37 @@ Describe "Theme input contract" {
     }
   }
 
+  It "runs theme builds in the managed gnustep-cli-new MSYS2 root before the bootstrap MSYS2" {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msys-roots-" + [guid]::NewGuid().ToString("N"))
+    $bootstrapRoot = Join-Path $tempRoot "msys64"
+    $cliRoot = Join-Path $tempRoot "gnustep-cli-new"
+    $savedMsys = $env:MSYS2_LOCATION
+    $savedCli = $env:GP_GNUSTEP_CLI_ROOT
+    try {
+      foreach ($root in @($bootstrapRoot, $cliRoot)) {
+        $envExe = Join-Path $root "usr\bin\env.exe"
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $envExe) | Out-Null
+        Set-Content -Path $envExe -Value "" -Encoding ascii
+      }
+      $env:MSYS2_LOCATION = $bootstrapRoot
+      $env:GP_GNUSTEP_CLI_ROOT = $cliRoot
+
+      Assert-GpEqual -Actual (Resolve-GpDefaultMsysRoot) -Expected $cliRoot -Message "The managed gnustep-cli-new root carries make and the GNUstep toolchain, so it should run theme builds."
+
+      $invocation = Get-GpShellInvocation -ShellConfig @{ kind = "msys2-bash" } -Command "make"
+      Assert-GpEqual -Actual $invocation.FilePath -Expected (Join-Path $cliRoot "usr\bin\env.exe") -Message "msys2-bash commands without an explicit msysRoot should use the gnustep-cli-new root's shell."
+
+      Remove-Item -Recurse -Force (Join-Path $cliRoot "usr")
+      Assert-GpEqual -Actual (Resolve-GpDefaultMsysRoot) -Expected $bootstrapRoot -Message "A gnustep-cli-new root that isn't an MSYS2 root should fall back to MSYS2_LOCATION."
+    } finally {
+      $env:MSYS2_LOCATION = $savedMsys
+      $env:GP_GNUSTEP_CLI_ROOT = $savedCli
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
   It "ships the downstream GNUstep GUI template with a required default WinUITheme input" {
     $context = Get-GpManifestContext -Path $script:downstreamGuiTemplatePath
     $issues = @()
