@@ -217,6 +217,9 @@ Important fields:
 - `smoke.kind`
 - `smoke.requiredPaths`
 - `smoke.timeoutSeconds`
+- `smoke.stayAliveSeconds`: how long the packaged app must keep running
+  after a backend's smoke launch first sees it (default 5). An app that
+  throws while initialising is briefly running first.
 - `logs.retainOnSuccess`
 - `packageContract.requiredContent`
 - `packageContract.requiredPaths`

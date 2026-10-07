@@ -3462,10 +3462,16 @@ function Get-GpValidationPlan {
     }
   }
 
+  $stayAliveSeconds = 5
+  if ($validation["smoke"].ContainsKey("stayAliveSeconds") -and $null -ne $validation["smoke"]["stayAliveSeconds"]) {
+    $stayAliveSeconds = [int]$validation["smoke"]["stayAliveSeconds"]
+  }
+
   return [pscustomobject]@{
     Kind           = [string]$validation["smoke"]["kind"]
     Enabled        = [bool]$validation["smoke"]["enabled"]
     TimeoutSeconds = [int]$validation["smoke"]["timeoutSeconds"]
+    StayAliveSeconds = $stayAliveSeconds
     RetainLogs     = [bool]$validation["logs"]["retainOnSuccess"]
     RequiredPaths  = @($requiredPaths.ToArray())
   }

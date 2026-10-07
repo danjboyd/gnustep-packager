@@ -499,6 +499,10 @@
             "timeoutSeconds": {
               "type": "integer",
               "minimum": 1
+            },
+            "stayAliveSeconds": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         },

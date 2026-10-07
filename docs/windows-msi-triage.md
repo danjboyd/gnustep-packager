@@ -47,6 +47,31 @@ If diagnostics name a target under `runtime/lib/...` rather than `runtime/bin/`,
 the missing dependency is coming from a runtime-extension DLL such as a GNUstep
 bundle, theme, or plugin.
 
+### App Exits Soon After the Smoke Launch
+Symptoms:
+- `MSI smoke failed: the packaged application exited within N seconds of
+  launch (exit code ...)`
+
+The smoke launch runs the installed launcher the way a clean machine would:
+the build toolchain (MSYS2, its `clang64`/`mingw64`/`ucrt64` trees and the
+managed gnustep-cli-new root) is taken off `PATH` and `GNUSTEP_*` variables
+are unset, and the app has to keep running for `validation.smoke.stayAliveSeconds`
+(default 5). An app that starts on the build host but not here is using
+something from the toolchain that the package doesn't ship.
+
+First checks:
+- run the installed app's executable under the launcher's environment and
+  read its stderr; on Windows an uncaught Objective-C exception shows only as
+  `libc++abi: terminating due to uncaught exception of type @id`, so break on
+  `objc_exception_throw` in a debugger to read its reason
+- GNUstep's tools: gnustep-gui starts `gdnc` at launch and `make_services`
+  on a first launch, and the pasteboard needs `gpbs`. Stage them where the
+  runtime's `GNUstep.conf` tools paths point
+- gnustep-gui's shared resources (`Images`, `KeyBindings`, `ColorPickers`...)
+  and the bundled themes must sit under a library path the runtime's
+  `GNUstep.conf` names; the packager stages themes under
+  `runtime/lib/GNUstep/Themes`
+
 ### WiX Bootstrap or Build
 Symptoms:
 - `heat`, `candle`, or `light` failures

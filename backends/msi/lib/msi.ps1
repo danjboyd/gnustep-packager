@@ -1932,6 +1932,118 @@ function Get-GpMsiProcessesByExecutablePath {
   return @($matches.ToArray())
 }
 
+# The PATH the smoke launch runs with: the host's, without the build
+# toolchain (MSYS2, its CLANG64/MINGW64/UCRT64 trees, and the managed
+# gnustep-cli-new root). On a build host those directories hold GNUstep's
+# tools and DLLs, which can stand in for ones the package forgot, so an MSI
+# that cannot start on a clean machine still passed its smoke launch.
+function Get-GpMsiCleanSmokePath {
+  param(
+    [string]$Path = $env:PATH,
+    [string[]]$ToolchainRoots = @($env:GP_GNUSTEP_CLI_ROOT, $env:MSYS2_LOCATION, "C:\msys64", "C:\clang64")
+  )
+
+  $roots = @($ToolchainRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object {
+    $_.TrimEnd('\', '/').Replace('/', '\')
+  })
+  $kept = [System.Collections.Generic.List[string]]::new()
+
+  foreach ($entry in @($Path -split ';')) {
+    if ([string]::IsNullOrWhiteSpace($entry)) {
+      continue
+    }
+    $normalized = $entry.TrimEnd('\', '/').Replace('/', '\')
+    $isToolchain = $false
+    foreach ($root in $roots) {
+      if ($normalized.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or
+          $normalized.StartsWith($root + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $isToolchain = $true
+        break
+      }
+    }
+    if (-not $isToolchain -and $normalized -match '\\(clang64|mingw64|ucrt64|clangarm64)(\\|$)') {
+      $isToolchain = $true
+    }
+    if (-not $isToolchain) {
+      $kept.Add($entry) | Out-Null
+    }
+  }
+
+  return [string]::Join(';', $kept.ToArray())
+}
+
+# Seen once isn't started: an app that throws while it initialises (a missing
+# GNUstep tool, theme or resource) is briefly running first. Fails unless at
+# least one of `Processes` is still running after `Seconds`.
+function Wait-GpMsiSmokeAppAlive {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Diagnostics.Process[]]$Processes,
+    [Parameter(Mandatory = $true)]
+    [int]$Seconds,
+    [Parameter(Mandatory = $true)]
+    [string]$AppPath
+  )
+
+  foreach ($process in $Processes) {
+    try {
+      $null = $process.Handle
+    } catch {
+    }
+  }
+
+  $deadline = (Get-Date).AddSeconds([Math]::Max($Seconds, 0))
+  do {
+    $running = @($Processes | Where-Object { $_.Refresh(); -not $_.HasExited })
+    if ($running.Count -eq 0) {
+      $exitCodes = @($Processes | ForEach-Object {
+        try { "0x{0:X8}" -f $_.ExitCode } catch { "unknown" }
+      })
+      throw ("MSI smoke failed: the packaged application exited within {0} seconds of launch (exit code {1}): {2}. A clean machine has no build toolchain to fall back on; check the staged runtime for missing GNUstep tools, themes and resources. See {3}." -f
+        $Seconds, ([string]::Join(", ", $exitCodes)), $AppPath, (Get-GpMsiDiagnosticsDocPath))
+    }
+    Start-Sleep -Milliseconds 250
+  } while ((Get-Date) -lt $deadline)
+}
+
+# Starts the installed launcher as a clean machine would: the toolchain off
+# PATH and no GNUSTEP_* variables, so the packaged runtime has to stand on
+# its own. The host's environment is restored afterwards.
+function Start-GpMsiSmokeLauncher {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath,
+    [Parameter(Mandatory = $true)]
+    [string]$WorkingDirectory,
+    [string[]]$ArgumentList = @(),
+    [string]$LogPath
+  )
+
+  $savedPath = $env:PATH
+  $savedGnustep = @(Get-ChildItem Env: | Where-Object { $_.Name -like "GNUSTEP_*" } | ForEach-Object {
+    [pscustomobject]@{ Name = $_.Name; Value = $_.Value }
+  })
+
+  try {
+    $env:PATH = Get-GpMsiCleanSmokePath -Path $savedPath
+    foreach ($variable in $savedGnustep) {
+      Remove-Item -Path ("Env:" + $variable.Name) -ErrorAction SilentlyContinue
+    }
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+      Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke launch PATH (toolchain removed): {0}" -f $env:PATH)
+      if ($savedGnustep.Count -gt 0) {
+        Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke launch unset: {0}" -f ([string]::Join(", ", @($savedGnustep | ForEach-Object { $_.Name }))))
+      }
+    }
+    return Start-Process $LauncherPath -ArgumentList $ArgumentList -PassThru -WorkingDirectory $WorkingDirectory
+  } finally {
+    $env:PATH = $savedPath
+    foreach ($variable in $savedGnustep) {
+      Set-Item -Path ("Env:" + $variable.Name) -Value $variable.Value
+    }
+  }
+}
+
 function Get-GpMsiInstalledRuntimeAuditFailureMessage {
   param(
     [Parameter(Mandatory = $true)]
@@ -2063,7 +2175,7 @@ function Invoke-GpMsiValidation {
     $childProcesses = @()
     Set-Content -Path $smokeArgument -Value "gnustep-packager smoke"
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Running MSI smoke launch: {0}" -f $launcherPath)
-    $proc = Start-Process $launcherPath -ArgumentList @($smokeArgument) -PassThru -WorkingDirectory $installPath
+    $proc = Start-GpMsiSmokeLauncher -LauncherPath $launcherPath -WorkingDirectory $installPath -ArgumentList @($smokeArgument) -LogPath $LogPath
 
     do {
       Start-Sleep -Milliseconds 500
@@ -2091,6 +2203,10 @@ function Invoke-GpMsiValidation {
     }
 
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke child process count: {0}" -f $childProcesses.Count)
+
+    Wait-GpMsiSmokeAppAlive -Processes $childProcesses -Seconds $validationPlan.StayAliveSeconds -AppPath $appPath
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke: the packaged application was still running after {0} seconds" -f $validationPlan.StayAliveSeconds)
+
     foreach ($child in $childProcesses) {
       try {
         $child | Stop-Process -Force
