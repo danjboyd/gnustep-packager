@@ -280,14 +280,14 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
     [execution setObject:executablePath forKey:@"relaunchExecutablePath"];
   }
 
-  NSMutableDictionary *linux = [NSMutableDictionary dictionary];
+  NSMutableDictionary *linuxInfo = [NSMutableDictionary dictionary];
   NSDictionary *environment = [[NSProcessInfo processInfo] environment];
   NSString *appImagePath = GPUpdaterUIStringValue([environment objectForKey:@"APPIMAGE"]);
   if ([appImagePath length] > 0) {
-    [linux setObject:appImagePath forKey:@"currentAppImagePath"];
+    [linuxInfo setObject:appImagePath forKey:@"currentAppImagePath"];
   }
-  if ([linux count] > 0) {
-    [execution setObject:linux forKey:@"linux"];
+  if ([linuxInfo count] > 0) {
+    [execution setObject:linuxInfo forKey:@"linux"];
   }
 
   NSMutableDictionary *plan = [NSMutableDictionary dictionary];
@@ -432,13 +432,26 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
   }
 
   NSMutableArray *arguments = [NSMutableArray arrayWithObjects:@"--mode", mode, @"--plan", _activePlanPath, @"--state-file", _activeStatePath, nil];
+  NSString *pidString = [NSString stringWithFormat:@"%d", [[NSProcessInfo processInfo] processIdentifier]];
+  NSString *launchPath = helperPath;
   if ([mode isEqualToString:GPUpdaterHelperModeApply]) {
     [arguments addObject:@"--wait-pid"];
-    [arguments addObject:[NSString stringWithFormat:@"%d", [[NSProcessInfo processInfo] processIdentifier]]];
+    [arguments addObject:pidString];
+
+    // An AppImage update is applied by the script the helper prepared,
+    // with the system's shell: the helper is inside the AppImage, whose
+    // mount goes when the app quits.
+    NSDictionary *apply = GPUpdaterUIDictionaryValue([[self _loadHelperState] objectForKey:@"apply"]);
+    NSString *scriptPath = GPUpdaterUIStringValue([apply objectForKey:@"script"]);
+    if ([scriptPath length] > 0 && [[NSFileManager defaultManager] fileExistsAtPath:scriptPath] &&
+        [[NSFileManager defaultManager] isExecutableFileAtPath:@"/bin/sh"]) {
+      launchPath = @"/bin/sh";
+      arguments = [NSMutableArray arrayWithObjects:scriptPath, pidString, nil];
+    }
   }
 
   @try {
-    [NSTask launchedTaskWithLaunchPath:helperPath arguments:arguments];
+    [NSTask launchedTaskWithLaunchPath:launchPath arguments:arguments];
   } @catch (NSException *exception) {
     NSDictionary *userInfo = [NSDictionary dictionaryWithObject:[exception reason] forKey:NSLocalizedDescriptionKey];
     NSError *error = [NSError errorWithDomain:@"GPUpdaterUIErrorDomain" code:3 userInfo:userInfo];

@@ -420,6 +420,18 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
 }
 
 + (instancetype)packagedConfigurationWithError:(NSError **)error {
+  // Inside a Flatpak the app's files are Flatpak's to update, through the
+  // remote it was installed from; the updater stays off even if a packaged
+  // configuration was shipped by mistake.
+  NSDictionary *environment = [[NSProcessInfo processInfo] environment];
+  if ([[environment objectForKey:@"FLATPAK_ID"] length] > 0 ||
+      [[NSFileManager defaultManager] fileExistsAtPath:@"/.flatpak-info"]) {
+    if (error != NULL) {
+      *error = GPMakeUpdaterError(GPUpdaterErrorConfigurationNotFound, @"Updates for this copy come through Flatpak.");
+    }
+    return nil;
+  }
+
   NSBundle *mainBundle = [NSBundle mainBundle];
   NSString *executablePath = [mainBundle executablePath];
   if ([executablePath length] == 0) {

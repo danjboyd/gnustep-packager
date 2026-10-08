@@ -383,6 +383,93 @@ static BOOL GPHelperLaunchProcess(NSString *launchPath, NSArray *arguments) {
   return YES;
 }
 
+#if !defined(_WIN32)
+// A single-quoted shell word.
+static NSString *GPHelperShellQuote(NSString *value) {
+  NSString *escaped = [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+  return [NSString stringWithFormat:@"'%@'", escaped];
+}
+
+// The script that applies an AppImage update once the app has quit, run
+// with the system's /bin/sh. The helper and its libraries are inside the
+// AppImage, whose mount goes when the app quits, so applying can't rely on
+// anything there. The script waits for the app (giving up after two
+// minutes, when quitting was cancelled), then either swaps the downloaded
+// AppImage in (appimage-replace) or has appimageupdatetool overwrite the
+// current one (appimage-update), and starts the AppImage at its path again.
+static NSString *GPHelperWriteAppImageApplyScript(NSString *workingRoot,
+                                                  NSString *mode,
+                                                  NSString *currentAppImagePath,
+                                                  NSString *downloadedPath,
+                                                  NSString *toolPath,
+                                                  NSString *statePath) {
+  NSMutableString *script = [NSMutableString string];
+  [script appendString:@"#!/bin/sh\n"
+    "# Written by gp-update-helper; run as: sh apply-appimage.sh <app pid>\n"
+    "unset LD_LIBRARY_PATH LD_PRELOAD APPDIR APPIMAGE ARGV0 OWD GNUSTEP_PATHPREFIX_LIST\n"];
+  [script appendFormat:@"current=%@\n", GPHelperShellQuote(currentAppImagePath)];
+  [script appendFormat:@"downloaded=%@\n", GPHelperShellQuote(downloadedPath != nil ? downloadedPath : @"")];
+  [script appendFormat:@"tool=%@\n", GPHelperShellQuote(toolPath != nil ? toolPath : @"")];
+  [script appendFormat:@"state=%@\n", GPHelperShellQuote(statePath)];
+  [script appendFormat:@"mode=%@\n", GPHelperShellQuote(mode)];
+  [script appendString:
+    @"exec >>\"${state%/*}/apply-appimage.log\" 2>&1\n"
+    "state() {\n"
+    "  printf '{\"formatVersion\": 1, \"status\": \"%s\", \"message\": \"%s\"}\\n' \"$1\" \"$2\" >\"$state.tmp\" && mv \"$state.tmp\" \"$state\"\n"
+    "}\n"
+    "pid=\"$1\"\n"
+    "waited=0\n"
+    "while [ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null; do\n"
+    "  if [ \"$waited\" -ge 240 ]; then\n"
+    "    state readyToApply 'The app did not quit, so the update was not applied.'\n"
+    "    exit 1\n"
+    "  fi\n"
+    "  sleep 0.5\n"
+    "  waited=$((waited + 1))\n"
+    "done\n"
+    "state applying 'Applying update...'\n"
+    "if [ \"$mode\" = appimage-update ]; then\n"
+    "  if ! \"$tool\" -O \"$current\"; then\n"
+    "    state failed 'appimageupdatetool could not update the AppImage.'\n"
+    "    exit 1\n"
+    "  fi\n"
+    "else\n"
+    "  # Copied next to the current file first, so the swap is a rename\n"
+    "  # within one directory.\n"
+    "  new=\"$current.gpupdate-new\"\n"
+    "  backup=\"$current.gpupdate-backup\"\n"
+    "  rm -f \"$new\" \"$backup\"\n"
+    "  if ! cp \"$downloaded\" \"$new\" || ! chmod +x \"$new\"; then\n"
+    "    rm -f \"$new\"\n"
+    "    state failed 'The new AppImage could not be copied next to the current one.'\n"
+    "    exit 1\n"
+    "  fi\n"
+    "  if ! mv \"$current\" \"$backup\"; then\n"
+    "    rm -f \"$new\"\n"
+    "    state failed 'The current AppImage could not be replaced.'\n"
+    "    exit 1\n"
+    "  fi\n"
+    "  if ! mv \"$new\" \"$current\"; then\n"
+    "    mv \"$backup\" \"$current\"\n"
+    "    rm -f \"$new\"\n"
+    "    state failed 'The current AppImage could not be replaced.'\n"
+    "    exit 1\n"
+    "  fi\n"
+    "  rm -f \"$backup\" \"$downloaded\"\n"
+    "fi\n"
+    "state completed 'The AppImage update was applied.'\n"
+    "nohup \"$current\" >/dev/null 2>&1 </dev/null &\n"
+    "exit 0\n"];
+
+  NSString *scriptPath = [workingRoot stringByAppendingPathComponent:@"apply-appimage.sh"];
+  [[NSFileManager defaultManager] createDirectoryAtPath:workingRoot withIntermediateDirectories:YES attributes:nil error:NULL];
+  if (![[script dataUsingEncoding:NSUTF8StringEncoding] writeToFile:scriptPath atomically:YES]) {
+    return nil;
+  }
+  return scriptPath;
+}
+#endif
+
 static NSDictionary *GPHelperLoadApplyState(NSString *statePath, NSError **error) {
   NSDictionary *state = GPHelperLoadJSONFile(statePath, error);
   if (state == nil) {
@@ -403,27 +490,37 @@ static NSDictionary *GPHelperLoadApplyState(NSString *statePath, NSError **error
 static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun) {
   NSDictionary *asset = GPHelperDictionaryValue([plan objectForKey:@"asset"]);
   NSDictionary *execution = GPHelperDictionaryValue([plan objectForKey:@"execution"]);
-  NSDictionary *linux = GPHelperDictionaryValue([execution objectForKey:@"linux"]);
+  NSDictionary *linuxInfo = GPHelperDictionaryValue([execution objectForKey:@"linux"]);
   NSString *backend = GPHelperStringValue([asset objectForKey:@"backend"]);
   NSString *assetName = GPHelperStringValue([asset objectForKey:@"name"]);
   NSString *assetURLString = GPHelperStringValue([asset objectForKey:@"url"]);
   NSString *sha256 = GPHelperStringValue([asset objectForKey:@"sha256"]);
   NSString *workingRoot = GPHelperStringValue([execution objectForKey:@"workingRoot"]);
-  NSString *currentAppImagePath = GPHelperStringValue([linux objectForKey:@"currentAppImagePath"]);
+  NSString *currentAppImagePath = GPHelperStringValue([linuxInfo objectForKey:@"currentAppImagePath"]);
   NSString *downloadRoot = [workingRoot stringByAppendingPathComponent:@"downloads"];
   NSString *downloadedPath = [downloadRoot stringByAppendingPathComponent:assetName];
 
   GPHelperUpdateState(statePath, GPHelperStatusPreparing, @"Preparing update...", nil, nil, nil, nil);
 
   if ([backend isEqualToString:@"appimage"]) {
-    NSString *appImageUpdatePath = GPHelperFindExecutable([NSArray arrayWithObjects:@"AppImageUpdate", @"appimageupdatetool", nil]);
-    if ([appImageUpdatePath length] > 0 && [currentAppImagePath length] > 0) {
-      NSDictionary *apply = [NSDictionary dictionaryWithObjectsAndKeys:
+    // appimageupdatetool, not the AppImageUpdate GUI: run with -O it
+    // overwrites the current AppImage, so starting it again starts the
+    // new version.
+    NSString *appImageUpdatePath = GPHelperFindExecutable([NSArray arrayWithObjects:@"appimageupdatetool", nil]);
+    if ([appImageUpdatePath length] > 0 && [currentAppImagePath length] > 0 &&
+        [[NSFileManager defaultManager] isWritableFileAtPath:[currentAppImagePath stringByDeletingLastPathComponent]]) {
+      NSMutableDictionary *apply = [NSMutableDictionary dictionaryWithObjectsAndKeys:
         @"appimage-update", @"mode",
         appImageUpdatePath, @"toolPath",
         currentAppImagePath, @"currentAppImagePath",
         nil
       ];
+#if !defined(_WIN32)
+      NSString *scriptPath = GPHelperWriteAppImageApplyScript(workingRoot, @"appimage-update", currentAppImagePath, nil, appImageUpdatePath, statePath);
+      if ([scriptPath length] > 0) {
+        [apply setObject:scriptPath forKey:@"script"];
+      }
+#endif
       GPHelperUpdateState(statePath, GPHelperStatusReadyToApply, @"Restart to let AppImageUpdate apply the new version.", nil, apply, nil, nil);
       return 0;
     }
@@ -431,7 +528,7 @@ static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun)
 
   if (dryRun) {
     NSString *applyMode = [backend isEqualToString:@"msi"] ? @"msi-install" : @"appimage-replace";
-    if ([backend isEqualToString:@"appimage"] && ![[NSFileManager defaultManager] isWritableFileAtPath:currentAppImagePath]) {
+    if ([backend isEqualToString:@"appimage"] && ![[NSFileManager defaultManager] isWritableFileAtPath:[currentAppImagePath stringByDeletingLastPathComponent]]) {
       applyMode = @"manual-download";
     }
 
@@ -472,7 +569,9 @@ static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun)
   if ([backend isEqualToString:@"appimage"]) {
     GPHelperSetExecutable(downloadedPath);
 
-    if ([currentAppImagePath length] == 0 || ![[NSFileManager defaultManager] isWritableFileAtPath:currentAppImagePath]) {
+    // Replacing the AppImage renames files in its directory.
+    if ([currentAppImagePath length] == 0 ||
+        ![[NSFileManager defaultManager] isWritableFileAtPath:[currentAppImagePath stringByDeletingLastPathComponent]]) {
       NSDictionary *apply = [NSDictionary dictionaryWithObjectsAndKeys:
         @"manual-download", @"mode",
         nil
@@ -487,11 +586,17 @@ static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun)
       return 0;
     }
 
-    NSDictionary *apply = [NSDictionary dictionaryWithObjectsAndKeys:
+    NSMutableDictionary *apply = [NSMutableDictionary dictionaryWithObjectsAndKeys:
       @"appimage-replace", @"mode",
       currentAppImagePath, @"currentAppImagePath",
       nil
     ];
+#if !defined(_WIN32)
+    NSString *scriptPath = GPHelperWriteAppImageApplyScript(workingRoot, @"appimage-replace", currentAppImagePath, downloadedPath, nil, statePath);
+    if ([scriptPath length] > 0) {
+      [apply setObject:scriptPath forKey:@"script"];
+    }
+#endif
     GPHelperUpdateState(statePath, GPHelperStatusReadyToApply, @"Restart to finish applying the new AppImage.", nil, apply, downloadedPath, nil);
     return 0;
   }
@@ -578,7 +683,7 @@ static int GPHelperApply(NSDictionary *plan, NSString *statePath, NSInteger wait
 
   if ([mode isEqualToString:@"appimage-replace"]) {
     NSString *currentAppImagePath = GPHelperStringValue([apply objectForKey:@"currentAppImagePath"]);
-    if (![GPHelperReplaceFile(downloadedPath, currentAppImagePath, &error)]) {
+    if (!GPHelperReplaceFile(downloadedPath, currentAppImagePath, &error)) {
       NSDictionary *errorDictionary = [NSDictionary dictionaryWithObjectsAndKeys:
         [error localizedDescription], @"message",
         nil
