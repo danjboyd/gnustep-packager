@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import "monocypher/monocypher-ed25519.h"
 
 #if defined(_WIN32)
 #import <windows.h>
@@ -314,6 +315,54 @@ static BOOL GPHelperVerifySHA256(NSString *path, NSString *expectedSHA256, NSErr
   return YES;
 }
 
+static NSData *GPHelperBase64Data(NSString *value) {
+  if ([value length] == 0) {
+    return nil;
+  }
+  return [[[NSData alloc] initWithBase64EncodedString:value
+                                              options:NSDataBase64DecodingIgnoreUnknownCharacters] autorelease];
+}
+
+// Checks the Ed25519 signature (base64, over the file's bytes, as
+// Sparkle's sign_update makes) against the public key (base64, 32 bytes).
+static BOOL GPHelperVerifyEdSignature(NSString *path, NSString *signature, NSString *publicKey, NSError **error) {
+  NSData *keyData = GPHelperBase64Data(publicKey);
+  if ([keyData length] != 32) {
+    if (error != NULL) {
+      *error = GPHelperSimpleError(10, @"The app's update signing key is not valid.");
+    }
+    return NO;
+  }
+
+  NSData *signatureData = GPHelperBase64Data(signature);
+  if ([signatureData length] != 64) {
+    if (error != NULL) {
+      *error = GPHelperSimpleError(11, [signature length] == 0 ? @"The update is not signed." : @"The update's signature is not valid.");
+    }
+    return NO;
+  }
+
+  NSData *fileData = [NSData dataWithContentsOfMappedFile:path];
+  if (fileData == nil) {
+    if (error != NULL) {
+      *error = GPHelperSimpleError(12, @"The downloaded file could not be read to check its signature.");
+    }
+    return NO;
+  }
+
+  if (crypto_ed25519_check((const uint8_t *)[signatureData bytes],
+                           (const uint8_t *)[keyData bytes],
+                           (const uint8_t *)[fileData bytes],
+                           (size_t)[fileData length]) != 0) {
+    if (error != NULL) {
+      *error = GPHelperSimpleError(13, @"The downloaded file's signature does not match: it was not signed by the app's publisher, or it was changed.");
+    }
+    return NO;
+  }
+
+  return YES;
+}
+
 static BOOL GPHelperSetExecutable(NSString *path) {
 #if defined(_WIN32)
   (void)path;
@@ -489,12 +538,17 @@ static NSDictionary *GPHelperLoadApplyState(NSString *statePath, NSError **error
 
 static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun) {
   NSDictionary *asset = GPHelperDictionaryValue([plan objectForKey:@"asset"]);
+  NSDictionary *package = GPHelperDictionaryValue([plan objectForKey:@"package"]);
   NSDictionary *execution = GPHelperDictionaryValue([plan objectForKey:@"execution"]);
   NSDictionary *linuxInfo = GPHelperDictionaryValue([execution objectForKey:@"linux"]);
   NSString *backend = GPHelperStringValue([asset objectForKey:@"backend"]);
   NSString *assetName = GPHelperStringValue([asset objectForKey:@"name"]);
   NSString *assetURLString = GPHelperStringValue([asset objectForKey:@"url"]);
   NSString *sha256 = GPHelperStringValue([asset objectForKey:@"sha256"]);
+  // With a public key, every payload must carry a valid signature; without
+  // one (configs from before signing) the SHA-256 alone is checked.
+  NSString *publicEDKey = GPHelperStringValue([package objectForKey:@"publicEDKey"]);
+  NSString *edSignature = GPHelperStringValue([asset objectForKey:@"edSignature"]);
   NSString *workingRoot = GPHelperStringValue([execution objectForKey:@"workingRoot"]);
   NSString *currentAppImagePath = GPHelperStringValue([linuxInfo objectForKey:@"currentAppImagePath"]);
   NSString *downloadRoot = [workingRoot stringByAppendingPathComponent:@"downloads"];
@@ -502,7 +556,9 @@ static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun)
 
   GPHelperUpdateState(statePath, GPHelperStatusPreparing, @"Preparing update...", nil, nil, nil, nil);
 
-  if ([backend isEqualToString:@"appimage"]) {
+  // appimageupdatetool checks only the .zsync file's hashes, so with a
+  // signing key the helper downloads and checks the AppImage itself.
+  if ([backend isEqualToString:@"appimage"] && [publicEDKey length] == 0) {
     // appimageupdatetool, not the AppImageUpdate GUI: run with -O it
     // overwrites the current AppImage, so starting it again starts the
     // new version.
@@ -563,6 +619,16 @@ static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun)
       nil
     ];
     GPHelperUpdateState(statePath, GPHelperStatusFailed, @"Downloaded update failed verification.", nil, nil, downloadedPath, errorDictionary);
+    return 1;
+  }
+
+  if ([publicEDKey length] > 0 && !GPHelperVerifyEdSignature(downloadedPath, edSignature, publicEDKey, &error)) {
+    [[NSFileManager defaultManager] removeItemAtPath:downloadedPath error:NULL];
+    NSDictionary *errorDictionary = [NSDictionary dictionaryWithObjectsAndKeys:
+      [error localizedDescription], @"message",
+      nil
+    ];
+    GPHelperUpdateState(statePath, GPHelperStatusFailed, @"Downloaded update failed verification.", nil, nil, nil, errorDictionary);
     return 1;
   }
 

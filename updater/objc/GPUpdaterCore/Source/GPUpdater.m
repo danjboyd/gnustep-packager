@@ -23,6 +23,7 @@ typedef NS_ENUM(NSInteger, GPUpdaterErrorCode) {
 @property (nonatomic, readwrite, copy) NSString *installerVersion;
 @property (nonatomic, readwrite, copy) NSString *updateInformation;
 @property (nonatomic, readwrite, retain) NSURL *zsyncURL;
+@property (nonatomic, readwrite, copy) NSString *edSignature;
 @end
 
 @interface GPUpdateRelease ()
@@ -50,6 +51,7 @@ typedef NS_ENUM(NSInteger, GPUpdaterErrorCode) {
 @property (nonatomic, readwrite, retain) NSURL *feedURL;
 @property (nonatomic, readwrite) NSTimeInterval minimumCheckInterval;
 @property (nonatomic, readwrite) NSTimeInterval startupDelay;
+@property (nonatomic, readwrite, copy) NSString *publicEDKey;
 @end
 
 @interface GPUpdaterDefaultsStore : NSObject {
@@ -232,6 +234,7 @@ static GPUpdateAsset *GPUpdateAssetFromDictionary(NSDictionary *dictionary) {
   asset.installScope = GPStringValue([dictionary objectForKey:@"installScope"]);
   asset.installerVersion = GPStringValue([dictionary objectForKey:@"msiVersion"]);
   asset.updateInformation = GPStringValue([dictionary objectForKey:@"updateInformation"]);
+  asset.edSignature = GPStringValue([dictionary objectForKey:@"edSignature"]);
 
   NSNumber *sizeValue = GPNumberValue([dictionary objectForKey:@"sizeBytes"]);
   asset.sizeBytes = sizeValue != nil ? [sizeValue unsignedLongLongValue] : 0ULL;
@@ -290,6 +293,7 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
 @synthesize installerVersion = _installerVersion;
 @synthesize updateInformation = _updateInformation;
 @synthesize zsyncURL = _zsyncURL;
+@synthesize edSignature = _edSignature;
 
 - (void)dealloc {
   [_backend release];
@@ -302,6 +306,7 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
   [_installerVersion release];
   [_updateInformation release];
   [_zsyncURL release];
+  [_edSignature release];
   [super dealloc];
 }
 
@@ -357,6 +362,7 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
 @synthesize feedURL = _feedURL;
 @synthesize minimumCheckInterval = _minimumCheckInterval;
 @synthesize startupDelay = _startupDelay;
+@synthesize publicEDKey = _publicEDKey;
 
 + (instancetype)configurationWithContentsOfFile:(NSString *)path error:(NSError **)error {
   NSData *data = [NSData dataWithContentsOfFile:path];
@@ -416,6 +422,8 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
   configuration.feedURL = feedURL;
   configuration.minimumCheckInterval = (minimumHours != nil ? [minimumHours doubleValue] : 24.0) * 3600.0;
   configuration.startupDelay = startupDelay != nil ? [startupDelay doubleValue] : 15.0;
+  NSString *publicEDKey = GPStringValue([updates objectForKey:@"publicEDKey"]);
+  configuration.publicEDKey = [publicEDKey length] > 0 ? publicEDKey : nil;
   return configuration;
 }
 
@@ -484,6 +492,7 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
   [_backend release];
   [_channel release];
   [_feedURL release];
+  [_publicEDKey release];
   [super dealloc];
 }
 

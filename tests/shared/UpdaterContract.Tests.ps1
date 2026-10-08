@@ -110,6 +110,7 @@ Describe "Updater contract" {
         channel = "beta"
         minimumCheckIntervalHours = 6
         startupDelaySeconds = 3
+        publicEDKey = "zhJy7ojERZsU55cvzuifdKiIIR2u3KeSp5M8GRFJrhM="
         github = @{
           owner = "example-org"
           repo = "sample-gnustep-linux-app"
@@ -134,12 +135,39 @@ Describe "Updater contract" {
       Assert-GpEqual -Actual $config["updates"]["channel"] -Expected "beta" -Message "The runtime config should preserve the configured channel."
       Assert-GpEqual -Actual $config["updates"]["feedUrl"] -Expected "https://example.invalid/updates/linux/beta.json" -Message "The runtime config should expose the resolved feed URL."
       Assert-GpEqual -Actual $config["updates"]["github"]["tag"] -Expected "v0.1.0" -Message "The runtime config should preserve the resolved release tag."
+      Assert-GpEqual -Actual $config["updates"]["publicEDKey"] -Expected "zhJy7ojERZsU55cvzuifdKiIIR2u3KeSp5M8GRFJrhM=" -Message "The runtime config should carry the update signing public key."
     } finally {
       if (Test-Path $manifestPath) {
         Remove-Item -Force $manifestPath
       }
       if (Test-Path $tempRoot) {
         Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
+  It "rejects an update signing key that is not a 32-byte base64 Ed25519 key" {
+    $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:linuxManifestPath -Customize {
+      param($manifest)
+      $manifest["updates"] = @{
+        enabled = $true
+        provider = "github-release-feed"
+        publicEDKey = "bm90LWEta2V5"
+        github = @{
+          owner = "example-org"
+          repo = "sample-gnustep-linux-app"
+          tagPattern = "v{version}"
+        }
+      }
+    }
+
+    try {
+      $context = Get-GpManifestContext -Path $manifestPath
+      $issues = @(Test-GpManifest -Manifest $context.Manifest)
+      Assert-GpTrue -Condition (@($issues | Where-Object { $_ -like "*publicEDKey*" }).Count -eq 1) -Message "A malformed updates.publicEDKey should be reported."
+    } finally {
+      if (Test-Path $manifestPath) {
+        Remove-Item -Force $manifestPath
       }
     }
   }

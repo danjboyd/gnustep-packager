@@ -230,6 +230,9 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
   [package setObject:[configuration currentVersion] forKey:@"currentVersion"];
   [package setObject:[configuration backend] forKey:@"backend"];
   [package setObject:[configuration channel] forKey:@"channel"];
+  if ([configuration publicEDKey] != nil) {
+    [package setObject:[configuration publicEDKey] forKey:@"publicEDKey"];
+  }
 
   NSMutableDictionary *release = [NSMutableDictionary dictionary];
   [release setObject:[result latestVersion] forKey:@"version"];
@@ -261,6 +264,9 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
   }
   if ([asset updateInformation] != nil) {
     [assetDictionary setObject:[asset updateInformation] forKey:@"updateInformation"];
+  }
+  if ([asset edSignature] != nil) {
+    [assetDictionary setObject:[asset edSignature] forKey:@"edSignature"];
   }
   if ([asset zsyncURL] != nil) {
     NSDictionary *zsync = [NSDictionary dictionaryWithObject:[[asset zsyncURL] absoluteString] forKey:@"url"];
