@@ -30,6 +30,9 @@ typedef NS_ENUM(NSInteger, GPUpdateCheckStatus) {
 @property (nonatomic, readonly, copy) NSString *installerVersion;
 @property (nonatomic, readonly, copy) NSString *updateInformation;
 @property (nonatomic, readonly, retain) NSURL *zsyncURL;
+// The Ed25519 signature of the asset's bytes, base64 (the feed's
+// "edSignature").
+@property (nonatomic, readonly, copy) NSString *edSignature;
 @end
 
 @interface GPUpdateRelease : NSObject
@@ -58,6 +61,10 @@ typedef NS_ENUM(NSInteger, GPUpdateCheckStatus) {
 @property (nonatomic, readonly, retain) NSURL *feedURL;
 @property (nonatomic, readonly) NSTimeInterval minimumCheckInterval;
 @property (nonatomic, readonly) NSTimeInterval startupDelay;
+// The Ed25519 public key update payloads must be signed with, base64
+// ("updates.publicEDKey"). When set, an asset without a valid signature
+// is refused.
+@property (nonatomic, readonly, copy) NSString *publicEDKey;
 + (instancetype)configurationWithContentsOfFile:(NSString *)path error:(NSError **)error;
 + (instancetype)configurationWithDictionary:(NSDictionary *)dictionary error:(NSError **)error;
 + (instancetype)packagedConfigurationWithError:(NSError **)error;

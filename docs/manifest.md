@@ -264,6 +264,8 @@ Important fields:
 - `feedUrl`
 - `minimumCheckIntervalHours`
 - `startupDelaySeconds`
+- `publicEDKey` (base64 Ed25519 public key; update payloads must then be
+  signed, see [update-feed-contract.md](update-feed-contract.md))
 - `github.owner`
 - `github.repo`
 - `github.tagPattern`

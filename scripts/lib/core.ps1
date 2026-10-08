@@ -1519,6 +1519,16 @@ function Test-GpManifest {
         Add-Issue "updates.startupDelaySeconds must be an integer greater than or equal to 0."
       }
 
+      if ($updates.Contains("publicEDKey") -and ($updates["publicEDKey"] -ne $null)) {
+        $publicKeyBytes = $null
+        if ($updates["publicEDKey"] -is [string]) {
+          try { $publicKeyBytes = [Convert]::FromBase64String([string]$updates["publicEDKey"]) } catch { $publicKeyBytes = $null }
+        }
+        if ($null -eq $publicKeyBytes -or $publicKeyBytes.Length -ne 32) {
+          Add-Issue "updates.publicEDKey must be a base64 Ed25519 public key (32 bytes) when present."
+        }
+      }
+
       if ($updates.Contains("github")) {
         if (-not ($updates["github"] -is [System.Collections.IDictionary])) {
           Add-Issue "updates.github must be an object when present."
@@ -2021,6 +2031,7 @@ function Get-GpUpdateSettings {
     FeedUrl = $feedUrl
     MinimumCheckIntervalHours = $(if ($updates.Contains("minimumCheckIntervalHours")) { [int]$updates["minimumCheckIntervalHours"] } else { 24 })
     StartupDelaySeconds = $(if ($updates.Contains("startupDelaySeconds")) { [int]$updates["startupDelaySeconds"] } else { 15 })
+    PublicEDKey = $(if ($updates.Contains("publicEDKey") -and -not [string]::IsNullOrWhiteSpace([string]$updates["publicEDKey"])) { [string]$updates["publicEDKey"] } else { $null })
     Backend = $Backend
     Platform = Get-GpUpdatePlatform -Backend $Backend
     RuntimeConfigRelativePath = Get-GpUpdateRuntimeConfigRelativePath -MetadataRootRelative ([string]$payload["metadataRoot"])
@@ -2093,6 +2104,7 @@ function Write-GpUpdateRuntimeConfig {
       feedUrl = $settings.FeedUrl
       minimumCheckIntervalHours = [int]$settings.MinimumCheckIntervalHours
       startupDelaySeconds = [int]$settings.StartupDelaySeconds
+      publicEDKey = $settings.PublicEDKey
       releaseNotesUrl = $settings.GitHub.ReleaseNotesUrl
       github = [ordered]@{
         owner = $settings.GitHub.Owner

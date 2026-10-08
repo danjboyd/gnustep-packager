@@ -650,6 +650,10 @@
           "type": "integer",
           "minimum": 0
         },
+        "publicEDKey": {
+          "type": ["string", "null"],
+          "description": "Base64 Ed25519 public key (32 bytes). When set, the updater refuses any payload without a valid edSignature in the feed."
+        },
         "github": {
           "type": "object",
           "additionalProperties": false,

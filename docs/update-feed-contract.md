@@ -25,6 +25,11 @@ release titles.
   Minimum time between automatic checks
 - `updates.startupDelaySeconds`
   Delay before a startup-triggered automatic check
+- `updates.publicEDKey`
+  Optional base64 Ed25519 public key (32 bytes). Copied into the runtime
+  config; when set, the helper refuses any payload whose feed asset lacks a
+  valid `edSignature`. A Sparkle key pair works as is (Sparkle's
+  `SUPublicEDKey`)
 - `updates.github.owner`
 - `updates.github.repo`
 - `updates.github.tagPattern`
@@ -166,6 +171,13 @@ Current format:
   ]
 }
 ```
+
+Signed feeds add `edSignature` to each asset: the base64 Ed25519 signature
+of the asset file's bytes, made with the private half of `updates.publicEDKey`
+(Sparkle's `sign_update` makes the same signature). gnustep-packager doesn't
+sign: the downstream release job adds it before publishing the feed, so the
+private key stays a secret of that job. Without a public key in the runtime
+config the helper checks `sha256` only.
 
 AppImage feeds add AppImage-native fields:
 

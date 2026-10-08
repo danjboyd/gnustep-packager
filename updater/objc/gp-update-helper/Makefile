@@ -9,7 +9,8 @@ BASE_LIBS := $(shell $(GNUSTEP_CONFIG) --base-libs)
 CORE_INCLUDE_DIR := ../GPUpdaterCore/Headers
 TARGET := gp-update-helper
 SOURCES := Source/main.m
-OBJECTS := $(SOURCES:.m=.o)
+C_SOURCES := Source/monocypher/monocypher.c Source/monocypher/monocypher-ed25519.c
+OBJECTS := $(SOURCES:.m=.o) $(C_SOURCES:.c=.o)
 
 .PHONY: all clean
 
@@ -20,6 +21,9 @@ $(TARGET): $(OBJECTS) ../GPUpdaterCore/libGPUpdaterCore.a
 
 Source/main.o: Source/main.m ../GPUpdaterCore/Headers/GPUpdater.h
 	clang $(OBJCFLAGS) -I$(CORE_INCLUDE_DIR) -c $< -o $@
+
+Source/monocypher/%.o: Source/monocypher/%.c Source/monocypher/monocypher.h Source/monocypher/monocypher-ed25519.h
+	clang -O2 -c $< -o $@
 
 ../GPUpdaterCore/libGPUpdaterCore.a:
 	$(MAKE) -C ../GPUpdaterCore
