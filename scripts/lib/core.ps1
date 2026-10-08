@@ -2075,7 +2075,10 @@ function Write-GpUpdateRuntimeConfig {
     [Parameter(Mandatory = $true)]
     [string]$Backend,
     [Parameter(Mandatory = $true)]
-    [string]$MetadataRoot
+    [string]$MetadataRoot,
+    # The launcher the updater relaunches after installing, relative to the
+    # install root (the folder holding metadata/updates). Optional.
+    [string]$LauncherRelativePath
   )
 
   $settings = Get-GpUpdateSettings -Context $Context -Backend $Backend
@@ -2112,6 +2115,10 @@ function Write-GpUpdateRuntimeConfig {
         tag = $settings.GitHub.Tag
       }
     }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($LauncherRelativePath)) {
+    $document["package"]["launcherRelativePath"] = ($LauncherRelativePath -replace "\\", "/")
   }
 
   $document | ConvertTo-Json -Depth 20 | Set-Content -Path $configPath -Encoding utf8
