@@ -47,6 +47,15 @@
       "GSTheme": {
         "value": "Adwaita",
         "policy": "ifUnset"
+      },
+      "XDG_DATA_DIRS": {
+        "value": "{@runtimeRoot}/share",
+        "policy": "prepend",
+        "hostDefault": "/usr/local/share:/usr/share"
+      },
+      "GP_FIXTURE_SEARCH_PATH": {
+        "value": "{@runtimeRoot}/lib",
+        "policy": "prepend"
       }
     }
   },

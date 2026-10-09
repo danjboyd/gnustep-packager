@@ -271,8 +271,12 @@
                     "type": "string",
                     "enum": [
                       "override",
-                      "ifUnset"
+                      "ifUnset",
+                      "prepend"
                     ]
+                  },
+                  "hostDefault": {
+                    "type": "string"
                   }
                 }
               }

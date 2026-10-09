@@ -79,13 +79,17 @@ Important fields:
 
 `launch.env` entries may be either:
 - a plain string, which means `policy: override`
-- an object with `value` plus optional `policy`
+- an object with `value` plus optional `policy` (and `hostDefault` with
+  `prepend`)
 
 Current launch environment policies:
 - `override`
   Always set the variable in the generated launcher.
 - `ifUnset`
   Set the variable only when the user has not already defined it.
+- `prepend`
+  Put the value in front of the variable's current value (see
+  `docs/launch-contract.md`), keeping the host's search-path entries.
 
 ## `outputs`
 Declares shared output roots for logs, packages, temporary files, and validation
