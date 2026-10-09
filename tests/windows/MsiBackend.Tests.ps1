@@ -203,6 +203,33 @@ Describe "MSI backend" {
       Assert-GpFalse -Condition ($templateText -match 'ApplicationProgramsFolder') -Message "Shortcut template should not create an extra Start Menu folder."
     }
 
+    It "ends the runtime's daemons running from the install folder before files are replaced or removed" {
+      $installRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-daemons-" + [guid]::NewGuid().ToString("N"))
+      $toolsRoot = Join-Path $installRoot "runtime\System\Tools"
+      New-Item -ItemType Directory -Force -Path $toolsRoot | Out-Null
+      try {
+        Assert-GpEqual -Actual @(Get-GpMsiRuntimeDaemonNames -InstallRoot $installRoot) -Expected @() -Message "An install tree without daemons should report none."
+        Assert-GpEqual -Actual (Get-GpMsiStopRuntimeDaemonsXml -DaemonNames @() -InstallDirectoryName "SampleGui") -Expected "" -Message "No daemons should mean no custom action."
+
+        foreach ($name in @("gdnc.exe", "gpbs.exe")) {
+          Set-Content -Path (Join-Path $toolsRoot $name) -Value ""
+        }
+        $names = @(Get-GpMsiRuntimeDaemonNames -InstallRoot $installRoot)
+        Assert-GpEqual -Actual $names -Expected @("gdnc", "gpbs") -Message "The bundled daemons should be found anywhere in the install tree."
+
+        $xml = Get-GpMsiStopRuntimeDaemonsXml -DaemonNames $names -InstallDirectoryName "SampleGui"
+        Assert-GpMatch -Actual $xml -Pattern 'DllEntry="WixQuietExec64" Execute="immediate" Return="ignore"' -Message "The daemons should be ended quietly, and a failure should not fail the install."
+        Assert-GpMatch -Actual $xml -Pattern '<Custom Action="GpStopRuntimeDaemons" Before="InstallValidate" />' -Message "The daemons should be ended before Windows Installer checks for files in use."
+        Assert-GpMatch -Actual $xml -Pattern 'Get-Process -Name gdnc,gpbs ' -Message "Only the bundled daemons should be ended."
+        Assert-GpMatch -Actual $xml -Pattern ([regex]::Escape("Where-Object Path -Like &apos;*\SampleGui\*&apos;")) -Message "Only daemons running from this product's install folder should be ended."
+
+        $escaped = Get-GpMsiStopRuntimeDaemonsXml -DaemonNames $names -InstallDirectoryName "Dan's [App]"
+        Assert-GpMatch -Actual $escaped -Pattern ([regex]::Escape("-Like &apos;*\Dan&apos;&apos;s ``[\[]App``[\]]\*&apos;")) -Message "Quotes and brackets in the folder name should be escaped for PowerShell and for the MSI formatted string."
+      } finally {
+        Remove-Item -Recurse -Force -Path $installRoot -ErrorAction SilentlyContinue
+      }
+    }
+
     It "writes bundled updater metadata into the MSI install tree when enabled" {
       $manifestPath = New-GpSiblingManifest {
         param($manifest)
