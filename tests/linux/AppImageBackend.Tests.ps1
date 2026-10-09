@@ -156,6 +156,31 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $mimeText -Pattern "glob pattern='\*\.samplelinux'" -Message "Generated MIME package should describe the staged extension association."
     }
 
+    It "packages an app that declares no file associations" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["integrations"]["fileAssociations"] = @()
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $logPath = Join-Path $script:packageConfig.OutputPaths.LogRoot "pester-appimage-package-no-associations.log"
+        $result = Invoke-GpAppImagePackage -Context $context -LogPath $logPath
+        $desktopText = Get-Content -Raw -Path $result.DesktopEntryPath
+        $metadata = Get-GpJsonFile -Path $result.MetadataPath
+
+        Assert-GpTrue -Condition (Test-Path $result.ArtifactPath) -Message "An app without file associations should still produce an AppImage."
+        Assert-GpTrue -Condition ([string]::IsNullOrWhiteSpace([string]$result.MimePackagePath)) -Message "No MIME package should be generated without file associations."
+        Assert-GpMatch -Actual $desktopText -Pattern "(?m)^Exec=AppRun\r?$" -Message "Without associations the desktop entry should not take file arguments."
+        Assert-GpTrue -Condition ($desktopText -notmatch "(?m)^MimeType=") -Message "Without associations the desktop entry should omit MimeType."
+        Assert-GpEqual -Actual @($metadata["desktop"]["mimeTypes"] | Where-Object { $_ }).Count -Expected 0 -Message "AppImage metadata should record no MIME types."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
+    }
+
     It "can emit updater metadata and a feed sidecar when updates are enabled" {
       $manifestPath = New-GpSiblingManifest {
         param($manifest)

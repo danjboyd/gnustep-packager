@@ -42,6 +42,11 @@ The backend emits a shared-mime-info package under:
 
 Those generated MIME types are also added to the desktop entry.
 
+Applications without file associations are supported: with an empty
+`integrations.fileAssociations`, the backend writes no MIME package, omits
+`MimeType` from the desktop entry, and uses `Exec=AppRun` without `%F`.
+Consumers should not declare placeholder extensions to get a package.
+
 ## Compliance and Diagnostics
 Shared compliance entries map to:
 
