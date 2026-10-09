@@ -1,0 +1,66 @@
+{
+  "backends": {
+    "dmg": {
+      "enabled": false,
+      "appBundleName": "{name}.app",
+      "volumeName": "",
+      "artifactNamePattern": "{name}-{version}-macos-{arch}.dmg",
+      "filesystem": "APFS",
+      "format": "UDZO",
+      "applicationsLink": true,
+      "backgroundImageRelativePath": "",
+      "finderLayout": "auto",
+      "finderLayoutTimeoutSeconds": 60,
+      "window": {
+        "x": 200,
+        "y": 120,
+        "width": 600,
+        "height": 400,
+        "iconSize": 128,
+        "textSize": 12,
+        "appIconPosition": {
+          "x": 150,
+          "y": 190
+        },
+        "applicationsIconPosition": {
+          "x": 450,
+          "y": 190
+        },
+        "noticeIconPosition": {
+          "x": 300,
+          "y": 330
+        }
+      },
+      "noticeReport": {
+        "enabled": false,
+        "fileName": "THIRD-PARTY-NOTICES.txt"
+      },
+      "signing": {
+        "identity": "-",
+        "resign": false,
+        "deep": true,
+        "hardenedRuntime": true,
+        "entitlementsPath": "",
+        "keychain": "",
+        "signDmg": true,
+        "additionalArguments": []
+      },
+      "notarization": {
+        "enabled": false,
+        "keychainProfileEnvVar": "GP_NOTARY_KEYCHAIN_PROFILE",
+        "staple": true,
+        "required": false
+      },
+      "validation": {
+        "requireSignature": true,
+        "requireGatekeeperAcceptance": false
+      },
+      "smoke": {
+        "enabled": false,
+        "startupSeconds": 5,
+        "arguments": [],
+        "environment": {}
+      }
+    }
+  }
+}

@@ -144,3 +144,39 @@ jobs:
           path: dist/logs/gnustep-cli-new
           retention-days: 7
           if-no-files-found: warn
+
+  macos-validation:
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate macOS Example Manifest
+        run: |
+          ./scripts/gnustep-packager.ps1 -Command manifest-check -Manifest examples/sample-macos/package.manifest.json
+
+      - name: Describe macOS Example Manifest
+        run: |
+          ./scripts/gnustep-packager.ps1 -Command describe -Manifest examples/sample-macos/package.manifest.json -Backend dmg
+
+      - name: Run Pester Regression Tests
+        run: |
+          ./scripts/test-repo.ps1 -CI
+
+      - name: Run Shared Packaging Pipeline
+        run: |
+          ./scripts/run-packaging-pipeline.ps1 -Manifest examples/sample-macos/package.manifest.json -Backend dmg -RunSmoke
+
+      - name: Upload DMG Artifacts And Logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: |
+            examples/sample-macos/dist/packages
+            examples/sample-macos/dist/logs
+          retention-days: 7
+          if-no-files-found: warn

@@ -1497,6 +1497,75 @@ Current status notes:
     documented Linux path or fails early with a deliberate unsupported-backend
     diagnostic
 
+## Phase 17: macOS DMG Backend
+Goal: package native macOS app bundles built from GNUstep codebases into DMGs
+from the same stage-first pipeline, without weakening the backend-neutral core.
+Status: phase 17A through 17F implemented; 17G is a follow-up.
+
+This phase deliberately widens the support boundary in `AGENTS.md`: the
+packaged artifact is a native macOS `.app` (Apple AppKit) rather than a
+GNUstep runtime payload. The tradeoffs are recorded in
+[docs/dmg-backend.md](docs/dmg-backend.md): the GNUstep launch contract,
+packaged defaults and theme inputs are not rendered on macOS and are reported
+as ignored settings instead.
+
+- `Phase 17A`: Platform overrides
+  Deliverables:
+  - backend-neutral `platformOverrides.<windows|linux|macos>` manifest overlays
+    with null-removes-key merge semantics
+  - `-Platform` on the shared CLI and pipeline wrapper; target platform falls
+    back to the requested backend's platform, then the host
+  Exit criteria:
+  - one manifest can build and stage a Linux GNUstep payload and a native
+    macOS bundle without forking the manifest
+
+- `Phase 17B`: DMG packaging
+  Deliverables:
+  - `backends/dmg` with `ditto` copy, `Applications` link, background, notice
+    report, read-write image, optional Finder layout, `UDZO`/`ULFO` conversion,
+    APFS/HFS+, `{arch}` artifact naming
+  Exit criteria:
+  - `package -Backend dmg` produces a predictable artifact and sidecars from a
+    staged payload only
+
+- `Phase 17C`: Signing and notarization hooks
+  Deliverables:
+  - preserve-or-re-sign policy, configurable identity, entitlements, hardened
+    runtime, DMG signing
+  - `notarytool submit --wait` and `stapler staple` driven by a keychain
+    profile named through an environment variable; clean skip without
+    credentials
+  Exit criteria:
+  - ad-hoc builds package without credentials; a Developer ID only needs
+    manifest and environment changes
+
+- `Phase 17D`: DMG validation
+  Deliverables:
+  - `hdiutil verify`, hidden read-only mount, bundle and link checks,
+    `codesign --verify --deep --strict`, recorded `spctl` assessment,
+    installed-result contract, launch smoke, guaranteed detach
+  Exit criteria:
+  - validation fails on broken images and signatures but records Gatekeeper
+    rejection of ad-hoc builds unless acceptance is required
+
+- `Phase 17E`: Fixture, tests, CI
+  Deliverables:
+  - `examples/sample-macos`, `tests/macos`, shared platform-override and
+    schema tests, `macos-validation` job in `validate-repo.yml`
+  Exit criteria:
+  - `scripts/test-repo.ps1` passes on macOS
+
+- `Phase 17F`: Documentation
+  Deliverables:
+  - `docs/dmg-backend.md`, manifest, signing, release-gate and compatibility
+    updates, downstream `package-dmg.yml` example
+
+- `Phase 17G`: Follow-ups
+  Deliverables:
+  - first notarization run against Apple's service once a Developer ID exists
+  - `dmg` support in the reusable `package-gnustep-app.yml` workflow
+  - optional volume icon and update-feed sidecars for DMG artifacts
+
 ## Suggested Early Execution Order
 Prioritize these subphases first:
 
