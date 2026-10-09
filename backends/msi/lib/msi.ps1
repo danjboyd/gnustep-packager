@@ -165,6 +165,7 @@ function Get-GpMsiConfig {
     DisplayName = $displayName
     ProductName = $productName
     Manufacturer = [string]$package["manufacturer"]
+    Summary = [string]$package["summary"]
     Version = [string]$package["version"]
     MsiVersion = $normalizedVersion
     UpgradeCode = [string]$backend["upgradeCode"]
@@ -186,6 +187,7 @@ function Get-GpMsiConfig {
     RuntimeRootRelative = [string]$payload["runtimeRoot"]
     MetadataRootRelative = [string]$payload["metadataRoot"]
     RuntimeSeedPaths = [string[]]@($payload["runtimeSeedPaths"])
+    FileAssociations = @($(if ($integrations -and $integrations.Contains("fileAssociations")) { $integrations["fileAssociations"] }))
     WixToolRoot = $wixToolRoot
     WixVersion = [string]$wixConfig["version"]
     WixDownloadUrl = [string]$wixConfig["downloadUrl"]
@@ -1667,6 +1669,17 @@ function Render-GpMsiTemplateText {
   return $text
 }
 
+function ConvertTo-GpMsiFormattedLiteral {
+  param(
+    [Parameter(Mandatory = $true)]
+    [AllowEmptyString()]
+    [string]$Value
+  )
+
+  # Brackets and braces have meaning in an MSI formatted string; [\x] is the literal character x.
+  return [regex]::Replace($Value, "[\[\]{}]", { param($match) "[\{0}]" -f $match.Value })
+}
+
 function Get-GpMsiRuntimeDaemonNames {
   param(
     [Parameter(Mandatory = $true)]
@@ -1701,7 +1714,7 @@ function Get-GpMsiStopRuntimeDaemonsXml {
   # escaped for each in turn. Exiting 0 keeps "none running" from being logged as a failure.
   $pattern = "*\{0}\*" -f [System.Management.Automation.WildcardPattern]::Escape($InstallDirectoryName)
   $pattern = $pattern.Replace("'", "''")
-  $pattern = [regex]::Replace($pattern, "[\[\]{}]", { param($match) "[\{0}]" -f $match.Value })
+  $pattern = ConvertTo-GpMsiFormattedLiteral -Value $pattern
   $command = "`"[System64Folder]WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"Get-Process -Name {0} -ErrorAction SilentlyContinue | Where-Object Path -Like '{1}' | Stop-Process -Force; exit 0`"" -f ($DaemonNames -join ","), $pattern
 
   return @"
@@ -1711,6 +1724,85 @@ function Get-GpMsiStopRuntimeDaemonsXml {
       <Custom Action="GpStopRuntimeDaemons" Before="InstallValidate" />
     </InstallExecuteSequence>
 "@
+}
+
+function Get-GpMsiOpenWithRegistration {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config
+  )
+
+  $extensions = [System.Collections.Generic.List[psobject]]::new()
+  $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  foreach ($association in @($Config.FileAssociations)) {
+    if ($null -eq $association -or [string]$association["kind"] -ne "extension") {
+      continue
+    }
+    $value = ([string]$association["value"]).Trim().ToLowerInvariant()
+    if ($value -notmatch '^\.?[a-z0-9][a-z0-9_+-]*$') {
+      continue
+    }
+    $extension = if ($value.StartsWith(".")) { $value } else { ".$value" }
+    if ($seen.Add($extension)) {
+      $extensions.Add([pscustomobject]@{
+        Extension = $extension
+        Description = [string]$association["description"]
+      }) | Out-Null
+    }
+  }
+
+  if ($extensions.Count -eq 0) {
+    return [pscustomobject]@{ RegistrationXml = ""; ComponentRefXml = ""; Extensions = [string[]]@() }
+  }
+
+  # "Open with" only: the app is listed for each extension (OpenWithProgids, SupportedTypes) and in
+  # Default Apps (Capabilities), but no extension's default handler or UserChoice is written, so
+  # whatever opens these files today keeps opening them.
+  $root = if ($Config.InstallScope -eq "perMachine") { "HKLM" } else { "HKCU" }
+  $progIdPrefix = [regex]::Replace([string]$Config.PackageName, "[^A-Za-z0-9]", "")
+  if ([string]::IsNullOrWhiteSpace($progIdPrefix)) {
+    $progIdPrefix = [regex]::Replace([System.IO.Path]::GetFileNameWithoutExtension($Config.LauncherFileName), "[^A-Za-z0-9]", "")
+  }
+  $productName = ConvertTo-GpMsiFormattedLiteral -Value ([string]$Config.ProductName)
+  $applicationKey = "Software\Classes\Applications\{0}" -f $Config.LauncherFileName
+  $capabilitiesKey = "Software\{0}\{1}\Capabilities" -f (ConvertTo-GpMsiFormattedLiteral -Value ([string]$Config.Manufacturer)), $productName
+  $command = '"[INSTALLDIR]{0}" "%1"' -f $Config.LauncherFileName
+  $icon = "[INSTALLDIR]{0},0" -f $Config.LauncherFileName
+  $description = if ([string]::IsNullOrWhiteSpace($Config.Summary)) { $productName } else { ConvertTo-GpMsiFormattedLiteral -Value $Config.Summary }
+
+  $lines = [System.Collections.Generic.List[string]]::new()
+  function Add-Value([string]$Key, [string]$Name, [string]$Value, [switch]$KeyPath) {
+    $nameAttribute = if ($Name) { ' Name="{0}"' -f (Escape-GpXmlText -Value $Name) } else { "" }
+    $keyPathAttribute = if ($KeyPath) { ' KeyPath="yes"' } else { "" }
+    $lines.Add(('        <RegistryValue Root="{0}" Key="{1}"{2} Type="string" Value="{3}"{4} />' -f $root, (Escape-GpXmlText -Value $Key), $nameAttribute, $(if ($Value) { Escape-GpXmlText -Value $Value } else { "" }), $keyPathAttribute)) | Out-Null
+  }
+
+  $lines.Add('    <DirectoryRef Id="INSTALLDIR">') | Out-Null
+  $lines.Add(('      <Component Id="OpenWithRegistration" Guid="{0}">' -f ([guid]::NewGuid().ToString()))) | Out-Null
+  Add-Value -Key "Software\RegisteredApplications" -Name $productName -Value $capabilitiesKey -KeyPath
+  Add-Value -Key $capabilitiesKey -Name "ApplicationName" -Value $productName
+  Add-Value -Key $capabilitiesKey -Name "ApplicationDescription" -Value $description
+  Add-Value -Key $applicationKey -Name "FriendlyAppName" -Value $productName
+  Add-Value -Key "$applicationKey\DefaultIcon" -Value $icon
+  Add-Value -Key "$applicationKey\shell\open\command" -Value $command
+  foreach ($entry in $extensions) {
+    $progId = "{0}{1}" -f $progIdPrefix, $entry.Extension
+    $typeName = if ([string]::IsNullOrWhiteSpace($entry.Description)) { "{0} file" -f $entry.Extension } else { ConvertTo-GpMsiFormattedLiteral -Value $entry.Description }
+    Add-Value -Key "$applicationKey\SupportedTypes" -Name $entry.Extension -Value ""
+    Add-Value -Key "$capabilitiesKey\FileAssociations" -Name $entry.Extension -Value $progId
+    Add-Value -Key "Software\Classes\$progId" -Value $typeName
+    Add-Value -Key "Software\Classes\$progId\DefaultIcon" -Value $icon
+    Add-Value -Key "Software\Classes\$progId\shell\open\command" -Value $command
+    Add-Value -Key ("Software\Classes\{0}\OpenWithProgids" -f $entry.Extension) -Name $progId -Value ""
+  }
+  $lines.Add('      </Component>') | Out-Null
+  $lines.Add('    </DirectoryRef>') | Out-Null
+
+  return [pscustomobject]@{
+    RegistrationXml = ($lines -join "`r`n")
+    ComponentRefXml = '      <ComponentRef Id="OpenWithRegistration" />'
+    Extensions = [string[]]@($extensions | ForEach-Object { $_.Extension })
+  }
 }
 
 function Write-GpMsiSources {
@@ -1751,6 +1843,11 @@ function Write-GpMsiSources {
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Install, upgrade and uninstall end running {0} from the install folder first" -f ($daemonNames -join ", "))
   }
 
+  $openWith = Get-GpMsiOpenWithRegistration -Config $Config
+  if ($openWith.Extensions.Count -gt 0) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Listed under Open with for {0}" -f ($openWith.Extensions -join ", "))
+  }
+
   $registryRoot = "HKCU"
   $rootDirectoryId = if ($Config.InstallScope -eq "perMachine") { "ProgramFiles64Folder" } else { "LocalAppDataFolder" }
   $tokens = @{
@@ -1769,6 +1866,8 @@ function Write-GpMsiSources {
     "__REGISTRY_MANUFACTURER__" = Escape-GpXmlText -Value $Config.Manufacturer
     "__REGISTRY_PRODUCT_NAME__" = Escape-GpXmlText -Value $Config.ProductName
     "__STOP_RUNTIME_DAEMONS__" = $stopDaemonsXml
+    "__OPEN_WITH_REGISTRATION__" = $openWith.RegistrationXml
+    "__OPEN_WITH_COMPONENT_REF__" = $openWith.ComponentRefXml
   }
 
   $productContent = Render-GpMsiTemplateText -TemplatePath $Config.ProductTemplatePath -Tokens $tokens
