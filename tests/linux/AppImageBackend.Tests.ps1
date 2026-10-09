@@ -129,6 +129,9 @@ Describe "AppImage backend" {
 
       Assert-GpMatch -Actual $appRunText -Pattern 'if \[ -z "\$\{GSTheme\+x\}" \]; then' -Message "AppRun should only seed GSTheme when the user has not already set it."
       Assert-GpMatch -Actual $appRunText -Pattern 'export GSTheme="Adwaita"' -Message "AppRun should preserve the configured default theme value."
+      Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export XDG_DATA_DIRS="${RUNTIME_ROOT}/share:${GP_HOST_XDG_DATA_DIRS:-/usr/local/share:/usr/share}"')) -Message "AppRun should prepend packaged data dirs to the host's, with the XDG default when the host has none."
+      Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export GP_HOST_XDG_DATA_DIRS="${XDG_DATA_DIRS:-}"')) -Message "AppRun should remember the host's value at the first launch, so relaunches don't stack entries."
+      Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export GP_FIXTURE_SEARCH_PATH="${RUNTIME_ROOT}/lib${GP_HOST_GP_FIXTURE_SEARCH_PATH:+:${GP_HOST_GP_FIXTURE_SEARCH_PATH}}"')) -Message "AppRun should prepend to a host value only when there is one."
       Assert-GpMatch -Actual $appRunText -Pattern 'APP_DEFAULTS_TOOL="\$RUNTIME_ROOT/bin/defaults"' -Message "AppRun should look for a bundled defaults tool when app-domain defaults are declared."
       Assert-GpMatch -Actual $appRunText -Pattern 'read "com\.example\.SampleGNUstepLinuxApp" "GSTheme"' -Message "AppRun should seed GSTheme through GNUstep defaults as well as the env fallback."
       Assert-GpMatch -Actual $appRunText -Pattern 'write "com\.example\.SampleGNUstepLinuxApp" "GSTheme" "\\"Adwaita\\""' -Message "AppRun should serialize the packaged theme as a GNUstep defaults write."

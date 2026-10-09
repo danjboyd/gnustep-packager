@@ -27,7 +27,8 @@ typedef struct GPAppDefaultEntry {
 
 enum {
     GP_ENV_OVERRIDE = 0,
-    GP_ENV_IF_UNSET = 1
+    GP_ENV_IF_UNSET = 1,
+    GP_ENV_PREPEND = 2
 };
 
 typedef struct GPLauncherConfig {
@@ -286,6 +287,8 @@ static BOOL GPAddEnvEntry(GPLauncherConfig *config, const char *value)
         config->env[config->envCount].policy = GP_ENV_OVERRIDE;
     } else if (strcmp(policyText, "ifUnset") == 0) {
         config->env[config->envCount].policy = GP_ENV_IF_UNSET;
+    } else if (strcmp(policyText, "prepend") == 0) {
+        config->env[config->envCount].policy = GP_ENV_PREPEND;
     } else {
         return FALSE;
     }
@@ -788,6 +791,27 @@ static BOOL GPApplyEnvironment(const GPLauncherConfig *config,
         if (config->env[i].policy == GP_ENV_IF_UNSET &&
             GPEnvironmentVariableExists(config->env[i].key)) {
             continue;
+        }
+        if (config->env[i].policy == GP_ENV_PREPEND) {
+            /* The packaged value first, then the current one (if any). */
+            size_t used = wcslen(expanded);
+            DWORD existing = 0;
+            if (used + 1 < GP_MAX_PATH) {
+                existing = GetEnvironmentVariableW(config->env[i].key,
+                                                   expanded + used + 1,
+                                                   (DWORD)(GP_MAX_PATH - used - 1));
+            }
+            if (existing > 0 && existing < GP_MAX_PATH - used - 1) {
+                const wchar_t *current = expanded + used + 1;
+                if (wcsncmp(current, expanded, used) == 0 &&
+                    (current[used] == L'\0' || current[used] == L';')) {
+                    /* Already there (an inherited environment, such as a
+                       relaunch after an update): keep the current value. */
+                    memmove(expanded, current, (wcslen(current) + 1) * sizeof(wchar_t));
+                } else {
+                    expanded[used] = L';';
+                }
+            }
         }
         if (!SetEnvironmentVariableW(config->env[i].key, expanded)) {
             return FALSE;
