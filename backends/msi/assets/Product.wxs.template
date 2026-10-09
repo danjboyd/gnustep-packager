@@ -11,7 +11,12 @@
              InstallScope="__INSTALL_SCOPE__"
              InstallPrivileges="__INSTALL_PRIVILEGES__"
              Platform="x64" />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of __PRODUCT_NAME__ is already installed." />
+    <!-- Windows Installer compares only the first three version fields, so a
+         prerelease (x.y.z.N) and its release (x.y.z.0) count as the same
+         version: replace the installed one rather than installing beside it.
+         Lower x.y.z is still a downgrade and refused. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of __PRODUCT_NAME__ is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">

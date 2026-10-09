@@ -1,4 +1,5 @@
 #import "GPUpdater.h"
+#import "GPUpdaterDownload.h"
 
 static NSString * const GPUpdaterErrorDomain = @"GPUpdaterErrorDomain";
 static NSString * const GPUpdaterRuntimeConfigRelativePath = @"metadata/updates/gnustep-packager-update.json";
@@ -745,10 +746,14 @@ static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
 }
 
 - (GPUpdateCheckResult *)checkForUpdatesSynchronously:(NSError **)error {
-  NSData *feedData = [NSData dataWithContentsOfURL:[[self configuration] feedURL]];
+  NSError *downloadError = nil;
+  NSData *feedData = GPUpdaterDownloadData([[self configuration] feedURL], &downloadError);
   if (feedData == nil) {
     if (error != NULL) {
-      *error = GPMakeUpdaterError(GPUpdaterErrorFeedLoadFailed, @"The update feed could not be loaded from the configured URL.");
+      NSString *reason = [downloadError localizedDescription];
+      *error = GPMakeUpdaterError(GPUpdaterErrorFeedLoadFailed, [reason length] > 0
+        ? [NSString stringWithFormat:@"The update feed could not be loaded from the configured URL: %@", reason]
+        : @"The update feed could not be loaded from the configured URL.");
     }
     return nil;
   }
