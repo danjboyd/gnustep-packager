@@ -230,6 +230,23 @@ Describe "MSI backend" {
       }
     }
 
+    It "lists the app under Open with for its file extensions without taking over their defaults" {
+      $registration = Get-GpMsiOpenWithRegistration -Config $script:transformConfig
+      $xml = $registration.RegistrationXml
+
+      Assert-GpEqual -Actual $registration.Extensions -Expected @(".sample") -Message "The manifest's extension associations should be registered."
+      Assert-GpMatch -Actual $xml -Pattern ([regex]::Escape('Key="Software\Classes\.sample\OpenWithProgids"')) -Message "Each extension should list the app's ProgID under OpenWithProgids."
+      Assert-GpMatch -Actual $xml -Pattern ([regex]::Escape('\SupportedTypes" Name=".sample"')) -Message "The launcher should declare the extension as a supported type."
+      Assert-GpMatch -Actual $xml -Pattern ([regex]::Escape('Key="Software\RegisteredApplications"')) -Message "The app should be offered in Default Apps."
+      Assert-GpMatch -Actual $xml -Pattern ([regex]::Escape('Value="&quot;[INSTALLDIR]')) -Message "Open commands should run the installed launcher."
+      Assert-GpFalse -Condition ($xml -match ([regex]::Escape('Key="Software\Classes\.sample"'))) -Message "The extension's default handler should never be written."
+      Assert-GpFalse -Condition ($xml -match 'UserChoice') -Message "The user's choice of default app should never be written."
+      Assert-GpMatch -Actual $registration.ComponentRefXml -Pattern 'ComponentRef Id="OpenWithRegistration"' -Message "The registration should be part of the main feature."
+
+      $none = Get-GpMsiOpenWithRegistration -Config ([pscustomobject]@{ FileAssociations = @(@{ kind = "mime"; value = "image/png" }) })
+      Assert-GpEqual -Actual $none.RegistrationXml -Expected "" -Message "MIME associations have no MSI registration."
+    }
+
     It "writes bundled updater metadata into the MSI install tree when enabled" {
       $manifestPath = New-GpSiblingManifest {
         param($manifest)

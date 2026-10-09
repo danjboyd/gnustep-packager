@@ -36,9 +36,11 @@
       </Component>
     </DirectoryRef>
 __STOP_RUNTIME_DAEMONS__
+__OPEN_WITH_REGISTRATION__
     <Feature Id="MainFeature" Title="__PRODUCT_NAME__" Level="1">
       <ComponentGroupRef Id="InstalledFiles" />
       <ComponentRef Id="AppShortcut" />
+__OPEN_WITH_COMPONENT_REF__
     </Feature>
   </Product>
 </Wix>
