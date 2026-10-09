@@ -1667,6 +1667,52 @@ function Render-GpMsiTemplateText {
   return $text
 }
 
+function Get-GpMsiRuntimeDaemonNames {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$InstallRoot
+  )
+
+  # GNUstep starts these on demand from the bundled runtime (gdnc at launch, gpbs on the first
+  # pasteboard use) and they outlive the app, so a running one holds its .exe in the install folder.
+  $names = foreach ($name in @("gdnc", "gpbs", "gdomap")) {
+    if (Get-ChildItem -Path $InstallRoot -Recurse -File -Filter ("{0}.exe" -f $name) -ErrorAction SilentlyContinue | Select-Object -First 1) {
+      $name
+    }
+  }
+  return [string[]]@($names)
+}
+
+function Get-GpMsiStopRuntimeDaemonsXml {
+  param(
+    [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
+    [string[]]$DaemonNames,
+    [Parameter(Mandatory = $true)]
+    [string]$InstallDirectoryName
+  )
+
+  if ($DaemonNames.Count -eq 0) {
+    return ""
+  }
+
+  # Matches only daemons running from this product's install folder, never another app's runtime.
+  # The pattern is a single-quoted PowerShell wildcard inside an MSI formatted string, so it is
+  # escaped for each in turn. Exiting 0 keeps "none running" from being logged as a failure.
+  $pattern = "*\{0}\*" -f [System.Management.Automation.WildcardPattern]::Escape($InstallDirectoryName)
+  $pattern = $pattern.Replace("'", "''")
+  $pattern = [regex]::Replace($pattern, "[\[\]{}]", { param($match) "[\{0}]" -f $match.Value })
+  $command = "`"[System64Folder]WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"Get-Process -Name {0} -ErrorAction SilentlyContinue | Where-Object Path -Like '{1}' | Stop-Process -Force; exit 0`"" -f ($DaemonNames -join ","), $pattern
+
+  return @"
+    <SetProperty Id="WixQuietExec64CmdLine" Value="$(Escape-GpXmlText -Value $command)" Before="GpStopRuntimeDaemons" Sequence="execute" />
+    <CustomAction Id="GpStopRuntimeDaemons" BinaryKey="WixCA" DllEntry="WixQuietExec64" Execute="immediate" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="GpStopRuntimeDaemons" Before="InstallValidate" />
+    </InstallExecuteSequence>
+"@
+}
+
 function Write-GpMsiSources {
   param(
     [Parameter(Mandatory = $true)]
@@ -1699,6 +1745,12 @@ function Write-GpMsiSources {
     "-out", $harvestPath
   ) -LogPath $LogPath
 
+  $daemonNames = Get-GpMsiRuntimeDaemonNames -InstallRoot $WorkPaths.InstallRoot
+  $stopDaemonsXml = Get-GpMsiStopRuntimeDaemonsXml -DaemonNames $daemonNames -InstallDirectoryName $Config.InstallDirectoryName
+  if ($daemonNames.Count -gt 0) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Install, upgrade and uninstall end running {0} from the install folder first" -f ($daemonNames -join ", "))
+  }
+
   $registryRoot = "HKCU"
   $rootDirectoryId = if ($Config.InstallScope -eq "perMachine") { "ProgramFiles64Folder" } else { "LocalAppDataFolder" }
   $tokens = @{
@@ -1716,6 +1768,7 @@ function Write-GpMsiSources {
     "__REGISTRY_ROOT__" = $registryRoot
     "__REGISTRY_MANUFACTURER__" = Escape-GpXmlText -Value $Config.Manufacturer
     "__REGISTRY_PRODUCT_NAME__" = Escape-GpXmlText -Value $Config.ProductName
+    "__STOP_RUNTIME_DAEMONS__" = $stopDaemonsXml
   }
 
   $productContent = Render-GpMsiTemplateText -TemplatePath $Config.ProductTemplatePath -Tokens $tokens
@@ -1724,6 +1777,7 @@ function Write-GpMsiSources {
   return [pscustomobject]@{
     HarvestPath = $harvestPath
     ProductPath = $productPath
+    WixExtensions = [string[]]@($(if ($stopDaemonsXml) { "WixUtilExtension" }))
   }
 }
 
@@ -1756,13 +1810,15 @@ function Build-GpMsiArtifacts {
   }
 
   $outputBase = Join-Path $WorkPaths.WixRoot ""
-  Invoke-GpMsiExternalTool -FilePath $WixTools.Candle -ArgumentList @(
+  $extensionArgs = [string[]]@(foreach ($extension in @($Sources.WixExtensions)) { if ($extension) { "-ext", $extension } })
+  Invoke-GpMsiExternalTool -FilePath $WixTools.Candle -ArgumentList (@(
     "-arch", "x64",
     "-dInstallSourceDir=$($WorkPaths.InstallRoot)",
-    "-out", $outputBase,
+    "-out", $outputBase
+  ) + $extensionArgs + @(
     $Sources.ProductPath,
     $Sources.HarvestPath
-  ) -LogPath $LogPath
+  )) -LogPath $LogPath
 
   $lightArgs = [System.Collections.Generic.List[string]]::new()
   $suppressedIces = [System.Collections.Generic.List[string]]::new()
@@ -1774,6 +1830,9 @@ function Build-GpMsiArtifacts {
     }
   }
 
+  foreach ($extensionArg in $extensionArgs) {
+    $lightArgs.Add($extensionArg) | Out-Null
+  }
   $lightArgs.Add("-out") | Out-Null
   $lightArgs.Add($msiPath) | Out-Null
   if ($skipValidation) {

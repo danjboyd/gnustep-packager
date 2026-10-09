@@ -35,7 +35,7 @@
                        KeyPath="yes" />
       </Component>
     </DirectoryRef>
-
+__STOP_RUNTIME_DAEMONS__
     <Feature Id="MainFeature" Title="__PRODUCT_NAME__" Level="1">
       <ComponentGroupRef Id="InstalledFiles" />
       <ComponentRef Id="AppShortcut" />
