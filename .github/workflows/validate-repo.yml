@@ -147,6 +147,8 @@ jobs:
 
   macos-validation:
     runs-on: macos-latest
+    # One early run stalled after the pipeline had finished; cap it.
+    timeout-minutes: 20
     defaults:
       run:
         shell: pwsh
