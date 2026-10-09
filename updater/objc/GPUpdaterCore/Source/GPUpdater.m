@@ -52,6 +52,8 @@ typedef NS_ENUM(NSInteger, GPUpdaterErrorCode) {
 @property (nonatomic, readwrite) NSTimeInterval minimumCheckInterval;
 @property (nonatomic, readwrite) NSTimeInterval startupDelay;
 @property (nonatomic, readwrite, copy) NSString *publicEDKey;
+@property (nonatomic, readwrite, copy) NSString *launcherRelativePath;
+@property (nonatomic, readwrite, copy) NSString *relaunchExecutablePath;
 @end
 
 @interface GPUpdaterDefaultsStore : NSObject {
@@ -351,6 +353,34 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
 
 @end
 
+// A feed other than the packaged one, for testing an update without
+// touching the published feed: the GP_UPDATER_FEED_URL environment
+// variable, or else the GPUpdaterFeedURL user default (http, https or
+// file URL). Signature checks still apply when the configuration has a
+// public key.
+static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
+  if (configuration == nil) {
+    return;
+  }
+  NSString *source = @"GP_UPDATER_FEED_URL";
+  NSString *value = [[[NSProcessInfo processInfo] environment] objectForKey:source];
+  if ([value length] == 0) {
+    source = @"GPUpdaterFeedURL";
+    value = GPStringValue([[NSUserDefaults standardUserDefaults] objectForKey:source]);
+  }
+  if ([value length] == 0) {
+    return;
+  }
+  NSURL *url = GPURLFromString(value);
+  NSString *scheme = [[url scheme] lowercaseString];
+  if (url == nil || !([scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"] || [scheme isEqualToString:@"file"])) {
+    NSLog(@"GPUpdater: ignoring %@ '%@': not an http, https or file URL.", source, value);
+    return;
+  }
+  NSLog(@"GPUpdater: update feed overridden by %@: %@", source, [url absoluteString]);
+  configuration.feedURL = url;
+}
+
 @implementation GPUpdaterConfiguration
 
 @synthesize packageIdentifier = _packageIdentifier;
@@ -363,6 +393,8 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
 @synthesize minimumCheckInterval = _minimumCheckInterval;
 @synthesize startupDelay = _startupDelay;
 @synthesize publicEDKey = _publicEDKey;
+@synthesize launcherRelativePath = _launcherRelativePath;
+@synthesize relaunchExecutablePath = _relaunchExecutablePath;
 
 + (instancetype)configurationWithContentsOfFile:(NSString *)path error:(NSError **)error {
   NSData *data = [NSData dataWithContentsOfFile:path];
@@ -424,6 +456,8 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
   configuration.startupDelay = startupDelay != nil ? [startupDelay doubleValue] : 15.0;
   NSString *publicEDKey = GPStringValue([updates objectForKey:@"publicEDKey"]);
   configuration.publicEDKey = [publicEDKey length] > 0 ? publicEDKey : nil;
+  NSString *launcherRelativePath = GPStringValue([package objectForKey:@"launcherRelativePath"]);
+  configuration.launcherRelativePath = [launcherRelativePath length] > 0 ? launcherRelativePath : nil;
   return configuration;
 }
 
@@ -454,12 +488,16 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
     return nil;
   }
 
+  // Each candidate with the folder it is relative to: the install root.
   NSMutableArray *candidatePaths = [NSMutableArray array];
+  NSMutableArray *candidateRoots = [NSMutableArray array];
   NSString *currentDirectory = [executablePath stringByDeletingLastPathComponent];
   NSUInteger depth = 0;
   while ([currentDirectory length] > 1 && depth < 8) {
     [candidatePaths addObject:[currentDirectory stringByAppendingPathComponent:GPUpdaterRuntimeConfigRelativePath]];
+    [candidateRoots addObject:currentDirectory];
     [candidatePaths addObject:[currentDirectory stringByAppendingPathComponent:GPUpdaterAppImageRuntimeConfigRelativePath]];
+    [candidateRoots addObject:currentDirectory];
 
     NSString *parentDirectory = [currentDirectory stringByDeletingLastPathComponent];
     if ([parentDirectory isEqualToString:currentDirectory]) {
@@ -470,11 +508,22 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
     depth++;
   }
 
-  NSEnumerator *enumerator = [candidatePaths objectEnumerator];
-  NSString *candidatePath = nil;
-  while ((candidatePath = [enumerator nextObject]) != nil) {
+  NSUInteger index;
+  for (index = 0; index < [candidatePaths count]; index++) {
+    NSString *candidatePath = [candidatePaths objectAtIndex:index];
     if ([[NSFileManager defaultManager] fileExistsAtPath:candidatePath]) {
-      return [self configurationWithContentsOfFile:candidatePath error:error];
+      GPUpdaterConfiguration *configuration = [self configurationWithContentsOfFile:candidatePath error:error];
+      GPApplyFeedOverride(configuration);
+      // The package's launcher (the MSI's root executable), which sets up
+      // the environment the app runs in: relaunched after an install.
+      if (configuration.launcherRelativePath != nil) {
+        NSString *launcherPath = [[candidateRoots objectAtIndex:index]
+          stringByAppendingPathComponent:configuration.launcherRelativePath];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:launcherPath]) {
+          configuration.relaunchExecutablePath = launcherPath;
+        }
+      }
+      return configuration;
     }
   }
 
@@ -493,6 +542,8 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
   [_channel release];
   [_feedURL release];
   [_publicEDKey release];
+  [_launcherRelativePath release];
+  [_relaunchExecutablePath release];
   [super dealloc];
 }
 

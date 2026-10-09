@@ -65,8 +65,16 @@ typedef NS_ENUM(NSInteger, GPUpdateCheckStatus) {
 // ("updates.publicEDKey"). When set, an asset without a valid signature
 // is refused.
 @property (nonatomic, readonly, copy) NSString *publicEDKey;
+// The package's launcher relative to its install root
+// ("package.launcherRelativePath"), and, for a packaged configuration
+// whose launcher exists, its full path: what to relaunch after an update.
+@property (nonatomic, readonly, copy) NSString *launcherRelativePath;
+@property (nonatomic, readonly, copy) NSString *relaunchExecutablePath;
 + (instancetype)configurationWithContentsOfFile:(NSString *)path error:(NSError **)error;
 + (instancetype)configurationWithDictionary:(NSDictionary *)dictionary error:(NSError **)error;
+// The configuration packaged next to the executable. Its feed URL can be
+// overridden for testing by the GP_UPDATER_FEED_URL environment variable,
+// or else the GPUpdaterFeedURL user default.
 + (instancetype)packagedConfigurationWithError:(NSError **)error;
 @end
 

@@ -373,7 +373,13 @@ static BOOL GPHelperSetExecutable(NSString *path) {
 #endif
 }
 
-static BOOL GPHelperWaitForPID(NSInteger pidValue) {
+// How long the helper waits for the app to quit before applying. The app
+// may not quit at all: its user can cancel Quit (unsaved documents).
+static const NSTimeInterval GPHelperQuitTimeout = 120.0;
+
+// YES once the process has gone, NO if it is still running after the
+// timeout.
+static BOOL GPHelperWaitForPID(NSInteger pidValue, NSTimeInterval timeout) {
   if (pidValue <= 0) {
     return YES;
   }
@@ -383,11 +389,15 @@ static BOOL GPHelperWaitForPID(NSInteger pidValue) {
   if (processHandle == NULL) {
     return YES;
   }
-  WaitForSingleObject(processHandle, INFINITE);
+  DWORD waited = WaitForSingleObject(processHandle, (DWORD)(timeout * 1000.0));
   CloseHandle(processHandle);
-  return YES;
+  return waited != WAIT_TIMEOUT;
 #else
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
   while (kill((pid_t)pidValue, 0) == 0 || errno == EPERM) {
+    if ([deadline timeIntervalSinceNow] <= 0) {
+      return NO;
+    }
     [NSThread sleepForTimeInterval:0.5];
     errno = 0;
   }
@@ -700,7 +710,12 @@ static int GPHelperApply(NSDictionary *plan, NSString *statePath, NSInteger wait
     return 0;
   }
 
-  GPHelperWaitForPID(waitPID);
+  if (!GPHelperWaitForPID(waitPID, GPHelperQuitTimeout)) {
+    // Quit was cancelled: leave the update ready, as the AppImage apply
+    // script does, rather than install under a running app.
+    GPHelperUpdateState(statePath, GPHelperStatusReadyToApply, @"The app did not quit, so the update was not applied.", nil, apply, downloadedPath, nil);
+    return 0;
+  }
 
   if ([mode isEqualToString:@"manual-download"]) {
     GPHelperUpdateState(statePath, GPHelperStatusManualActionRequired, @"The downloaded update requires manual installation.", nil, apply, downloadedPath, nil);
@@ -714,17 +729,27 @@ static int GPHelperApply(NSDictionary *plan, NSString *statePath, NSInteger wait
       return 1;
     }
 
-    NSDictionary *result = GPHelperRunTask(msiexecPath, [NSArray arrayWithObjects:@"/i", downloadedPath, nil]);
-    if ([[result objectForKey:@"exitCode"] intValue] != 0) {
-      NSString *stderrText = GPHelperStringValue([result objectForKey:@"stderr"]);
-      if ([stderrText length] == 0) {
-        stderrText = @"msiexec returned a failure exit code.";
-      }
-      GPHelperUpdateState(statePath, GPHelperStatusFailed, @"MSI installation failed.", nil, apply, downloadedPath, [NSDictionary dictionaryWithObject:stderrText forKey:@"message"]);
+    // A progress window but no questions (/passive), no reboot by the
+    // installer (/norestart; 3010 and 1641 mean one is needed or under
+    // way, and the update is still installed), and a verbose log beside
+    // the state file for when it fails.
+    NSString *logPath = [[statePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"msiexec.log"];
+    NSArray *arguments = [NSArray arrayWithObjects:@"/i", downloadedPath, @"/passive", @"/norestart", @"/l*v", logPath, nil];
+    NSDictionary *result = GPHelperRunTask(msiexecPath, arguments);
+    int exitCode = [[result objectForKey:@"exitCode"] intValue];
+    if (exitCode == 1602) {
+      GPHelperUpdateState(statePath, GPHelperStatusFailed, @"The MSI installation was cancelled.", nil, apply, downloadedPath, [NSDictionary dictionaryWithObject:@"msiexec exit code 1602: cancelled by the user." forKey:@"message"]);
+      return 1;
+    }
+    if (exitCode != 0 && exitCode != 3010 && exitCode != 1641) {
+      NSString *message = [NSString stringWithFormat:@"msiexec exit code %d; see %@", exitCode, logPath];
+      GPHelperUpdateState(statePath, GPHelperStatusFailed, @"MSI installation failed.", nil, apply, downloadedPath, [NSDictionary dictionaryWithObject:message forKey:@"message"]);
       return 1;
     }
 
-    GPHelperUpdateState(statePath, GPHelperStatusCompleted, @"MSI installation completed.", nil, apply, downloadedPath, nil);
+    GPHelperUpdateState(statePath, GPHelperStatusCompleted,
+      (exitCode == 0 ? @"MSI installation completed." : @"MSI installation completed; Windows needs a restart to finish it."),
+      nil, apply, downloadedPath, nil);
     GPHelperLaunchProcess(relaunchPath, [NSArray array]);
     return 0;
   }

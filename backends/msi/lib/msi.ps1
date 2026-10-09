@@ -1556,7 +1556,7 @@ function Prepare-GpMsiInstallTree {
 
   $noticeReport = Write-GpMsiNoticeReport -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot -LogPath $LogPath
   $metadataRoot = Ensure-GpDirectory -Path (Resolve-GpPathRelativeToBase -BasePath $WorkPaths.InstallRoot -Path $Config.MetadataRootRelative)
-  $updateRuntimeConfigPath = Write-GpUpdateRuntimeConfig -Context $Context -Backend "msi" -MetadataRoot $metadataRoot
+  $updateRuntimeConfigPath = Write-GpUpdateRuntimeConfig -Context $Context -Backend "msi" -MetadataRoot $metadataRoot -LauncherRelativePath $Config.LauncherFileName
   if (-not [string]::IsNullOrWhiteSpace($updateRuntimeConfigPath)) {
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Generated updater runtime config: {0}" -f $updateRuntimeConfigPath)
   }

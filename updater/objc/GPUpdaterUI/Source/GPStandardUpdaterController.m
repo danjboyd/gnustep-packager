@@ -279,11 +279,18 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
     executablePath = [arguments count] > 0 ? [arguments objectAtIndex:0] : nil;
   }
 
+  // Relaunched after the update: the package's launcher when it has one
+  // (it sets up the environment the app runs in), else this executable.
+  NSString *relaunchPath = [configuration relaunchExecutablePath];
+  if ([relaunchPath length] == 0) {
+    relaunchPath = executablePath;
+  }
+
   NSMutableDictionary *execution = [NSMutableDictionary dictionary];
   [execution setObject:statePath forKey:@"stateFile"];
   [execution setObject:stateRoot forKey:@"workingRoot"];
-  if ([executablePath length] > 0) {
-    [execution setObject:executablePath forKey:@"relaunchExecutablePath"];
+  if ([relaunchPath length] > 0) {
+    [execution setObject:relaunchPath forKey:@"relaunchExecutablePath"];
   }
 
   NSMutableDictionary *linuxInfo = [NSMutableDictionary dictionary];
