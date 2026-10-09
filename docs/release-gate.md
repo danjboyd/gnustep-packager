@@ -118,3 +118,24 @@ Confirm these outputs exist:
 - `usr/metadata/THIRD-PARTY-NOTICES.txt` inside the extracted AppDir
 
 See [../backends/appimage/README.md](../backends/appimage/README.md).
+
+## DMG Requirement
+Run on a macOS host:
+
+```powershell
+./scripts/run-packaging-pipeline.ps1 `
+  -Manifest examples/sample-macos/package.manifest.json `
+  -Backend dmg `
+  -RunSmoke
+```
+
+Confirm these outputs exist:
+- `<name>-<version>-macos-<arch>.dmg`
+- `<artifact-base>.metadata.json`
+- `<artifact-base>.diagnostics.txt`
+- `validation-summary.json` with every check `pass` or `info`
+
+For a release signed with a Developer ID, also set
+`backends.dmg.notarization.required` and
+`backends.dmg.validation.requireGatekeeperAcceptance` to `true` so an
+unnotarized image cannot pass. See [dmg-backend.md](dmg-backend.md).

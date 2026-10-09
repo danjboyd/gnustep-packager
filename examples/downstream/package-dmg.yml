@@ -1,0 +1,73 @@
+name: package-macos-dmg
+
+# Builds, stages, packages and validates a macOS DMG with the dmg backend on a
+# GitHub-hosted macOS runner. The reusable package-gnustep-app.yml workflow does
+# not cover the dmg backend yet; this job calls the shared pipeline directly.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    runs-on: macos-latest
+    env:
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout App
+        uses: actions/checkout@v4
+
+      - name: Checkout gnustep-packager
+        uses: actions/checkout@v4
+        with:
+          repository: <owner>/gnustep-packager
+          ref: main
+          path: .gnustep-packager
+
+      # Optional: Developer ID signing and notarization. Skip this step (and
+      # keep backends.dmg.signing.identity "-") for ad-hoc builds.
+      - name: Import Signing Certificate And Notary Profile
+        if: ${{ env.MACOS_CERTIFICATE_P12 != '' }}
+        env:
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p "" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "" "$keychain"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          xcrun notarytool store-credentials ci-notary --apple-id "$NOTARY_APPLE_ID" \
+            --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_APP_PASSWORD" --keychain "$keychain"
+          # The manifest names this variable in backends.dmg.notarization.keychainProfileEnvVar.
+          echo "MYAPP_NOTARY_PROFILE=ci-notary" >> "$GITHUB_ENV"
+
+      - name: Package And Validate DMG
+        run: |
+          ./.gnustep-packager/scripts/run-packaging-pipeline.ps1 `
+            -Manifest package.manifest.json `
+            -Backend dmg `
+            -PackageVersion "${{ github.ref_type == 'tag' && github.ref_name || '' }}" `
+            -RunSmoke
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: |
+            dist/packages/*.dmg
+            dist/packages/*.metadata.json
+            dist/packages/*.diagnostics.txt
+            dist/logs

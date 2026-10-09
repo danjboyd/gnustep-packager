@@ -7,6 +7,7 @@
 | Host OS | Windows x64 | Supported | MSI backend local and CI validation path |
 | Host OS | Linux x64 (`ubuntu-latest` default runner) | Supported | AppImage backend local and CI validation path |
 | Host OS | Linux x64 self-hosted GNUstep runner | Supported | Reusable workflow accepts caller-supplied `runs-on-appimage` labels |
+| Host OS | macOS 13+ (Apple Silicon or Intel; `macos-latest` in CI) | Supported | DMG backend local and CI validation path; verified on macOS 26.5 with Xcode 26.4 |
 | PowerShell | PowerShell 7+ | Supported | Shared scripts and tests use `pwsh` |
 | Toolchain | MSYS2 `CLANG64` x64 | Supported | Current runtime discovery and launcher assumptions target this layout |
 | Toolchain | clang-based GNUstep stage on Linux x64 | Supported | AppImage backend expects a self-contained staged payload |
@@ -19,6 +20,8 @@
 | Workflow | Additive backend prerequisite packages | Supported | Reusable workflow exposes `msys2-packages` and `appimage-apt-packages` |
 | Backend | MSI | Supported | Build, package, ZIP, and backend validation implemented |
 | Backend | AppImage | Supported | AppDir transform, `AppRun`, artifact build, and backend validation implemented |
+| Backend | DMG | Supported | Native `.app` bundles; Apple tools only; APFS/HFS+, UDZO/ULFO; ad-hoc or identity signing; notarization hook (not yet exercised against Apple's service) |
+| Manifest | `platformOverrides` | Supported | Per-platform overlays selected by `-Platform`, backend, or host |
 | Install scope | MSI perMachine | Supported | Packaging works; validation may require elevation |
 | Install scope | MSI perUser | Supported | Used by sample fixture for local and CI validation |
 | Diagnostics | MSI metadata and diagnostics sidecars | Supported | Package step emits `.metadata.json` and `.diagnostics.txt` next to the MSI |
@@ -43,6 +46,8 @@
 | AppImage package build on Linux | Supported |
 | AppImage extractability and desktop-entry validation | Supported |
 | AppImage smoke launch path | Supported | `launch-only`, `open-file`, `custom-arguments`, and `marker-file` modes |
+| DMG verify, hidden mount, codesign and Gatekeeper assessment | Supported | Gatekeeper rejection is recorded unless acceptance is required |
+| DMG launch smoke | Supported | Runs the bundle executable directly with a startup window, then kills it |
 
 ## Consumer Boundary
 The current support contract is intentionally narrow:
@@ -50,7 +55,10 @@ The current support contract is intentionally narrow:
 - Windows packaging expects MSYS2-style GNUstep runtime layout
 - Linux AppImage packaging expects a self-contained staged Linux runtime tree
 - launchers assume a private `runtime/` tree by default
-- the example fixtures currently validate x64 Windows MSI and x64 Linux AppImage
+- the example fixtures currently validate x64 Windows MSI, x64 Linux AppImage
+  and universal macOS DMG
+- the DMG backend packages native macOS bundles and does not render the
+  GNUstep launch contract, packaged defaults or theme inputs
 - consumers are expected to stage any shipped notice files explicitly
 - host dependency provisioning supports MSYS2 and Debian/Ubuntu-style apt paths only
 - automatic host dependency inference is explicitly out of scope

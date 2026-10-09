@@ -92,6 +92,9 @@ Shared behavior is driven by layered configuration:
 - core defaults
 - backend defaults
 - app overrides
+- per-platform app overrides (`platformOverrides`), for apps whose payload
+  differs by platform, such as a GNUstep runtime payload on Linux and a native
+  bundle on macOS
 
 This keeps the manifest concise while avoiding hidden backend-specific behavior
 in shared code.
@@ -111,6 +114,11 @@ in shared code.
 
 - `backends/appimage/`
   Linux AppImage backend
+
+- `backends/dmg/`
+  macOS DMG backend for native app bundles. A native bundle carries its own
+  launch behavior, so this backend does not render the launch contract; it
+  reports the launch settings it ignores (see [dmg-backend.md](dmg-backend.md))
 
 ## MSI References
 The Windows backend design details live in:
