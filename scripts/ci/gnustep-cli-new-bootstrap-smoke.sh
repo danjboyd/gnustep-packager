@@ -7,8 +7,18 @@ install_root="${GP_GNUSTEP_CLI_ROOT:-/tmp/gnustep-cli-new}"
 log_root="${GP_GNUSTEP_CLI_LOG_ROOT:-/tmp/gnustep-cli-new-logs}"
 smoke_root="${GP_GNUSTEP_CLI_SMOKE_ROOT:-/tmp/gnustep-cli-new-smoke}"
 
+# The POSIX bootstrap only handles Linux and OpenBSD hosts. On MSYS2 the
+# Windows artifacts are installed by the PowerShell bootstrap instead.
+case "$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')" in
+  mingw*|msys*|clang*|ucrt*|cygwin*) windows_host=1 ;;
+  *) windows_host=0 ;;
+esac
+if [ "$windows_host" -eq 1 ]; then
+  bootstrap_url=$(printf '%s\n' "$bootstrap_url" | sed 's/gnustep-bootstrap\.sh$/gnustep-bootstrap.ps1/')
+fi
+
 mkdir -p "$install_root" "$log_root" "$smoke_root"
-bootstrap_path="$smoke_root/gnustep-bootstrap.sh"
+bootstrap_path="$smoke_root/$(basename "$bootstrap_url")"
 report_path="$log_root/gnustep-cli-new-blocker-report.md"
 host_context_path="$log_root/gnustep-cli-new-host-context.log"
 path_context_path="$log_root/gnustep-cli-new-path-context.log"
@@ -23,9 +33,12 @@ run_logged() {
     done
     printf '\n'
   } >"$log_path"
-  "$@" >>"$log_path" 2>&1
-  status_code="$?"
+  status_code=0
+  "$@" >>"$log_path" 2>&1 || status_code="$?"
   cat "$log_path"
+  if [ "$status_code" -ne 0 ]; then
+    printf 'command failed with exit code %s (log: %s)\n' "$status_code" "$log_path" >&2
+  fi
   return "$status_code"
 }
 
@@ -95,7 +108,7 @@ write_report() {
     printf '%s\n\n' "- log root: $log_root"
     printf '## Command Contract\n\n'
     printf '```sh\n'
-    printf 'gnustep-bootstrap.sh --json --yes setup --user --root "%s" --manifest "%s"\n' "$install_root" "$manifest_url"
+    printf '%s --json --yes setup --user --root "%s" --manifest "%s"\n' "$(basename "$bootstrap_url")" "$install_root" "$manifest_url"
     printf 'gnustep --version\n'
     printf 'gnustep doctor --json --manifest "%s"\n' "$manifest_url"
     printf 'gnustep new cli-tool HelloPackager --json\n'
@@ -145,13 +158,36 @@ printf 'gnustep-cli-new root: %s\n' "$install_root" | tee -a "$log_root/gnustep-
 
 run_logged "$log_root/gnustep-cli-new-bootstrap-download.log" \
   curl -fsSL "$bootstrap_url" -o "$bootstrap_path"
-chmod +x "$bootstrap_path"
 
-run_logged "$log_root/gnustep-cli-new-setup.log" \
-  "$bootstrap_path" --json --yes setup --user --root "$install_root" \
-  --manifest "$manifest_url"
-
-PATH="$install_root/bin:$install_root/Tools:$install_root/System/Tools:$PATH"
+if [ "$windows_host" -eq 1 ]; then
+  # The MSYS2 shell's minimal PATH usually omits PowerShell 7.
+  pwsh_cmd=""
+  for candidate in pwsh "/c/Program Files/PowerShell/7/pwsh.exe" powershell.exe; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      pwsh_cmd="$candidate"
+      break
+    fi
+  done
+  if [ -z "$pwsh_cmd" ]; then
+    printf 'no PowerShell found for gnustep-bootstrap.ps1\n' | tee "$log_root/gnustep-cli-new-setup.log" >&2
+    exit 1
+  fi
+  # The PowerShell bootstrap runs bare `tar` on Windows paths. MSYS2's GNU tar
+  # reads `D:` as a remote host, so put Windows' bsdtar first for this call.
+  run_logged "$log_root/gnustep-cli-new-setup.log" \
+    env PATH="/c/Windows/System32:$PATH" "$pwsh_cmd" -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$bootstrap_path")" \
+    --json --yes setup --user --root "$(cygpath -w "$install_root")" \
+    --manifest "$manifest_url"
+  # Keep the managed root's private usr/bin out of this shell: a second MSYS2
+  # runtime ahead of ours replaces cat, tail and friends mid-script.
+  PATH="$install_root/bin:$install_root/Tools:$install_root/System/Tools:$PATH"
+else
+  chmod +x "$bootstrap_path"
+  run_logged "$log_root/gnustep-cli-new-setup.log" \
+    "$bootstrap_path" --json --yes setup --user --root "$install_root" \
+    --manifest "$manifest_url"
+  PATH="$install_root/bin:$install_root/Tools:$install_root/System/Tools:$PATH"
+fi
 export PATH
 
 write_path_context
@@ -167,4 +203,14 @@ cd "$work_root"
 run_logged "$log_root/gnustep-cli-new-new.json" gnustep new cli-tool HelloPackager --json
 cd HelloPackager
 run_logged "$log_root/gnustep-cli-new-build.json" gnustep build --json
-run_logged "$log_root/gnustep-cli-new-run.json" gnustep run --json
+if [ "$windows_host" -eq 1 ]; then
+  # Match the MSI workflow: run the built executable directly on Windows.
+  hello_exe="$(pwd)/obj/HelloPackager.exe"
+  if [ ! -f "$hello_exe" ]; then
+    printf 'expected Windows smoke executable was not produced: %s\n' "$hello_exe" | tee "$log_root/gnustep-cli-new-run.json" >&2
+    exit 1
+  fi
+  run_logged "$log_root/gnustep-cli-new-run.json" "$hello_exe"
+else
+  run_logged "$log_root/gnustep-cli-new-run.json" gnustep run --json
+fi

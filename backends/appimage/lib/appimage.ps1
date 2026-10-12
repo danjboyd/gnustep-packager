@@ -181,6 +181,7 @@ function Get-GpAppImageMimeEntries {
 function Get-GpAppImageDesktopMimeTypes {
   param(
     [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
     [psobject[]]$MimeEntries
   )
 
@@ -819,6 +820,7 @@ function Write-GpAppImageMimePackage {
     [Parameter(Mandatory = $true)]
     [string]$AppDirRoot,
     [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
     [psobject[]]$MimeEntries,
     [Parameter(Mandatory = $true)]
     [string]$LogPath
@@ -859,6 +861,7 @@ function Write-GpAppImageDesktopEntry {
     [Parameter(Mandatory = $true)]
     [string]$AppDirRoot,
     [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
     [psobject[]]$MimeEntries,
     [Parameter(Mandatory = $true)]
     [string]$LogPath
@@ -1007,6 +1010,27 @@ function Write-GpAppImageAppRun {
         $lines.Add(('if [ -z "${' + $key + '+x}" ]; then')) | Out-Null
         $lines.Add(("  export {0}={1}" -f $key, $valueExpression)) | Out-Null
         $lines.Add("fi") | Out-Null
+      }
+
+      "prepend" {
+        # The packaged value goes first; the host's value (or hostDefault
+        # when the host has none) follows, so search paths such as
+        # XDG_DATA_DIRS keep the desktop's entries.
+        # GP_HOST_<key> keeps the host's value from the first launch, so an
+        # app relaunched from inside the AppImage (after an update, from a
+        # different mount) doesn't stack packaged entries.
+        $packagedPart = $valueExpression.Substring(1, $valueExpression.Length - 2)
+        $hostKey = "GP_HOST_" + $key
+        $lines.Add(('if [ -z "${' + $hostKey + '+x}" ]; then')) | Out-Null
+        $lines.Add(('  export ' + $hostKey + '="${' + $key + ':-}"')) | Out-Null
+        $lines.Add('fi') | Out-Null
+        $hostDefault = if (($entry -is [System.Collections.IDictionary]) -and $entry.Contains("hostDefault")) { [string]$entry["hostDefault"] } else { "" }
+        if ([string]::IsNullOrEmpty($hostDefault)) {
+          $lines.Add(('export ' + $key + '="' + $packagedPart + '${' + $hostKey + ':+:${' + $hostKey + '}}"')) | Out-Null
+        } else {
+          $hostDefaultPart = Escape-GpShDoubleQuotedLiteral -Value $hostDefault
+          $lines.Add(('export ' + $key + '="' + $packagedPart + ':${' + $hostKey + ':-' + $hostDefaultPart + '}"')) | Out-Null
+        }
       }
 
       default {

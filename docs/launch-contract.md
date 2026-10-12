@@ -44,6 +44,12 @@ Current assignment policies:
 - `ifUnset`
   Set the variable only when the variable is not already defined in the
   process environment.
+- `prepend`
+  Put the value in front of the variable's current value, joined with `:`
+  (AppImage) or `;` (MSI), for search paths such as `XDG_DATA_DIRS` that
+  must keep the host's entries. An optional `hostDefault` (AppImage) is the
+  host value assumed when the variable is unset, such as
+  `/usr/local/share:/usr/share` for `XDG_DATA_DIRS`.
 
 ## Runtime Tokens
 Backend renderers may expand these tokens inside launch-environment values:

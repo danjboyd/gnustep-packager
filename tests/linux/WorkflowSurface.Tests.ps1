@@ -25,6 +25,7 @@ Describe "Reusable workflow surface" {
     foreach ($pattern in @(
       "runs-on-msi:",
       "runs-on-appimage:",
+      "container-appimage:",
       "skip-default-host-setup:",
       "msys2-packages:",
       "appimage-apt-packages:",
@@ -180,6 +181,7 @@ Describe "Reusable workflow surface" {
     foreach ($pattern in @(
       "runs-on-msi",
       "runs-on-appimage",
+      "container-appimage",
       "preflight-command",
       "gnustep-cli-manifest-url",
       "gnustep-cli-new",

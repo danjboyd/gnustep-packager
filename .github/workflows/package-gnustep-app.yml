@@ -30,6 +30,13 @@ on:
         required: false
         type: string
         default: '["ubuntu-latest"]'
+      # An image to run the AppImage job in (with PowerShell and the
+      # AppImage tools); usually with skip-default-host-setup: true. GHCR
+      # images get the workflow token as their registry login.
+      container-appimage:
+        required: false
+        type: string
+        default: ""
       skip-default-host-setup:
         required: false
         type: boolean
@@ -116,6 +123,7 @@ on:
 jobs:
   package:
     runs-on: ${{ fromJSON(inputs.backend == 'appimage' && inputs.runs-on-appimage || inputs.runs-on-msi) }}
+    container: ${{ (inputs.backend == 'appimage' && startsWith(inputs.container-appimage, 'ghcr.io/')) && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.container-appimage, github.actor, github.token)) || (inputs.backend == 'appimage' && inputs.container-appimage) || '' }}
     outputs:
       resolved-version: ${{ steps.manifest.outputs.resolved_version }}
       package-root: ${{ steps.manifest.outputs.package_root }}

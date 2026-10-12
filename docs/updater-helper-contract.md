@@ -22,7 +22,8 @@ Example document:
     "displayName": "My GNUstep App",
     "currentVersion": "1.2.2",
     "backend": "appimage",
-    "channel": "stable"
+    "channel": "stable",
+    "publicEDKey": "base64 Ed25519 public key (optional; when present the helper requires asset.edSignature)"
   },
   "release": {
     "version": "1.2.3",
@@ -36,6 +37,7 @@ Example document:
     "name": "MyGNUstepApp-1.2.3-x86_64.AppImage",
     "url": "https://github.com/example-org/my-gnustep-app/releases/download/v1.2.3/MyGNUstepApp-1.2.3-x86_64.AppImage",
     "sha256": "abc123...",
+    "edSignature": "base64 Ed25519 signature of the file (when the package has a publicEDKey)",
     "sizeBytes": 12345678,
     "updateInformation": "gh-releases-zsync|example-org|my-gnustep-app|latest|MyGNUstepApp-*x86_64.AppImage.zsync",
     "zsync": {

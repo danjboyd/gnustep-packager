@@ -62,6 +62,19 @@ are added automatically. Override or extend that list through
 `appimage-apt-packages`, or set
 `skip-default-host-setup: true` on a pre-provisioned self-hosted runner.
 
+Instead of a pre-provisioned runner, the AppImage job can run in a container
+image that already holds the GNUstep toolchain: pass it as
+`container-appimage` (for example `ghcr.io/owner/app-ci@sha256:...`, pinned
+by digest) together with `skip-default-host-setup: true`. The image must
+provide PowerShell (`pwsh`), `git`, and the AppImage tools
+(`squashfs-tools`, `desktop-file-utils`, `file`, `zsync`); `appimagetool`
+is bootstrapped and run with `APPIMAGE_EXTRACT_AND_RUN`, so FUSE isn't
+needed. A GHCR image gets the workflow's token as its registry login, so a
+private package of the calling repository can be pulled; images from other
+registries must be public. A smoke test that opens a window needs a display:
+start Xvfb in `preflight-command` and export `DISPLAY` through
+`$GITHUB_ENV`.
+
 After installing backend host prerequisites, the default MSI and AppImage paths
 run the repo-owned `scripts/ci/gnustep-cli-new-bootstrap-smoke.sh` script. That
 smoke downloads the selected bootstrap script, runs `gnustep-bootstrap.sh
@@ -96,6 +109,7 @@ Primary inputs:
 - `package-version`
 - `runs-on-msi`
 - `runs-on-appimage`
+- `container-appimage`
 - `skip-default-host-setup`
 - `msys2-packages`
 - `appimage-apt-packages`

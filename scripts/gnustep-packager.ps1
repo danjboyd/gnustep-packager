@@ -4,6 +4,8 @@ param(
   [string]$Command = "describe",
   [string]$Manifest = "examples/sample-gui/package.manifest.json",
   [string]$Backend,
+  [ValidateSet("", "windows", "linux", "macos")]
+  [string]$Platform,
   [string]$PackageVersion,
   [switch]$InstallHostDependencies,
   [switch]$DryRun,
@@ -15,7 +17,7 @@ $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "lib/core.ps1")
 
-$context = Get-GpManifestContext -Path $Manifest -PackageVersion $PackageVersion
+$context = Get-GpManifestContext -Path $Manifest -PackageVersion $PackageVersion -Backend $Backend -Platform $Platform
 $manifestData = $context.Manifest
 $issues = @()
 $issues += @(Test-GpManifestSchema -Path $context.ManifestPath)
@@ -37,6 +39,7 @@ switch ($Command) {
   "manifest-check" {
     Write-Host "Manifest is valid: $($context.ManifestPath)"
     Write-Host "Package: $($summary.Name) $($summary.Version)"
+    Write-Host "Target platform: $($context.TargetPlatform)$(if ($context.PlatformOverrideApplied) { ' (platformOverrides applied)' })"
     if ($summary.Profiles.Count -gt 0) {
       Write-Host "Profiles: $([string]::Join(', ', $summary.Profiles))"
     }
@@ -71,6 +74,7 @@ switch ($Command) {
       Write-Host "Version override: $($context.PackageVersionOverride)"
     }
     Write-Host "Manufacturer: $($summary.Manufacturer)"
+    Write-Host "Target platform: $($context.TargetPlatform)$(if ($context.PlatformOverrideApplied) { ' (platformOverrides applied)' })"
     Write-Host "Shell kind: $($summary.ShellKind)"
     if ($summary.Profiles.Count -gt 0) {
       Write-Host "Profiles: $([string]::Join(', ', $summary.Profiles))"
@@ -151,7 +155,7 @@ switch ($Command) {
     }
 
     $backendLogPath = New-GpCommandLogPath -Context $context -CommandName ("package-" + $backendName)
-    & $backendScript -Manifest $context.ManifestPath -PackageVersion $context.PackageVersionOverride -DryRun:$DryRun -LogPath $backendLogPath
+    & $backendScript -Manifest $context.ManifestPath -PackageVersion $context.PackageVersionOverride -Platform $context.TargetPlatform -DryRun:$DryRun -LogPath $backendLogPath
     if (-not $DryRun) {
       Write-Host "Backend package command completed. Log: $backendLogPath"
     }
@@ -167,7 +171,7 @@ switch ($Command) {
       }
 
       $backendLogPath = New-GpCommandLogPath -Context $context -CommandName ("validate-" + $backendName)
-      & $backendScript -Manifest $context.ManifestPath -PackageVersion $context.PackageVersionOverride -DryRun:$DryRun -RunSmoke:$RunSmoke -LogPath $backendLogPath
+      & $backendScript -Manifest $context.ManifestPath -PackageVersion $context.PackageVersionOverride -Platform $context.TargetPlatform -DryRun:$DryRun -RunSmoke:$RunSmoke -LogPath $backendLogPath
       if (-not $DryRun) {
         Write-Host "Backend validation completed. Log: $backendLogPath"
       }

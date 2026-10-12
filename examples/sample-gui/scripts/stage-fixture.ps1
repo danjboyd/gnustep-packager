@@ -49,7 +49,13 @@ $defaultsSource = $defaultsCandidates | Where-Object { Test-Path $_ } | Select-O
 if ($defaultsSource) {
   Copy-Item -Force $defaultsSource (Join-Path $runtimeBin "defaults.exe")
 } else {
-  Set-Content -Path (Join-Path $runtimeBin "defaults.exe") -Value "fixture runtime launcher"
+  # No GNUstep defaults.exe on this host. The launcher runs defaults.exe to seed
+  # packagedDefaults, so stage the executable stand-in, not a placeholder file.
+  $fixtureDefaults = [System.IO.Path]::GetFullPath((Join-Path (Join-Path (Get-Location).Path "out/build") "fixture-defaults.exe"))
+  if (-not (Test-Path $fixtureDefaults)) {
+    throw "Expected fixture defaults stand-in not found: $fixtureDefaults"
+  }
+  Copy-Item -Force $fixtureDefaults (Join-Path $runtimeBin "defaults.exe")
 }
 
 $fontConfigSource = $fontConfigCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1

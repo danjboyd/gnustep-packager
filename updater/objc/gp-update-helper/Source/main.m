@@ -1,4 +1,6 @@
 #import <Foundation/Foundation.h>
+#import "GPUpdaterDownload.h"
+#import "monocypher/monocypher-ed25519.h"
 
 #if defined(_WIN32)
 #import <windows.h>
@@ -218,24 +220,19 @@ static BOOL GPHelperCopyURLToPath(NSURL *url, NSString *destinationPath, NSStrin
   }
 
   GPHelperUpdateState(statePath, GPHelperStatusDownloading, @"Downloading update...", nil, nil, nil, nil);
-  NSData *data = [NSData dataWithContentsOfURL:url];
-  if (data == nil) {
+  unsigned long long totalBytes = 0;
+  NSError *downloadError = nil;
+  if (!GPUpdaterDownloadToFile(url, destinationPath, &totalBytes, &downloadError)) {
     if (error != NULL) {
-      *error = GPHelperSimpleError(4, @"The update payload could not be downloaded.");
+      NSString *reason = [downloadError localizedDescription];
+      *error = GPHelperSimpleError(4, [reason length] > 0
+        ? [NSString stringWithFormat:@"The update payload could not be downloaded: %@", reason]
+        : @"The update payload could not be downloaded.");
     }
     return NO;
   }
 
-  NSString *directory = [destinationPath stringByDeletingLastPathComponent];
-  [[NSFileManager defaultManager] createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL];
-  if (![data writeToFile:destinationPath atomically:YES]) {
-    if (error != NULL) {
-      *error = GPHelperSimpleError(9, @"The downloaded payload could not be written to disk.");
-    }
-    return NO;
-  }
 
-  unsigned long long totalBytes = [data length];
   NSDictionary *progress = [NSDictionary dictionaryWithObjectsAndKeys:
     [NSNumber numberWithDouble:1.0], @"fractionCompleted",
     [NSNumber numberWithUnsignedLongLong:totalBytes], @"bytesReceived",
@@ -314,6 +311,54 @@ static BOOL GPHelperVerifySHA256(NSString *path, NSString *expectedSHA256, NSErr
   return YES;
 }
 
+static NSData *GPHelperBase64Data(NSString *value) {
+  if ([value length] == 0) {
+    return nil;
+  }
+  return [[[NSData alloc] initWithBase64EncodedString:value
+                                              options:NSDataBase64DecodingIgnoreUnknownCharacters] autorelease];
+}
+
+// Checks the Ed25519 signature (base64, over the file's bytes, as
+// Sparkle's sign_update makes) against the public key (base64, 32 bytes).
+static BOOL GPHelperVerifyEdSignature(NSString *path, NSString *signature, NSString *publicKey, NSError **error) {
+  NSData *keyData = GPHelperBase64Data(publicKey);
+  if ([keyData length] != 32) {
+    if (error != NULL) {
+      *error = GPHelperSimpleError(10, @"The app's update signing key is not valid.");
+    }
+    return NO;
+  }
+
+  NSData *signatureData = GPHelperBase64Data(signature);
+  if ([signatureData length] != 64) {
+    if (error != NULL) {
+      *error = GPHelperSimpleError(11, [signature length] == 0 ? @"The update is not signed." : @"The update's signature is not valid.");
+    }
+    return NO;
+  }
+
+  NSData *fileData = [NSData dataWithContentsOfMappedFile:path];
+  if (fileData == nil) {
+    if (error != NULL) {
+      *error = GPHelperSimpleError(12, @"The downloaded file could not be read to check its signature.");
+    }
+    return NO;
+  }
+
+  if (crypto_ed25519_check((const uint8_t *)[signatureData bytes],
+                           (const uint8_t *)[keyData bytes],
+                           (const uint8_t *)[fileData bytes],
+                           (size_t)[fileData length]) != 0) {
+    if (error != NULL) {
+      *error = GPHelperSimpleError(13, @"The downloaded file's signature does not match: it was not signed by the app's publisher, or it was changed.");
+    }
+    return NO;
+  }
+
+  return YES;
+}
+
 static BOOL GPHelperSetExecutable(NSString *path) {
 #if defined(_WIN32)
   (void)path;
@@ -324,7 +369,13 @@ static BOOL GPHelperSetExecutable(NSString *path) {
 #endif
 }
 
-static BOOL GPHelperWaitForPID(NSInteger pidValue) {
+// How long the helper waits for the app to quit before applying. The app
+// may not quit at all: its user can cancel Quit (unsaved documents).
+static const NSTimeInterval GPHelperQuitTimeout = 120.0;
+
+// YES once the process has gone, NO if it is still running after the
+// timeout.
+static BOOL GPHelperWaitForPID(NSInteger pidValue, NSTimeInterval timeout) {
   if (pidValue <= 0) {
     return YES;
   }
@@ -334,11 +385,15 @@ static BOOL GPHelperWaitForPID(NSInteger pidValue) {
   if (processHandle == NULL) {
     return YES;
   }
-  WaitForSingleObject(processHandle, INFINITE);
+  DWORD waited = WaitForSingleObject(processHandle, (DWORD)(timeout * 1000.0));
   CloseHandle(processHandle);
-  return YES;
+  return waited != WAIT_TIMEOUT;
 #else
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
   while (kill((pid_t)pidValue, 0) == 0 || errno == EPERM) {
+    if ([deadline timeIntervalSinceNow] <= 0) {
+      return NO;
+    }
     [NSThread sleepForTimeInterval:0.5];
     errno = 0;
   }
@@ -383,6 +438,93 @@ static BOOL GPHelperLaunchProcess(NSString *launchPath, NSArray *arguments) {
   return YES;
 }
 
+#if !defined(_WIN32)
+// A single-quoted shell word.
+static NSString *GPHelperShellQuote(NSString *value) {
+  NSString *escaped = [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+  return [NSString stringWithFormat:@"'%@'", escaped];
+}
+
+// The script that applies an AppImage update once the app has quit, run
+// with the system's /bin/sh. The helper and its libraries are inside the
+// AppImage, whose mount goes when the app quits, so applying can't rely on
+// anything there. The script waits for the app (giving up after two
+// minutes, when quitting was cancelled), then either swaps the downloaded
+// AppImage in (appimage-replace) or has appimageupdatetool overwrite the
+// current one (appimage-update), and starts the AppImage at its path again.
+static NSString *GPHelperWriteAppImageApplyScript(NSString *workingRoot,
+                                                  NSString *mode,
+                                                  NSString *currentAppImagePath,
+                                                  NSString *downloadedPath,
+                                                  NSString *toolPath,
+                                                  NSString *statePath) {
+  NSMutableString *script = [NSMutableString string];
+  [script appendString:@"#!/bin/sh\n"
+    "# Written by gp-update-helper; run as: sh apply-appimage.sh <app pid>\n"
+    "unset LD_LIBRARY_PATH LD_PRELOAD APPDIR APPIMAGE ARGV0 OWD GNUSTEP_PATHPREFIX_LIST\n"];
+  [script appendFormat:@"current=%@\n", GPHelperShellQuote(currentAppImagePath)];
+  [script appendFormat:@"downloaded=%@\n", GPHelperShellQuote(downloadedPath != nil ? downloadedPath : @"")];
+  [script appendFormat:@"tool=%@\n", GPHelperShellQuote(toolPath != nil ? toolPath : @"")];
+  [script appendFormat:@"state=%@\n", GPHelperShellQuote(statePath)];
+  [script appendFormat:@"mode=%@\n", GPHelperShellQuote(mode)];
+  [script appendString:
+    @"exec >>\"${state%/*}/apply-appimage.log\" 2>&1\n"
+    "state() {\n"
+    "  printf '{\"formatVersion\": 1, \"status\": \"%s\", \"message\": \"%s\"}\\n' \"$1\" \"$2\" >\"$state.tmp\" && mv \"$state.tmp\" \"$state\"\n"
+    "}\n"
+    "pid=\"$1\"\n"
+    "waited=0\n"
+    "while [ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null; do\n"
+    "  if [ \"$waited\" -ge 240 ]; then\n"
+    "    state readyToApply 'The app did not quit, so the update was not applied.'\n"
+    "    exit 1\n"
+    "  fi\n"
+    "  sleep 0.5\n"
+    "  waited=$((waited + 1))\n"
+    "done\n"
+    "state applying 'Applying update...'\n"
+    "if [ \"$mode\" = appimage-update ]; then\n"
+    "  if ! \"$tool\" -O \"$current\"; then\n"
+    "    state failed 'appimageupdatetool could not update the AppImage.'\n"
+    "    exit 1\n"
+    "  fi\n"
+    "else\n"
+    "  # Copied next to the current file first, so the swap is a rename\n"
+    "  # within one directory.\n"
+    "  new=\"$current.gpupdate-new\"\n"
+    "  backup=\"$current.gpupdate-backup\"\n"
+    "  rm -f \"$new\" \"$backup\"\n"
+    "  if ! cp \"$downloaded\" \"$new\" || ! chmod +x \"$new\"; then\n"
+    "    rm -f \"$new\"\n"
+    "    state failed 'The new AppImage could not be copied next to the current one.'\n"
+    "    exit 1\n"
+    "  fi\n"
+    "  if ! mv \"$current\" \"$backup\"; then\n"
+    "    rm -f \"$new\"\n"
+    "    state failed 'The current AppImage could not be replaced.'\n"
+    "    exit 1\n"
+    "  fi\n"
+    "  if ! mv \"$new\" \"$current\"; then\n"
+    "    mv \"$backup\" \"$current\"\n"
+    "    rm -f \"$new\"\n"
+    "    state failed 'The current AppImage could not be replaced.'\n"
+    "    exit 1\n"
+    "  fi\n"
+    "  rm -f \"$backup\" \"$downloaded\"\n"
+    "fi\n"
+    "state completed 'The AppImage update was applied.'\n"
+    "nohup \"$current\" >/dev/null 2>&1 </dev/null &\n"
+    "exit 0\n"];
+
+  NSString *scriptPath = [workingRoot stringByAppendingPathComponent:@"apply-appimage.sh"];
+  [[NSFileManager defaultManager] createDirectoryAtPath:workingRoot withIntermediateDirectories:YES attributes:nil error:NULL];
+  if (![[script dataUsingEncoding:NSUTF8StringEncoding] writeToFile:scriptPath atomically:YES]) {
+    return nil;
+  }
+  return scriptPath;
+}
+#endif
+
 static NSDictionary *GPHelperLoadApplyState(NSString *statePath, NSError **error) {
   NSDictionary *state = GPHelperLoadJSONFile(statePath, error);
   if (state == nil) {
@@ -402,28 +544,45 @@ static NSDictionary *GPHelperLoadApplyState(NSString *statePath, NSError **error
 
 static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun) {
   NSDictionary *asset = GPHelperDictionaryValue([plan objectForKey:@"asset"]);
+  NSDictionary *package = GPHelperDictionaryValue([plan objectForKey:@"package"]);
   NSDictionary *execution = GPHelperDictionaryValue([plan objectForKey:@"execution"]);
-  NSDictionary *linux = GPHelperDictionaryValue([execution objectForKey:@"linux"]);
+  NSDictionary *linuxInfo = GPHelperDictionaryValue([execution objectForKey:@"linux"]);
   NSString *backend = GPHelperStringValue([asset objectForKey:@"backend"]);
   NSString *assetName = GPHelperStringValue([asset objectForKey:@"name"]);
   NSString *assetURLString = GPHelperStringValue([asset objectForKey:@"url"]);
   NSString *sha256 = GPHelperStringValue([asset objectForKey:@"sha256"]);
+  // With a public key, every payload must carry a valid signature; without
+  // one (configs from before signing) the SHA-256 alone is checked.
+  NSString *publicEDKey = GPHelperStringValue([package objectForKey:@"publicEDKey"]);
+  NSString *edSignature = GPHelperStringValue([asset objectForKey:@"edSignature"]);
   NSString *workingRoot = GPHelperStringValue([execution objectForKey:@"workingRoot"]);
-  NSString *currentAppImagePath = GPHelperStringValue([linux objectForKey:@"currentAppImagePath"]);
+  NSString *currentAppImagePath = GPHelperStringValue([linuxInfo objectForKey:@"currentAppImagePath"]);
   NSString *downloadRoot = [workingRoot stringByAppendingPathComponent:@"downloads"];
   NSString *downloadedPath = [downloadRoot stringByAppendingPathComponent:assetName];
 
   GPHelperUpdateState(statePath, GPHelperStatusPreparing, @"Preparing update...", nil, nil, nil, nil);
 
-  if ([backend isEqualToString:@"appimage"]) {
-    NSString *appImageUpdatePath = GPHelperFindExecutable([NSArray arrayWithObjects:@"AppImageUpdate", @"appimageupdatetool", nil]);
-    if ([appImageUpdatePath length] > 0 && [currentAppImagePath length] > 0) {
-      NSDictionary *apply = [NSDictionary dictionaryWithObjectsAndKeys:
+  // appimageupdatetool checks only the .zsync file's hashes, so with a
+  // signing key the helper downloads and checks the AppImage itself.
+  if ([backend isEqualToString:@"appimage"] && [publicEDKey length] == 0) {
+    // appimageupdatetool, not the AppImageUpdate GUI: run with -O it
+    // overwrites the current AppImage, so starting it again starts the
+    // new version.
+    NSString *appImageUpdatePath = GPHelperFindExecutable([NSArray arrayWithObjects:@"appimageupdatetool", nil]);
+    if ([appImageUpdatePath length] > 0 && [currentAppImagePath length] > 0 &&
+        [[NSFileManager defaultManager] isWritableFileAtPath:[currentAppImagePath stringByDeletingLastPathComponent]]) {
+      NSMutableDictionary *apply = [NSMutableDictionary dictionaryWithObjectsAndKeys:
         @"appimage-update", @"mode",
         appImageUpdatePath, @"toolPath",
         currentAppImagePath, @"currentAppImagePath",
         nil
       ];
+#if !defined(_WIN32)
+      NSString *scriptPath = GPHelperWriteAppImageApplyScript(workingRoot, @"appimage-update", currentAppImagePath, nil, appImageUpdatePath, statePath);
+      if ([scriptPath length] > 0) {
+        [apply setObject:scriptPath forKey:@"script"];
+      }
+#endif
       GPHelperUpdateState(statePath, GPHelperStatusReadyToApply, @"Restart to let AppImageUpdate apply the new version.", nil, apply, nil, nil);
       return 0;
     }
@@ -431,7 +590,7 @@ static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun)
 
   if (dryRun) {
     NSString *applyMode = [backend isEqualToString:@"msi"] ? @"msi-install" : @"appimage-replace";
-    if ([backend isEqualToString:@"appimage"] && ![[NSFileManager defaultManager] isWritableFileAtPath:currentAppImagePath]) {
+    if ([backend isEqualToString:@"appimage"] && ![[NSFileManager defaultManager] isWritableFileAtPath:[currentAppImagePath stringByDeletingLastPathComponent]]) {
       applyMode = @"manual-download";
     }
 
@@ -469,10 +628,22 @@ static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun)
     return 1;
   }
 
+  if ([publicEDKey length] > 0 && !GPHelperVerifyEdSignature(downloadedPath, edSignature, publicEDKey, &error)) {
+    [[NSFileManager defaultManager] removeItemAtPath:downloadedPath error:NULL];
+    NSDictionary *errorDictionary = [NSDictionary dictionaryWithObjectsAndKeys:
+      [error localizedDescription], @"message",
+      nil
+    ];
+    GPHelperUpdateState(statePath, GPHelperStatusFailed, @"Downloaded update failed verification.", nil, nil, nil, errorDictionary);
+    return 1;
+  }
+
   if ([backend isEqualToString:@"appimage"]) {
     GPHelperSetExecutable(downloadedPath);
 
-    if ([currentAppImagePath length] == 0 || ![[NSFileManager defaultManager] isWritableFileAtPath:currentAppImagePath]) {
+    // Replacing the AppImage renames files in its directory.
+    if ([currentAppImagePath length] == 0 ||
+        ![[NSFileManager defaultManager] isWritableFileAtPath:[currentAppImagePath stringByDeletingLastPathComponent]]) {
       NSDictionary *apply = [NSDictionary dictionaryWithObjectsAndKeys:
         @"manual-download", @"mode",
         nil
@@ -487,11 +658,17 @@ static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun)
       return 0;
     }
 
-    NSDictionary *apply = [NSDictionary dictionaryWithObjectsAndKeys:
+    NSMutableDictionary *apply = [NSMutableDictionary dictionaryWithObjectsAndKeys:
       @"appimage-replace", @"mode",
       currentAppImagePath, @"currentAppImagePath",
       nil
     ];
+#if !defined(_WIN32)
+    NSString *scriptPath = GPHelperWriteAppImageApplyScript(workingRoot, @"appimage-replace", currentAppImagePath, downloadedPath, nil, statePath);
+    if ([scriptPath length] > 0) {
+      [apply setObject:scriptPath forKey:@"script"];
+    }
+#endif
     GPHelperUpdateState(statePath, GPHelperStatusReadyToApply, @"Restart to finish applying the new AppImage.", nil, apply, downloadedPath, nil);
     return 0;
   }
@@ -529,7 +706,12 @@ static int GPHelperApply(NSDictionary *plan, NSString *statePath, NSInteger wait
     return 0;
   }
 
-  GPHelperWaitForPID(waitPID);
+  if (!GPHelperWaitForPID(waitPID, GPHelperQuitTimeout)) {
+    // Quit was cancelled: leave the update ready, as the AppImage apply
+    // script does, rather than install under a running app.
+    GPHelperUpdateState(statePath, GPHelperStatusReadyToApply, @"The app did not quit, so the update was not applied.", nil, apply, downloadedPath, nil);
+    return 0;
+  }
 
   if ([mode isEqualToString:@"manual-download"]) {
     GPHelperUpdateState(statePath, GPHelperStatusManualActionRequired, @"The downloaded update requires manual installation.", nil, apply, downloadedPath, nil);
@@ -543,17 +725,27 @@ static int GPHelperApply(NSDictionary *plan, NSString *statePath, NSInteger wait
       return 1;
     }
 
-    NSDictionary *result = GPHelperRunTask(msiexecPath, [NSArray arrayWithObjects:@"/i", downloadedPath, nil]);
-    if ([[result objectForKey:@"exitCode"] intValue] != 0) {
-      NSString *stderrText = GPHelperStringValue([result objectForKey:@"stderr"]);
-      if ([stderrText length] == 0) {
-        stderrText = @"msiexec returned a failure exit code.";
-      }
-      GPHelperUpdateState(statePath, GPHelperStatusFailed, @"MSI installation failed.", nil, apply, downloadedPath, [NSDictionary dictionaryWithObject:stderrText forKey:@"message"]);
+    // A progress window but no questions (/passive), no reboot by the
+    // installer (/norestart; 3010 and 1641 mean one is needed or under
+    // way, and the update is still installed), and a verbose log beside
+    // the state file for when it fails.
+    NSString *logPath = [[statePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"msiexec.log"];
+    NSArray *arguments = [NSArray arrayWithObjects:@"/i", downloadedPath, @"/passive", @"/norestart", @"/l*v", logPath, nil];
+    NSDictionary *result = GPHelperRunTask(msiexecPath, arguments);
+    int exitCode = [[result objectForKey:@"exitCode"] intValue];
+    if (exitCode == 1602) {
+      GPHelperUpdateState(statePath, GPHelperStatusFailed, @"The MSI installation was cancelled.", nil, apply, downloadedPath, [NSDictionary dictionaryWithObject:@"msiexec exit code 1602: cancelled by the user." forKey:@"message"]);
+      return 1;
+    }
+    if (exitCode != 0 && exitCode != 3010 && exitCode != 1641) {
+      NSString *message = [NSString stringWithFormat:@"msiexec exit code %d; see %@", exitCode, logPath];
+      GPHelperUpdateState(statePath, GPHelperStatusFailed, @"MSI installation failed.", nil, apply, downloadedPath, [NSDictionary dictionaryWithObject:message forKey:@"message"]);
       return 1;
     }
 
-    GPHelperUpdateState(statePath, GPHelperStatusCompleted, @"MSI installation completed.", nil, apply, downloadedPath, nil);
+    GPHelperUpdateState(statePath, GPHelperStatusCompleted,
+      (exitCode == 0 ? @"MSI installation completed." : @"MSI installation completed; Windows needs a restart to finish it."),
+      nil, apply, downloadedPath, nil);
     GPHelperLaunchProcess(relaunchPath, [NSArray array]);
     return 0;
   }
@@ -578,7 +770,7 @@ static int GPHelperApply(NSDictionary *plan, NSString *statePath, NSInteger wait
 
   if ([mode isEqualToString:@"appimage-replace"]) {
     NSString *currentAppImagePath = GPHelperStringValue([apply objectForKey:@"currentAppImagePath"]);
-    if (![GPHelperReplaceFile(downloadedPath, currentAppImagePath, &error)]) {
+    if (!GPHelperReplaceFile(downloadedPath, currentAppImagePath, &error)) {
       NSDictionary *errorDictionary = [NSDictionary dictionaryWithObjectsAndKeys:
         [error localizedDescription], @"message",
         nil

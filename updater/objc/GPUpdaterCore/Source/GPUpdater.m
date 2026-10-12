@@ -1,4 +1,5 @@
 #import "GPUpdater.h"
+#import "GPUpdaterDownload.h"
 
 static NSString * const GPUpdaterErrorDomain = @"GPUpdaterErrorDomain";
 static NSString * const GPUpdaterRuntimeConfigRelativePath = @"metadata/updates/gnustep-packager-update.json";
@@ -23,6 +24,7 @@ typedef NS_ENUM(NSInteger, GPUpdaterErrorCode) {
 @property (nonatomic, readwrite, copy) NSString *installerVersion;
 @property (nonatomic, readwrite, copy) NSString *updateInformation;
 @property (nonatomic, readwrite, retain) NSURL *zsyncURL;
+@property (nonatomic, readwrite, copy) NSString *edSignature;
 @end
 
 @interface GPUpdateRelease ()
@@ -50,6 +52,9 @@ typedef NS_ENUM(NSInteger, GPUpdaterErrorCode) {
 @property (nonatomic, readwrite, retain) NSURL *feedURL;
 @property (nonatomic, readwrite) NSTimeInterval minimumCheckInterval;
 @property (nonatomic, readwrite) NSTimeInterval startupDelay;
+@property (nonatomic, readwrite, copy) NSString *publicEDKey;
+@property (nonatomic, readwrite, copy) NSString *launcherRelativePath;
+@property (nonatomic, readwrite, copy) NSString *relaunchExecutablePath;
 @end
 
 @interface GPUpdaterDefaultsStore : NSObject {
@@ -232,6 +237,7 @@ static GPUpdateAsset *GPUpdateAssetFromDictionary(NSDictionary *dictionary) {
   asset.installScope = GPStringValue([dictionary objectForKey:@"installScope"]);
   asset.installerVersion = GPStringValue([dictionary objectForKey:@"msiVersion"]);
   asset.updateInformation = GPStringValue([dictionary objectForKey:@"updateInformation"]);
+  asset.edSignature = GPStringValue([dictionary objectForKey:@"edSignature"]);
 
   NSNumber *sizeValue = GPNumberValue([dictionary objectForKey:@"sizeBytes"]);
   asset.sizeBytes = sizeValue != nil ? [sizeValue unsignedLongLongValue] : 0ULL;
@@ -290,6 +296,7 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
 @synthesize installerVersion = _installerVersion;
 @synthesize updateInformation = _updateInformation;
 @synthesize zsyncURL = _zsyncURL;
+@synthesize edSignature = _edSignature;
 
 - (void)dealloc {
   [_backend release];
@@ -302,6 +309,7 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
   [_installerVersion release];
   [_updateInformation release];
   [_zsyncURL release];
+  [_edSignature release];
   [super dealloc];
 }
 
@@ -346,6 +354,34 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
 
 @end
 
+// A feed other than the packaged one, for testing an update without
+// touching the published feed: the GP_UPDATER_FEED_URL environment
+// variable, or else the GPUpdaterFeedURL user default (http, https or
+// file URL). Signature checks still apply when the configuration has a
+// public key.
+static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
+  if (configuration == nil) {
+    return;
+  }
+  NSString *source = @"GP_UPDATER_FEED_URL";
+  NSString *value = [[[NSProcessInfo processInfo] environment] objectForKey:source];
+  if ([value length] == 0) {
+    source = @"GPUpdaterFeedURL";
+    value = GPStringValue([[NSUserDefaults standardUserDefaults] objectForKey:source]);
+  }
+  if ([value length] == 0) {
+    return;
+  }
+  NSURL *url = GPURLFromString(value);
+  NSString *scheme = [[url scheme] lowercaseString];
+  if (url == nil || !([scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"] || [scheme isEqualToString:@"file"])) {
+    NSLog(@"GPUpdater: ignoring %@ '%@': not an http, https or file URL.", source, value);
+    return;
+  }
+  NSLog(@"GPUpdater: update feed overridden by %@: %@", source, [url absoluteString]);
+  configuration.feedURL = url;
+}
+
 @implementation GPUpdaterConfiguration
 
 @synthesize packageIdentifier = _packageIdentifier;
@@ -357,6 +393,9 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
 @synthesize feedURL = _feedURL;
 @synthesize minimumCheckInterval = _minimumCheckInterval;
 @synthesize startupDelay = _startupDelay;
+@synthesize publicEDKey = _publicEDKey;
+@synthesize launcherRelativePath = _launcherRelativePath;
+@synthesize relaunchExecutablePath = _relaunchExecutablePath;
 
 + (instancetype)configurationWithContentsOfFile:(NSString *)path error:(NSError **)error {
   NSData *data = [NSData dataWithContentsOfFile:path];
@@ -416,10 +455,26 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
   configuration.feedURL = feedURL;
   configuration.minimumCheckInterval = (minimumHours != nil ? [minimumHours doubleValue] : 24.0) * 3600.0;
   configuration.startupDelay = startupDelay != nil ? [startupDelay doubleValue] : 15.0;
+  NSString *publicEDKey = GPStringValue([updates objectForKey:@"publicEDKey"]);
+  configuration.publicEDKey = [publicEDKey length] > 0 ? publicEDKey : nil;
+  NSString *launcherRelativePath = GPStringValue([package objectForKey:@"launcherRelativePath"]);
+  configuration.launcherRelativePath = [launcherRelativePath length] > 0 ? launcherRelativePath : nil;
   return configuration;
 }
 
 + (instancetype)packagedConfigurationWithError:(NSError **)error {
+  // Inside a Flatpak the app's files are Flatpak's to update, through the
+  // remote it was installed from; the updater stays off even if a packaged
+  // configuration was shipped by mistake.
+  NSDictionary *environment = [[NSProcessInfo processInfo] environment];
+  if ([[environment objectForKey:@"FLATPAK_ID"] length] > 0 ||
+      [[NSFileManager defaultManager] fileExistsAtPath:@"/.flatpak-info"]) {
+    if (error != NULL) {
+      *error = GPMakeUpdaterError(GPUpdaterErrorConfigurationNotFound, @"Updates for this copy come through Flatpak.");
+    }
+    return nil;
+  }
+
   NSBundle *mainBundle = [NSBundle mainBundle];
   NSString *executablePath = [mainBundle executablePath];
   if ([executablePath length] == 0) {
@@ -434,12 +489,16 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
     return nil;
   }
 
+  // Each candidate with the folder it is relative to: the install root.
   NSMutableArray *candidatePaths = [NSMutableArray array];
+  NSMutableArray *candidateRoots = [NSMutableArray array];
   NSString *currentDirectory = [executablePath stringByDeletingLastPathComponent];
   NSUInteger depth = 0;
   while ([currentDirectory length] > 1 && depth < 8) {
     [candidatePaths addObject:[currentDirectory stringByAppendingPathComponent:GPUpdaterRuntimeConfigRelativePath]];
+    [candidateRoots addObject:currentDirectory];
     [candidatePaths addObject:[currentDirectory stringByAppendingPathComponent:GPUpdaterAppImageRuntimeConfigRelativePath]];
+    [candidateRoots addObject:currentDirectory];
 
     NSString *parentDirectory = [currentDirectory stringByDeletingLastPathComponent];
     if ([parentDirectory isEqualToString:currentDirectory]) {
@@ -450,11 +509,22 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
     depth++;
   }
 
-  NSEnumerator *enumerator = [candidatePaths objectEnumerator];
-  NSString *candidatePath = nil;
-  while ((candidatePath = [enumerator nextObject]) != nil) {
+  NSUInteger index;
+  for (index = 0; index < [candidatePaths count]; index++) {
+    NSString *candidatePath = [candidatePaths objectAtIndex:index];
     if ([[NSFileManager defaultManager] fileExistsAtPath:candidatePath]) {
-      return [self configurationWithContentsOfFile:candidatePath error:error];
+      GPUpdaterConfiguration *configuration = [self configurationWithContentsOfFile:candidatePath error:error];
+      GPApplyFeedOverride(configuration);
+      // The package's launcher (the MSI's root executable), which sets up
+      // the environment the app runs in: relaunched after an install.
+      if (configuration.launcherRelativePath != nil) {
+        NSString *launcherPath = [[candidateRoots objectAtIndex:index]
+          stringByAppendingPathComponent:configuration.launcherRelativePath];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:launcherPath]) {
+          configuration.relaunchExecutablePath = launcherPath;
+        }
+      }
+      return configuration;
     }
   }
 
@@ -472,6 +542,9 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
   [_backend release];
   [_channel release];
   [_feedURL release];
+  [_publicEDKey release];
+  [_launcherRelativePath release];
+  [_relaunchExecutablePath release];
   [super dealloc];
 }
 
@@ -673,10 +746,14 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
 }
 
 - (GPUpdateCheckResult *)checkForUpdatesSynchronously:(NSError **)error {
-  NSData *feedData = [NSData dataWithContentsOfURL:[[self configuration] feedURL]];
+  NSError *downloadError = nil;
+  NSData *feedData = GPUpdaterDownloadData([[self configuration] feedURL], &downloadError);
   if (feedData == nil) {
     if (error != NULL) {
-      *error = GPMakeUpdaterError(GPUpdaterErrorFeedLoadFailed, @"The update feed could not be loaded from the configured URL.");
+      NSString *reason = [downloadError localizedDescription];
+      *error = GPMakeUpdaterError(GPUpdaterErrorFeedLoadFailed, [reason length] > 0
+        ? [NSString stringWithFormat:@"The update feed could not be loaded from the configured URL: %@", reason]
+        : @"The update feed could not be loaded from the configured URL.");
     }
     return nil;
   }

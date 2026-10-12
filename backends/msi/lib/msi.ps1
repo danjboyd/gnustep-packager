@@ -678,7 +678,11 @@ function Get-GpPeImportedDllNames {
   }
 
   $output = & $objdump -p $Path 2>$null
-  if ($LASTEXITCODE -ne 0 -or -not $output) {
+  $exitCode = $LASTEXITCODE
+  # A non-PE file is skipped, not an error; don't leave its exit code in
+  # $LASTEXITCODE, where a calling CI shell would report it as a failure.
+  $global:LASTEXITCODE = 0
+  if ($exitCode -ne 0 -or -not $output) {
     return @()
   }
 
@@ -1556,7 +1560,7 @@ function Prepare-GpMsiInstallTree {
 
   $noticeReport = Write-GpMsiNoticeReport -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot -LogPath $LogPath
   $metadataRoot = Ensure-GpDirectory -Path (Resolve-GpPathRelativeToBase -BasePath $WorkPaths.InstallRoot -Path $Config.MetadataRootRelative)
-  $updateRuntimeConfigPath = Write-GpUpdateRuntimeConfig -Context $Context -Backend "msi" -MetadataRoot $metadataRoot
+  $updateRuntimeConfigPath = Write-GpUpdateRuntimeConfig -Context $Context -Backend "msi" -MetadataRoot $metadataRoot -LauncherRelativePath $Config.LauncherFileName
   if (-not [string]::IsNullOrWhiteSpace($updateRuntimeConfigPath)) {
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Generated updater runtime config: {0}" -f $updateRuntimeConfigPath)
   }
@@ -1784,6 +1788,9 @@ function Build-GpMsiArtifacts {
       Add-SuppressedIce $ice
     }
   }
+  # ICE61 warns about AllowSameVersionUpgrades, which Product.wxs.template
+  # sets on purpose (prereleases and their release share x.y.z).
+  Add-SuppressedIce "ICE61"
   foreach ($ice in @($Config.WixSuppressedIces)) {
     Add-SuppressedIce $ice
   }

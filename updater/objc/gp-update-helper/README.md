@@ -17,10 +17,17 @@ Current backend behavior:
   Downloads the target MSI, verifies the configured SHA-256 when available, and
   hands off to `msiexec` during apply
 - `appimage`
-  Prefers `AppImageUpdate` when it is present and the app is running from an
-  AppImage; otherwise downloads and verifies the new AppImage and either
-  replaces the current file or leaves a manual-download result when the current
-  location is not writable
+  Prefers `appimageupdatetool` when it is present and the app is running from
+  an AppImage; otherwise downloads and verifies the new AppImage. When the
+  AppImage's directory isn't writable it leaves a manual-download result.
+  Otherwise it writes `apply-appimage.sh` into the working root, and the app
+  runs that with `/bin/sh` on restart instead of `--mode apply`: the helper and
+  its libraries are inside the AppImage, whose mount goes when the app quits.
+  The script waits for the app (two minutes at most), swaps the new AppImage in
+  by renaming within its directory (or runs `appimageupdatetool -O`), and
+  starts the AppImage at its path again
+- Inside a Flatpak (`FLATPAK_ID` set or `/.flatpak-info` present) the updater
+  is off: Flatpak updates the app
 
 Supported command-line shape:
 

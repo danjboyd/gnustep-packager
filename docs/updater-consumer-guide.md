@@ -140,11 +140,16 @@ Check timing stays in the packaged config generated from the manifest:
 ## Linux Notes
 The AppImage path is intentionally ecosystem-friendly:
 
-- if `AppImageUpdate` is available and the app is running from an AppImage, the
-  helper prefers it
+- if `appimageupdatetool` is available and the app is running from an
+  AppImage, the helper prefers it (run with `-O`, so it overwrites the current
+  AppImage and starting it again starts the new version)
 - if not, the helper downloads the replacement AppImage itself
-- if the current location is not writable, the helper reports a manual-download
-  result instead of moving files behind the user's back
+- if the AppImage's directory is not writable, the helper reports a
+  manual-download result instead of moving files behind the user's back
+- the update is applied by a `/bin/sh` script the helper writes while the app
+  runs, not by the helper: the helper is inside the AppImage, whose mount goes
+  when the app quits
+- inside a Flatpak the updater is off; Flatpak updates the app
 
 That lets AppImageLauncher, AppImageUpdate, and Gear participate without
 becoming hard requirements.

@@ -16,6 +16,9 @@ It exists to:
   compliance notice entries
 - `src/SampleGNUstepApp.c`
   Tiny Windows GUI executable used as the inner app
+- `src/FixtureDefaults.c`
+  Stand-in for GNUstep `defaults.exe`, staged when the build host has no
+  GNUstep `defaults.exe`, so launcher defaults seeding can run
 - `scripts/build-fixture.ps1`
   Build step for the fixture
 - `scripts/stage-fixture.ps1`
