@@ -40,6 +40,12 @@ The backend now implements:
   install folder before install, upgrade and uninstall touch its files: GNUstep
   starts them on demand and they outlive the app, and a running `.exe` can't
   be replaced or removed. Daemons running from anywhere else are left alone.
+- "Open with" registration for `integrations.fileAssociations` extensions:
+  each extension lists the launcher under `OpenWithProgids` and the app is
+  offered in Default Apps (`Capabilities`, `RegisteredApplications`). The
+  installer never writes an extension's default handler or the user's choice,
+  so it doesn't take over files another app opens. MIME entries are
+  AppImage-only.
 
 Key backend assets:
 - `assets/GpWindowsLauncher.c`
