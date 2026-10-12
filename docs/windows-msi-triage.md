@@ -88,6 +88,35 @@ First checks:
   `dwrite.dll`, `gdiplus.dll`, `msimg32.dll`, `opengl32.dll`, `usp10.dll`,
   `winhttp.dll`, `winspool.drv`, or `wsock32.dll`, treat that as a backend
   classification gap rather than a consumer staging miss
+- if the smoke failure includes `Launcher error:`, that is the message the
+  launcher would have shown in its error dialog (see below)
+
+### Launcher Errors On Headless Hosts
+The generated launcher normally reports a launch error in a modal dialog. On a
+CI runner or any other unattended host, nobody can dismiss that dialog, so a
+failed launch would look like a smoke timeout with no message.
+
+The launcher therefore has a non-interactive mode. It is on when:
+
+- `GP_LAUNCHER_NONINTERACTIVE` is set to any value other than `0`, or
+- the launcher runs without a visible desktop (a non-interactive window station,
+  such as a service session)
+
+In that mode, the launcher writes `<display name>: <message>` to stderr, appends
+it to the file named by `GP_LAUNCHER_ERROR_LOG` when that variable is set, and
+exits with a nonzero code without showing a dialog. Interactive launches by
+users still show the dialog.
+
+MSI validation's smoke launch turns this mode on and puts the launcher's message
+in the failure as `Launcher error: ...`. To reproduce a launch failure outside
+validation, run the installed launcher from PowerShell:
+
+```powershell
+$env:GP_LAUNCHER_NONINTERACTIVE = "1"
+$p = Start-Process "<install path>\<launcher>.exe" -PassThru -Wait -RedirectStandardError launcher-error.txt
+$p.ExitCode
+Get-Content launcher-error.txt
+```
 
 ## Reproduction Commands
 

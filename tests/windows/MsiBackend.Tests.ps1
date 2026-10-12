@@ -179,6 +179,61 @@ Describe "MSI backend" {
       Assert-GpMatch -Actual $configText -Pattern 'appDefault=SampleWelcomeText=\"Packaged sample\"' -Message "Launcher config should serialize string app defaults as quoted GNUstep literals."
     }
 
+    It "reports launcher errors without a dialog in non-interactive mode" {
+      # A text file posing as defaults.exe: the launcher cannot run it to seed
+      # packaged defaults. Interactively that error is a modal dialog, which
+      # hangs a headless run until the smoke timeout.
+      $brokenRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msi-broken-launch-" + [guid]::NewGuid().ToString("N"))
+      $stderrPath = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msi-broken-launch-" + [guid]::NewGuid().ToString("N") + ".err")
+      $previousNonInteractive = $env:GP_LAUNCHER_NONINTERACTIVE
+      try {
+        Copy-Item -Recurse -Path $script:transform.InstallRoot -Destination $brokenRoot
+        Set-Content -Path (Join-Path $brokenRoot "runtime\bin\defaults.exe") -Value "not an executable"
+        $launcher = Join-Path $brokenRoot (Split-Path -Leaf $script:transform.LauncherPath)
+
+        $env:GP_LAUNCHER_NONINTERACTIVE = "1"
+        $proc = Start-Process $launcher -PassThru -WorkingDirectory $brokenRoot -RedirectStandardError $stderrPath
+        $exited = $proc.WaitForExit(15000)
+        if (-not $exited) {
+          $proc | Stop-Process -Force
+        }
+
+        Assert-GpTrue -Condition $exited -Message "The launcher should exit instead of waiting on an error dialog."
+        Assert-GpTrue -Condition ($proc.ExitCode -ne 0) -Message "A failed launch should exit with a nonzero code."
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $stderrPath) -Pattern "Unable to read packaged app default" -Message "The launcher error should be written to stderr."
+      } finally {
+        $env:GP_LAUNCHER_NONINTERACTIVE = $previousNonInteractive
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $brokenRoot, $stderrPath
+      }
+    }
+
+    It "fails the smoke launch fast with the launcher's error for a broken payload" {
+      $brokenRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msi-broken-smoke-" + [guid]::NewGuid().ToString("N"))
+      $smokeLog = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msi-broken-smoke-" + [guid]::NewGuid().ToString("N") + ".log")
+      try {
+        Copy-Item -Recurse -Path $script:transform.InstallRoot -Destination $brokenRoot
+        Set-Content -Path (Join-Path $brokenRoot "runtime\bin\defaults.exe") -Value "not an executable"
+        $launcher = Join-Path $brokenRoot (Split-Path -Leaf $script:transform.LauncherPath)
+        $app = Join-Path $brokenRoot "app\SampleGNUstepApp.app\SampleGNUstepApp.exe"
+
+        $message = $null
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        try {
+          Invoke-GpMsiSmokeLaunch -LauncherPath $launcher -AppPath $app -WorkingDirectory $brokenRoot -TimeoutSeconds 30 -LogPath $smokeLog
+        } catch {
+          $message = $_.Exception.Message
+        }
+        $stopwatch.Stop()
+
+        Assert-GpTrue -Condition ($null -ne $message) -Message "The smoke launch should fail for a broken payload."
+        Assert-GpTrue -Condition ($stopwatch.Elapsed.TotalSeconds -lt 20) -Message "The smoke launch should fail fast, not at the timeout. Took $($stopwatch.Elapsed.TotalSeconds) s."
+        Assert-GpMatch -Actual $message -Pattern "launcher exited with code" -Message "The smoke failure should report the launcher exit."
+        Assert-GpMatch -Actual $message -Pattern "Launcher error: .*Unable to read packaged app default" -Message "The smoke failure should include the launcher's error message."
+      } finally {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $brokenRoot, $smokeLog
+      }
+    }
+
     It "writes a bundled notice report from compliance entries" {
       $noticeText = Get-Content -Raw -Path $script:transform.NoticeReportPath
 
