@@ -69,8 +69,78 @@ typedef struct GPLauncherState {
     GPLauncherConfig config;
 } GPLauncherState;
 
+/* Errors normally go to a modal dialog. With no visible desktop (a service or CI
+   runner session) nobody can dismiss it, so the launcher would hang. In that case,
+   or when GP_LAUNCHER_NONINTERACTIVE is set to anything but 0, the error goes to
+   stderr and to the file named by GP_LAUNCHER_ERROR_LOG instead, and the launcher
+   exits with a nonzero code. */
+static BOOL GPIsNonInteractive(void)
+{
+    wchar_t value[16];
+    DWORD length = GetEnvironmentVariableW(L"GP_LAUNCHER_NONINTERACTIVE", value, 16);
+    HWINSTA station = NULL;
+    USEROBJECTFLAGS flags;
+
+    if (length > 0 && length < 16) {
+        return wcscmp(value, L"0") != 0;
+    }
+
+    station = GetProcessWindowStation();
+    ZeroMemory(&flags, sizeof(flags));
+    if (station != NULL &&
+        GetUserObjectInformationW(station, UOI_FLAGS, &flags, sizeof(flags), NULL) &&
+        (flags.dwFlags & WSF_VISIBLE) == 0) {
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void GPWriteErrorLine(HANDLE handle, const char *line, DWORD lineLength)
+{
+    DWORD written = 0;
+
+    if (handle == NULL || handle == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    WriteFile(handle, line, lineLength, &written, NULL);
+}
+
+static void GPReportErrorNonInteractive(const wchar_t *title, const wchar_t *message)
+{
+    wchar_t text[GP_MAX_LINE];
+    char line[GP_MAX_LINE * 3];
+    wchar_t logPath[GP_MAX_PATH];
+    DWORD logPathLength = 0;
+    int lineLength = 0;
+    HANDLE logFile = INVALID_HANDLE_VALUE;
+
+    _snwprintf(text, GP_MAX_LINE - 1, L"%ls: %ls\r\n", title, message);
+    text[GP_MAX_LINE - 1] = L'\0';
+    lineLength = WideCharToMultiByte(CP_UTF8, 0, text, -1, line, (int)sizeof(line), NULL, NULL);
+    if (lineLength <= 1) {
+        return;
+    }
+    lineLength -= 1;
+
+    GPWriteErrorLine(GetStdHandle(STD_ERROR_HANDLE), line, (DWORD)lineLength);
+
+    logPathLength = GetEnvironmentVariableW(L"GP_LAUNCHER_ERROR_LOG", logPath, GP_MAX_PATH);
+    if (logPathLength == 0 || logPathLength >= GP_MAX_PATH) {
+        return;
+    }
+    logFile = CreateFileW(logPath, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (logFile != INVALID_HANDLE_VALUE) {
+        GPWriteErrorLine(logFile, line, (DWORD)lineLength);
+        CloseHandle(logFile);
+    }
+}
+
 static void GPShowError(const wchar_t *title, const wchar_t *message)
 {
+    if (GPIsNonInteractive()) {
+        GPReportErrorNonInteractive(title, message);
+        return;
+    }
     MessageBoxW(NULL, message, title, MB_OK | MB_ICONERROR);
 }
 
