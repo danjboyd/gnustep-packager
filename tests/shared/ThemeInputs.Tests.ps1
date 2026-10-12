@@ -208,6 +208,12 @@ Describe "Theme input contract" {
   }
 
   It "stages complete theme bundles and writes a theme payload report" {
+    # The fixture theme targets Linux and builds with a PowerShell command;
+    # on Windows the theme is filtered out by platform, so nothing provisions.
+    if ($IsWindows) {
+      return
+    }
+
     $manifestPath = $null
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-report-" + [guid]::NewGuid().ToString("N"))
     $workspace = Join-Path $tempRoot "ReportThemeSource"
@@ -226,7 +232,11 @@ Describe "Theme input contract" {
 }
 "@
 
+    # These cases provision a "linux" theme input with no backend, so the
+    # host platform decides; pin it so the test means the same on any host.
+    $originalGetPlatform = ${function:Get-GpHostPlatform}
     try {
+      ${function:Get-GpHostPlatform} = { return "linux" }
       $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
         param($manifest)
         $manifest.Remove("packagedDefaults")
@@ -280,6 +290,7 @@ Describe "Theme input contract" {
       Assert-GpTrue -Condition (-not $contract.HasIssues) -Message "A complete theme bundle and declared theme resource should pass package contract checks."
       Assert-GpMatch -Actual $contractText -Pattern "theme-resource:ReportTheme:Resources/ThemeImages/Button\.png" -Message "Theme-resource diagnostics should identify the asserted resource."
     } finally {
+      ${function:Get-GpHostPlatform} = $originalGetPlatform
       if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
         Remove-Item -Force $manifestPath
       }
@@ -449,6 +460,12 @@ Describe "Theme input contract" {
   }
 
   It "reuses a current theme payload report instead of provisioning twice" {
+    # The fixture theme targets Linux and builds with a PowerShell command;
+    # on Windows the theme is filtered out by platform, so nothing provisions.
+    if ($IsWindows) {
+      return
+    }
+
     $manifestPath = $null
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-reuse-" + [guid]::NewGuid().ToString("N"))
     $workspace = Join-Path $tempRoot "ReuseThemeSource"
@@ -459,7 +476,11 @@ Describe "Theme input contract" {
     Set-Content -Path (Join-Path $themeBundle "ReuseTheme.dll") -Value "fixture executable"
     Set-Content -Path (Join-Path $resources "Info-gnustep.plist") -Value "{ NSExecutable = ReuseTheme; }"
 
+    # These cases provision a "linux" theme input with no backend, so the
+    # host platform decides; pin it so the test means the same on any host.
+    $originalGetPlatform = ${function:Get-GpHostPlatform}
     try {
+      ${function:Get-GpHostPlatform} = { return "linux" }
       $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
         param($manifest)
         $manifest.Remove("packagedDefaults")
@@ -497,6 +518,7 @@ Describe "Theme input contract" {
       Assert-GpTrue -Condition $second.Reused -Message "The second provisioning pass should reuse the current staged report."
       Assert-GpMatch -Actual $secondLog -Pattern "REUSE\s+theme payload report is current" -Message "Reuse diagnostics should explain why provisioning was skipped."
     } finally {
+      ${function:Get-GpHostPlatform} = $originalGetPlatform
       if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
         Remove-Item -Force $manifestPath
       }

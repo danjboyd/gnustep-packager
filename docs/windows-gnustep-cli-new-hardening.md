@@ -7,7 +7,9 @@ The supported hosted Windows MSI path is:
 
 1. start on `windows-latest`
 2. provision an MSYS2 `CLANG64` bootstrap shell
-3. run `scripts/ci/gnustep-cli-new-bootstrap-smoke.sh` from that shell
+3. run `scripts/ci/gnustep-cli-new-bootstrap-smoke.sh` from that shell; on
+   MSYS2 hosts it fetches and runs `gnustep-bootstrap.ps1`, because the POSIX
+   `gnustep-bootstrap.sh` only selects Linux and OpenBSD artifacts
 4. add the selected `gnustep-cli-new` root to `PATH`
 5. run the shared build, stage, package, and validation pipeline
 

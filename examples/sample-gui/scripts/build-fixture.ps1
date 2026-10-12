@@ -12,6 +12,8 @@ New-Item -ItemType Directory -Force -Path $resolvedRoot | Out-Null
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $sourcePath = Join-Path (Join-Path (Split-Path -Parent $scriptRoot) "src") "SampleGNUstepApp.c"
 $outputExe = Join-Path $resolvedRoot "SampleGNUstepApp.exe"
+$defaultsSourcePath = Join-Path (Join-Path (Split-Path -Parent $scriptRoot) "src") "FixtureDefaults.c"
+$defaultsExe = Join-Path $resolvedRoot "fixture-defaults.exe"
 
 $clangCandidates = [System.Collections.Generic.List[string]]::new()
 if (-not [string]::IsNullOrWhiteSpace($env:MSYS2_LOCATION)) {
@@ -37,6 +39,11 @@ if (-not $clang) {
 & $clang "-Os" "-municode" "-mwindows" "-o" $outputExe $sourcePath
 if ($LASTEXITCODE -ne 0) {
   throw "clang failed while building the sample fixture executable."
+}
+
+& $clang "-Os" "-municode" "-mwindows" "-o" $defaultsExe $defaultsSourcePath
+if ($LASTEXITCODE -ne 0) {
+  throw "clang failed while building the fixture defaults stand-in."
 }
 
 Set-Content -Path (Join-Path $resolvedRoot "build.txt") -Value "sample fixture build output"

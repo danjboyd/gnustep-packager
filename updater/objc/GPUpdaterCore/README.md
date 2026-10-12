@@ -24,6 +24,17 @@ Current public entry points:
 - `-start`
 - `-checkForUpdates`
 - `-checkForUpdatesSynchronously:`
+- `GPUpdaterDownloadData()` and `GPUpdaterDownloadToFile()`
+  (`GPUpdaterDownload.h`), which the feed check and `gp-update-helper` use
+
+Downloads don't use `-[NSData dataWithContentsOfURL:]`: GNUstep's doesn't
+follow HTTP redirects, and GitHub serves release assets through one. On
+Windows they go through WinHTTP (`GPUpdaterWinHTTP.c`, plain C because
+`winhttp.h` clashes with GNUstep's headers there), so they use the system's
+certificate store rather than gnustep-base's bundled list, the system's proxy
+settings, and stream the payload to disk; link with `-lwinhttp`. Elsewhere they
+use `NSURLHandle` and follow up to ten redirects. `file:` URLs are read
+directly.
 
 Build the static library with:
 
