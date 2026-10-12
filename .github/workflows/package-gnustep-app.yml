@@ -45,6 +45,14 @@ on:
         required: false
         type: string
         default: ""
+      # .pkg.tar.zst URLs of CLANG64 packages that replace MSYS2's own, such
+      # as a GNUstep library carrying fixes ahead of its release. Installed
+      # into the MSYS2 shell with pacman -U and laid over the gnustep-cli-new
+      # toolchain, which is what the MSI stages.
+      msys2-package-urls:
+        required: false
+        type: string
+        default: ""
       appimage-apt-packages:
         required: false
         type: string
@@ -181,6 +189,7 @@ jobs:
             Context = $context
             Backend = '${{ inputs.backend }}'
             AdditionalMsys2Packages = '${{ inputs.msys2-packages }}'
+            Msys2PackageUrls = '${{ inputs.msys2-package-urls }}'
             AdditionalAptPackages = '${{ inputs.appimage-apt-packages }}'
           }
           if ($${{ inputs.skip-default-host-setup }}) {
@@ -498,6 +507,39 @@ jobs:
           "GP_GNUSTEP_CLI_ROOT=$env:GP_GNUSTEP_CLI_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "GP_GNUSTEP_CLI_MANIFEST_URL=$env:GP_GNUSTEP_CLI_MANIFEST_URL" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install Carried MSYS2 Packages
+        if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup && inputs.msys2-package-urls != '' }}
+        shell: pwsh
+        env:
+          GP_MSYS2_PACKAGE_URLS: ${{ inputs.msys2-package-urls }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          . (Join-Path $env:GITHUB_WORKSPACE '.gnustep-packager-toolkit\scripts\lib\core.ps1')
+          $msysRoot = '${{ steps.msys2.outputs.msys2-location }}'
+          $bash = Join-Path $msysRoot 'usr\bin\bash.exe'
+          $tar = Join-Path $msysRoot 'usr\bin\tar.exe'
+          $downloadRoot = Join-Path $env:RUNNER_TEMP 'gp-msys2-packages'
+          New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
+
+          foreach ($url in @($env:GP_MSYS2_PACKAGE_URLS -split '\s+' | Where-Object { $_ })) {
+            $package = Join-Path $downloadRoot ([System.IO.Path]::GetFileName(([uri]$url).AbsolutePath))
+            Write-Host "Downloading $url"
+            Invoke-WebRequest -Uri $url -OutFile $package
+
+            # The MSYS2 shell the workflow set up, for anything built against it.
+            $env:MSYSTEM = 'CLANG64'
+            & $bash -lc "pacman -U --noconfirm '$($package -replace '\\', '/')'"
+            if ($LASTEXITCODE -ne 0) {
+              throw "pacman -U failed for $package (exit $LASTEXITCODE)."
+            }
+
+            # The gnustep-cli-new toolchain: the runtime the MSI stages.
+            if (-not [string]::IsNullOrWhiteSpace($env:GP_GNUSTEP_CLI_ROOT) -and (Test-Path -LiteralPath $env:GP_GNUSTEP_CLI_ROOT)) {
+              $overlay = Install-GpMsys2PackageOverlay -PackagePath $package -Root $env:GP_GNUSTEP_CLI_ROOT -TarPath $tar
+              Write-Host "Laid $(@($overlay.Files).Count) files from $([System.IO.Path]::GetFileName($package)) over: $([string]::Join(', ', @($overlay.Targets)))"
+            }
+          }
 
       - name: Install Linux AppImage Prerequisites
         if: ${{ inputs.backend == 'appimage' && !inputs.skip-default-host-setup }}

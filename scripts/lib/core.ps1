@@ -806,6 +806,7 @@ function Get-GpWorkflowHostSetupPlan {
     [string]$Backend,
     [switch]$SkipDefaultHostSetup,
     [string]$AdditionalMsys2Packages,
+    [string]$Msys2PackageUrls,
     [string]$AdditionalAptPackages
   )
 
@@ -817,6 +818,11 @@ function Get-GpWorkflowHostSetupPlan {
   $manifestAptPackages = [string[]]@($hostDependencies.LinuxAptPackages)
   $additionalMsys2Text = Join-GpUniquePackageList -Values @($AdditionalMsys2Packages)
   $additionalAptText = Join-GpUniquePackageList -Values @($AdditionalAptPackages)
+  $msys2PackageUrlText = Join-GpUniquePackageList -Values @($Msys2PackageUrls)
+
+  if ($SkipDefaultHostSetup -and $Backend -eq "msi" -and -not [string]::IsNullOrWhiteSpace($msys2PackageUrlText)) {
+    $errors.Add('`msys2-package-urls` is not applied when `skip-default-host-setup: true`. Install those packages in your caller preflight.') | Out-Null
+  }
 
   if ($SkipDefaultHostSetup -and $Backend -eq "msi" -and -not [string]::IsNullOrWhiteSpace($additionalMsys2Text)) {
     $errors.Add('`msys2-packages` is not applied when `skip-default-host-setup: true`. Declare app-specific MSYS2 packages under `hostDependencies.windows.msys2Packages` or install them in your caller preflight.') | Out-Null
@@ -843,7 +849,71 @@ function Get-GpWorkflowHostSetupPlan {
     ManifestAptPackageText = Join-GpUniquePackageList -Values @($manifestAptPackages)
     ResolvedMsys2PackageText = Join-GpUniquePackageList -Values @($AdditionalMsys2Packages, (Join-GpUniquePackageList -Values @($manifestMsys2Packages)))
     ResolvedAptPackageText = Join-GpUniquePackageList -Values @($AdditionalAptPackages, (Join-GpUniquePackageList -Values @($manifestAptPackages)))
+    Msys2PackageUrlText = $msys2PackageUrlText
     Errors = [string[]]@($errors.ToArray())
+  }
+}
+
+# Lays a CLANG64 MSYS2 package (.pkg.tar.zst) over a GNUstep toolchain root
+# that pacman doesn't manage, such as gnustep-cli-new's: its files replace the
+# ones under <root>\clang64, and under <root> itself when the root also holds
+# a flattened copy of the prefix (a lib\GNUstep beside clang64). Returns the
+# package's files, relative to its prefix.
+function Install-GpMsys2PackageOverlay {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PackagePath,
+    [Parameter(Mandatory = $true)]
+    [string]$Root,
+    [Parameter(Mandatory = $true)]
+    [string]$TarPath,
+    [string]$Prefix = "clang64"
+  )
+
+  $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msys2-overlay-" + [guid]::NewGuid().ToString("N"))
+  New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+  try {
+    # MSYS2's tar: --force-local keeps the drive letter's colon from naming a remote host.
+    & $TarPath --force-local --zstd -xf ($PackagePath -replace '\\', '/') -C ($extractRoot -replace '\\', '/') 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+      throw "Unable to unpack $PackagePath with $TarPath (exit $LASTEXITCODE)."
+    }
+
+    $packagePrefix = Join-Path $extractRoot $Prefix
+    if (-not (Test-Path -LiteralPath $packagePrefix -PathType Container)) {
+      throw "$PackagePath has no $Prefix\ prefix; only $Prefix packages can be laid over $Root."
+    }
+
+    $targets = [System.Collections.Generic.List[string]]::new()
+    $prefixTarget = Join-Path $Root $Prefix
+    if (Test-Path -LiteralPath $prefixTarget -PathType Container) {
+      $targets.Add($prefixTarget) | Out-Null
+    }
+    if (Test-Path -LiteralPath (Join-Path $Root "lib\GNUstep") -PathType Container) {
+      $targets.Add($Root) | Out-Null
+    }
+    if ($targets.Count -eq 0) {
+      throw "$Root has neither $Prefix\ nor a flattened lib\GNUstep to lay $PackagePath over."
+    }
+
+    $files = @(Get-ChildItem -LiteralPath $packagePrefix -Recurse -File | ForEach-Object {
+      $_.FullName.Substring($packagePrefix.Length).TrimStart('\', '/')
+    })
+    foreach ($target in $targets) {
+      foreach ($relative in $files) {
+        $destination = Join-Path $target $relative
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $packagePrefix $relative) -Destination $destination -Force
+      }
+    }
+
+    return [pscustomobject]@{
+      Files = [string[]]$files
+      Targets = [string[]]@($targets.ToArray())
+    }
+  }
+  finally {
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $extractRoot
   }
 }
 
@@ -1817,6 +1887,10 @@ function Test-GpManifest {
             Add-Issue "backends.dmg.notarization.keychainProfileEnvVar must be an environment variable name, not a value."
           }
         }
+        $notarizationEnabled = $notarization.Contains("enabled") -and [bool]$notarization["enabled"]
+        if ($notarization.Contains("required") -and [bool]$notarization["required"] -and -not $notarizationEnabled) {
+          Add-Issue "backends.dmg.notarization.required is true, but notarization.enabled is not; a required notarization must be enabled."
+        }
       }
       if ($dmg.Contains("smoke") -and ($dmg["smoke"] -is [System.Collections.IDictionary]) -and $dmg["smoke"].Contains("startupSeconds")) {
         if (-not (Test-IntegerAtLeast -Value $dmg["smoke"]["startupSeconds"] -Minimum 1)) {
@@ -1841,7 +1915,7 @@ function Test-GpManifest {
       }
 
       $sharedFeedUrl = if ($updates.Contains("feedUrl") -and (Test-StringValue $updates["feedUrl"])) { [string]$updates["feedUrl"] } else { $null }
-      foreach ($backendName in @(Get-GpEnabledBackends -Manifest $Manifest)) {
+      foreach ($backendName in @(Get-GpEnabledBackends -Manifest $Manifest | Where-Object { Test-GpBackendEmitsUpdates -Backend $_ })) {
         $backendFeedUrl = $null
         if ($Manifest["backends"].Contains($backendName)) {
           $backendConfig = $Manifest["backends"][$backendName]
@@ -2078,6 +2152,17 @@ function Get-GpArtifactSidecarPath {
 
 function Get-GpUpdateProviderKind {
   return "github-release-feed"
+}
+
+# Backends that emit updater runtime config and update-feed sidecars. Others (dmg)
+# ignore the updates block and report that as a note, so they need no feed URL.
+function Test-GpBackendEmitsUpdates {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Backend
+  )
+
+  return ($Backend -in @("msi", "appimage"))
 }
 
 function Get-GpUpdatePlatform {
