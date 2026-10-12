@@ -181,6 +181,7 @@ function Get-GpAppImageMimeEntries {
 function Get-GpAppImageDesktopMimeTypes {
   param(
     [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
     [psobject[]]$MimeEntries
   )
 
@@ -819,6 +820,7 @@ function Write-GpAppImageMimePackage {
     [Parameter(Mandatory = $true)]
     [string]$AppDirRoot,
     [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
     [psobject[]]$MimeEntries,
     [Parameter(Mandatory = $true)]
     [string]$LogPath
@@ -859,6 +861,7 @@ function Write-GpAppImageDesktopEntry {
     [Parameter(Mandatory = $true)]
     [string]$AppDirRoot,
     [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
     [psobject[]]$MimeEntries,
     [Parameter(Mandatory = $true)]
     [string]$LogPath
