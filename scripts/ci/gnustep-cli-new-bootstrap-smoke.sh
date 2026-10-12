@@ -172,8 +172,10 @@ if [ "$windows_host" -eq 1 ]; then
     printf 'no PowerShell found for gnustep-bootstrap.ps1\n' | tee "$log_root/gnustep-cli-new-setup.log" >&2
     exit 1
   fi
+  # The PowerShell bootstrap runs bare `tar` on Windows paths. MSYS2's GNU tar
+  # reads `D:` as a remote host, so put Windows' bsdtar first for this call.
   run_logged "$log_root/gnustep-cli-new-setup.log" \
-    "$pwsh_cmd" -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$bootstrap_path")" \
+    env PATH="/c/Windows/System32:$PATH" "$pwsh_cmd" -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$bootstrap_path")" \
     --json --yes setup --user --root "$(cygpath -w "$install_root")" \
     --manifest "$manifest_url"
   PATH="$install_root/bin:$install_root/Tools:$install_root/System/Tools:$install_root/usr/bin:$install_root/clang64/bin:$PATH"
