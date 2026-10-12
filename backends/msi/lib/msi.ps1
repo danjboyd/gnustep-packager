@@ -1841,7 +1841,8 @@ function Write-GpMsiSources {
     "-out", $harvestPath
   ) -LogPath $LogPath
 
-  $daemonNames = Get-GpMsiRuntimeDaemonNames -InstallRoot $WorkPaths.InstallRoot
+  # @() keeps an empty result an array: a bare call unrolls it to $null.
+  $daemonNames = @(Get-GpMsiRuntimeDaemonNames -InstallRoot $WorkPaths.InstallRoot)
   $stopDaemonsXml = Get-GpMsiStopRuntimeDaemonsXml -DaemonNames $daemonNames -InstallDirectoryName $Config.InstallDirectoryName
   if ($daemonNames.Count -gt 0) {
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Install, upgrade and uninstall end running {0} from the install folder first" -f ($daemonNames -join ", "))
