@@ -160,8 +160,20 @@ run_logged "$log_root/gnustep-cli-new-bootstrap-download.log" \
   curl -fsSL "$bootstrap_url" -o "$bootstrap_path"
 
 if [ "$windows_host" -eq 1 ]; then
+  # The MSYS2 shell's minimal PATH usually omits PowerShell 7.
+  pwsh_cmd=""
+  for candidate in pwsh "/c/Program Files/PowerShell/7/pwsh.exe" powershell.exe; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      pwsh_cmd="$candidate"
+      break
+    fi
+  done
+  if [ -z "$pwsh_cmd" ]; then
+    printf 'no PowerShell found for gnustep-bootstrap.ps1\n' | tee "$log_root/gnustep-cli-new-setup.log" >&2
+    exit 1
+  fi
   run_logged "$log_root/gnustep-cli-new-setup.log" \
-    pwsh -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$bootstrap_path")" \
+    "$pwsh_cmd" -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$bootstrap_path")" \
     --json --yes setup --user --root "$(cygpath -w "$install_root")" \
     --manifest "$manifest_url"
   PATH="$install_root/bin:$install_root/Tools:$install_root/System/Tools:$install_root/usr/bin:$install_root/clang64/bin:$PATH"
