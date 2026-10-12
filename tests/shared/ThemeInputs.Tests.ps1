@@ -208,6 +208,12 @@ Describe "Theme input contract" {
   }
 
   It "stages complete theme bundles and writes a theme payload report" {
+    # The fixture theme targets Linux and builds with a PowerShell command;
+    # on Windows the theme is filtered out by platform, so nothing provisions.
+    if ($IsWindows) {
+      return
+    }
+
     $manifestPath = $null
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-report-" + [guid]::NewGuid().ToString("N"))
     $workspace = Join-Path $tempRoot "ReportThemeSource"
@@ -449,6 +455,12 @@ Describe "Theme input contract" {
   }
 
   It "reuses a current theme payload report instead of provisioning twice" {
+    # The fixture theme targets Linux and builds with a PowerShell command;
+    # on Windows the theme is filtered out by platform, so nothing provisions.
+    if ($IsWindows) {
+      return
+    }
+
     $manifestPath = $null
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-reuse-" + [guid]::NewGuid().ToString("N"))
     $workspace = Join-Path $tempRoot "ReuseThemeSource"
