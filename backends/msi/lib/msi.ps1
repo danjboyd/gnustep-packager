@@ -1953,6 +1953,92 @@ function Get-GpMsiInstalledRuntimeAuditFailureMessage {
   return ("MSI validation failed: installed runtime closure is incomplete. {0}" -f $primary)
 }
 
+# Runs the installed launcher once, as the smoke check. The launcher runs in its
+# non-interactive mode (GP_LAUNCHER_NONINTERACTIVE), so a launch error is written
+# to GP_LAUNCHER_ERROR_LOG and ends the launcher with a nonzero code, instead of
+# a modal dialog that holds the run until the timeout. The error text is put in
+# the thrown message.
+function Invoke-GpMsiSmokeLaunch {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath,
+    [Parameter(Mandatory = $true)]
+    [string]$AppPath,
+    [Parameter(Mandatory = $true)]
+    [string]$WorkingDirectory,
+    [int]$TimeoutSeconds = 30,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  $smokeArgument = Join-Path $env:TEMP "gnustep-packager-smoke.txt"
+  $launcherErrorLog = Join-Path $env:TEMP ("gnustep-packager-launcher-error-" + [guid]::NewGuid().ToString("N") + ".log")
+  $probeDeadline = (Get-Date).AddSeconds([Math]::Max($TimeoutSeconds, 1))
+  $childProcesses = @()
+  Set-Content -Path $smokeArgument -Value "gnustep-packager smoke"
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Running MSI smoke launch: {0}" -f $LauncherPath)
+
+  $previousNonInteractive = $env:GP_LAUNCHER_NONINTERACTIVE
+  $previousErrorLog = $env:GP_LAUNCHER_ERROR_LOG
+  try {
+    $env:GP_LAUNCHER_NONINTERACTIVE = "1"
+    $env:GP_LAUNCHER_ERROR_LOG = $launcherErrorLog
+    $proc = Start-Process $LauncherPath -ArgumentList @($smokeArgument) -PassThru -WorkingDirectory $WorkingDirectory
+  } finally {
+    $env:GP_LAUNCHER_NONINTERACTIVE = $previousNonInteractive
+    $env:GP_LAUNCHER_ERROR_LOG = $previousErrorLog
+  }
+
+  try {
+    do {
+      Start-Sleep -Milliseconds 500
+      $proc.Refresh()
+      if ($proc.HasExited -and $proc.ExitCode -ne 0) {
+        break
+      }
+      $childProcesses = @(Get-GpMsiProcessesByExecutablePath -ExecutablePath $AppPath)
+    } while (((-not $proc.HasExited) -or $childProcesses.Count -eq 0) -and (Get-Date) -lt $probeDeadline)
+
+    $proc.Refresh()
+    $launcherError = ""
+    if (Test-Path -LiteralPath $launcherErrorLog) {
+      $launcherError = (Get-Content -Raw -LiteralPath $launcherErrorLog).Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($launcherError)) {
+      Write-GpMsiLogLine -LogPath $LogPath -Message ("Launcher error: {0}" -f $launcherError)
+    }
+    $launcherErrorSuffix = if ([string]::IsNullOrWhiteSpace($launcherError)) { "" } else { " Launcher error: $launcherError" }
+
+    if (-not $proc.HasExited) {
+      try {
+        $proc | Stop-Process -Force
+      } catch {
+      }
+      throw "Smoke launcher did not exit within $TimeoutSeconds seconds: $LauncherPath.$launcherErrorSuffix See $(Get-GpMsiDiagnosticsDocPath)."
+    }
+
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke process exit code: {0}" -f $proc.ExitCode)
+    if ($proc.ExitCode -ne 0) {
+      throw "MSI smoke failed: launcher exited with code $($proc.ExitCode): $LauncherPath.$launcherErrorSuffix See $(Get-GpMsiDiagnosticsDocPath)."
+    }
+
+    $childProcesses = @(Get-GpMsiProcessesByExecutablePath -ExecutablePath $AppPath)
+    if ($childProcesses.Count -eq 0) {
+      throw "MSI smoke failed: launcher exited successfully but the packaged application was not observed running: $AppPath. See $(Get-GpMsiDiagnosticsDocPath)."
+    }
+
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke child process count: {0}" -f $childProcesses.Count)
+    foreach ($child in $childProcesses) {
+      try {
+        $child | Stop-Process -Force
+      } catch {
+      }
+    }
+  } finally {
+    Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $launcherErrorLog
+  }
+}
+
 function Invoke-GpMsiValidation {
   param(
     [Parameter(Mandatory = $true)]
@@ -2065,45 +2151,12 @@ function Invoke-GpMsiValidation {
   }
 
   if ($RunSmoke -or $validationPlan.Enabled) {
-    $smokeArgument = Join-Path $env:TEMP "gnustep-packager-smoke.txt"
-    $probeDeadline = (Get-Date).AddSeconds([Math]::Max($validationPlan.TimeoutSeconds, 1))
-    $childProcesses = @()
-    Set-Content -Path $smokeArgument -Value "gnustep-packager smoke"
-    Write-GpMsiLogLine -LogPath $LogPath -Message ("Running MSI smoke launch: {0}" -f $launcherPath)
-    $proc = Start-Process $launcherPath -ArgumentList @($smokeArgument) -PassThru -WorkingDirectory $installPath
-
-    do {
-      Start-Sleep -Milliseconds 500
-      $proc.Refresh()
-      $childProcesses = @(Get-GpMsiProcessesByExecutablePath -ExecutablePath $appPath)
-    } while (((-not $proc.HasExited) -or $childProcesses.Count -eq 0) -and (Get-Date) -lt $probeDeadline)
-
-    $proc.Refresh()
-    if (-not $proc.HasExited) {
-      try {
-        $proc | Stop-Process -Force
-      } catch {
-      }
-      throw "Smoke launcher did not exit within $($validationPlan.TimeoutSeconds) seconds: $launcherPath. See $(Get-GpMsiDiagnosticsDocPath)."
-    }
-
-    Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke process exit code: {0}" -f $proc.ExitCode)
-    if ($proc.ExitCode -ne 0) {
-      throw "MSI smoke failed: launcher exited with code $($proc.ExitCode): $launcherPath. See $(Get-GpMsiDiagnosticsDocPath)."
-    }
-
-    $childProcesses = @(Get-GpMsiProcessesByExecutablePath -ExecutablePath $appPath)
-    if ($childProcesses.Count -eq 0) {
-      throw "MSI smoke failed: launcher exited successfully but the packaged application was not observed running: $appPath. See $(Get-GpMsiDiagnosticsDocPath)."
-    }
-
-    Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke child process count: {0}" -f $childProcesses.Count)
-    foreach ($child in $childProcesses) {
-      try {
-        $child | Stop-Process -Force
-      } catch {
-      }
-    }
+    Invoke-GpMsiSmokeLaunch `
+      -LauncherPath $launcherPath `
+      -AppPath $appPath `
+      -WorkingDirectory $installPath `
+      -TimeoutSeconds $validationPlan.TimeoutSeconds `
+      -LogPath $LogPath
   }
 
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Uninstalling MSI: {0}" -f $artifactPath)
