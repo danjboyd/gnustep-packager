@@ -36,6 +36,10 @@ The backend now implements:
   are enabled
 - bundled third-party notice report generation from manifest compliance entries
 - backend validation for install, launch, and uninstall smoke paths
+- ending the GNUstep daemons (`gdnc`, `gpbs`, `gdomap`) that run from the
+  install folder before install, upgrade and uninstall touch its files: GNUstep
+  starts them on demand and they outlive the app, and a running `.exe` can't
+  be replaced or removed. Daemons running from anywhere else are left alone.
 
 Key backend assets:
 - `assets/GpWindowsLauncher.c`
