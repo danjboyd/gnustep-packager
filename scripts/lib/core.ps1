@@ -96,6 +96,40 @@ function Merge-GpHashtable {
   return $merged
 }
 
+# Merges a platformOverrides entry over a manifest. Same rules as Merge-GpHashtable
+# (objects merge recursively, arrays and scalars replace), plus: a null overlay value
+# removes the key, so a platform can drop settings that do not apply to it.
+function Merge-GpOverrideHashtable {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Base,
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Overlay
+  )
+
+  $merged = Copy-GpValue -Value $Base
+
+  foreach ($key in $Overlay.Keys) {
+    $value = $Overlay[$key]
+    if ($null -eq $value) {
+      if ($merged.Contains($key)) {
+        $merged.Remove($key)
+      }
+      continue
+    }
+
+    if ($merged.Contains($key) -and
+        ($merged[$key] -is [System.Collections.IDictionary]) -and
+        ($value -is [System.Collections.IDictionary])) {
+      $merged[$key] = Merge-GpOverrideHashtable -Base $merged[$key] -Overlay $value
+    } else {
+      $merged[$key] = Copy-GpValue -Value $value
+    }
+  }
+
+  return $merged
+}
+
 function Resolve-GpPathRelativeToBase {
   param(
     [Parameter(Mandatory = $true)]
@@ -295,7 +329,8 @@ function Get-GpDefaultManifest {
   foreach ($path in @(
     (Join-Path $toolRoot "defaults\\core\\defaults.json"),
     (Join-Path $toolRoot "defaults\\backends\\msi\\defaults.json"),
-    (Join-Path $toolRoot "defaults\\backends\\appimage\\defaults.json")
+    (Join-Path $toolRoot "defaults\\backends\\appimage\\defaults.json"),
+    (Join-Path $toolRoot "defaults\\backends\\dmg\\defaults.json")
   )) {
     $merged = Merge-GpHashtable -Base $merged -Overlay (Get-GpJsonFile -Path $path)
   }
@@ -309,14 +344,62 @@ function Get-GpDefaultManifest {
   return $merged
 }
 
+function Get-GpSupportedPlatforms {
+  return [string[]]@("windows", "linux", "macos")
+}
+
+function Resolve-GpTargetPlatform {
+  param(
+    [string]$Platform,
+    [string]$Backend
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($Platform)) {
+    $value = $Platform.Trim().ToLowerInvariant()
+    if ($value -notin @(Get-GpSupportedPlatforms)) {
+      throw "Unsupported target platform '$Platform'. Expected one of: $([string]::Join(', ', @(Get-GpSupportedPlatforms)))."
+    }
+    return $value
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($Backend)) {
+    $required = Get-GpBackendRequiredPlatform -Backend $Backend.Trim()
+    if (-not [string]::IsNullOrWhiteSpace($required)) {
+      return $required
+    }
+  }
+
+  return (Get-GpHostEnvironment).Platform
+}
+
+function Apply-GpPlatformOverrides {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest,
+    [string]$Platform
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Platform) -or
+      -not $Manifest.Contains("platformOverrides") -or
+      -not ($Manifest["platformOverrides"] -is [System.Collections.IDictionary]) -or
+      -not $Manifest["platformOverrides"].Contains($Platform) -or
+      -not ($Manifest["platformOverrides"][$Platform] -is [System.Collections.IDictionary])) {
+    return (Copy-GpValue -Value $Manifest)
+  }
+
+  return (Merge-GpOverrideHashtable -Base $Manifest -Overlay $Manifest["platformOverrides"][$Platform])
+}
+
 function Resolve-GpManifestData {
   param(
     [Parameter(Mandatory = $true)]
-    [System.Collections.IDictionary]$Manifest
+    [System.Collections.IDictionary]$Manifest,
+    [string]$Platform
   )
 
-  $defaults = Get-GpDefaultManifest -Profiles (Get-GpRequestedProfiles -Manifest $Manifest)
-  $resolved = Merge-GpHashtable -Base $defaults -Overlay $Manifest
+  $effective = Apply-GpPlatformOverrides -Manifest $Manifest -Platform $Platform
+  $defaults = Get-GpDefaultManifest -Profiles (Get-GpRequestedProfiles -Manifest $effective)
+  $resolved = Merge-GpHashtable -Base $defaults -Overlay $effective
   $resolved = Apply-GpDeclarativeThemeDefaults -Manifest $resolved
   return (Apply-GpDeclarativePackagedDefaults -Manifest $resolved)
 }
@@ -357,6 +440,10 @@ function Apply-GpManifestOverrides {
 }
 
 function Get-GpHostPlatform {
+  if ($IsMacOS) {
+    return "macos"
+  }
+
   try {
     $platform = [System.Environment]::OSVersion.Platform
     if ($platform -eq [System.PlatformID]::Win32NT) {
@@ -764,13 +851,16 @@ function Get-GpManifestContext {
   param(
     [Parameter(Mandatory = $true)]
     [string]$Path,
-    [string]$PackageVersion
+    [string]$PackageVersion,
+    [string]$Backend,
+    [string]$Platform
   )
 
   $resolvedPath = (Resolve-Path $Path).Path
   $rawManifest = Get-GpJsonFile -Path $resolvedPath
   $versionOverride = Resolve-GpPackageVersionOverride -RequestedVersion $PackageVersion
-  $resolvedManifest = Resolve-GpManifestData -Manifest $rawManifest
+  $targetPlatform = Resolve-GpTargetPlatform -Platform $Platform -Backend $Backend
+  $resolvedManifest = Resolve-GpManifestData -Manifest $rawManifest -Platform $targetPlatform
   $resolvedManifest = Apply-GpManifestOverrides -Manifest $resolvedManifest -PackageVersion $versionOverride
   $manifestRoot = Split-Path -Parent $resolvedPath
   $toolRoot = Get-GpToolRoot
@@ -782,6 +872,10 @@ function Get-GpManifestContext {
     RawManifest            = $rawManifest
     Manifest               = $resolvedManifest
     PackageVersionOverride = $versionOverride
+    TargetPlatform         = $targetPlatform
+    PlatformOverrideApplied = [bool]($rawManifest.Contains("platformOverrides") -and
+      ($rawManifest["platformOverrides"] -is [System.Collections.IDictionary]) -and
+      $rawManifest["platformOverrides"].Contains($targetPlatform))
   }
 }
 
@@ -1669,6 +1763,69 @@ function Test-GpManifest {
     }
   }
 
+  if ($Manifest.Contains("platformOverrides")) {
+    if (-not ($Manifest["platformOverrides"] -is [System.Collections.IDictionary])) {
+      Add-Issue "platformOverrides must be an object when present."
+    } else {
+      foreach ($platformKey in @($Manifest["platformOverrides"].Keys)) {
+        if ([string]$platformKey -notin @(Get-GpSupportedPlatforms)) {
+          Add-Issue ("platformOverrides keys must be one of: {0}." -f [string]::Join(", ", @(Get-GpSupportedPlatforms)))
+        } elseif (-not ($Manifest["platformOverrides"][$platformKey] -is [System.Collections.IDictionary])) {
+          Add-Issue "platformOverrides.$platformKey must be an object."
+        } else {
+          foreach ($forbiddenKey in @("schemaVersion", "platformOverrides", "package")) {
+            if ($Manifest["platformOverrides"][$platformKey].Contains($forbiddenKey)) {
+              Add-Issue "platformOverrides.$platformKey must not override $forbiddenKey."
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if ($Manifest.Contains("backends") -and ($Manifest["backends"] -is [System.Collections.IDictionary]) -and
+      $Manifest["backends"].Contains("dmg") -and ($Manifest["backends"]["dmg"] -is [System.Collections.IDictionary])) {
+    $dmg = $Manifest["backends"]["dmg"]
+    if ($dmg.Contains("enabled") -and $dmg["enabled"]) {
+      Require-String -Parent $dmg -Key "artifactNamePattern" -Label "backends.dmg.artifactNamePattern"
+      Require-String -Parent $dmg -Key "appBundleName" -Label "backends.dmg.appBundleName"
+      if ($dmg.Contains("appBundleName") -and (Test-StringValue $dmg["appBundleName"]) -and
+          -not ([string]$dmg["appBundleName"]).EndsWith(".app", [System.StringComparison]::OrdinalIgnoreCase)) {
+        Add-Issue "backends.dmg.appBundleName must name a .app bundle."
+      }
+      if ($dmg.Contains("filesystem") -and ([string]$dmg["filesystem"] -notin @("APFS", "HFS+"))) {
+        Add-Issue "backends.dmg.filesystem must be one of: APFS, HFS+."
+      }
+      if ($dmg.Contains("format") -and ([string]$dmg["format"] -notin @("UDZO", "ULFO"))) {
+        Add-Issue "backends.dmg.format must be one of: UDZO, ULFO."
+      }
+      if ($dmg.Contains("finderLayout") -and ([string]$dmg["finderLayout"] -notin @("auto", "applescript", "off"))) {
+        Add-Issue "backends.dmg.finderLayout must be one of: auto, applescript, off."
+      }
+      if ($dmg.Contains("signing") -and ($dmg["signing"] -is [System.Collections.IDictionary])) {
+        $dmgSigning = $dmg["signing"]
+        if ($dmgSigning.Contains("identity") -and -not (Test-StringValue $dmgSigning["identity"])) {
+          Add-Issue "backends.dmg.signing.identity must be a non-empty string (use '-' for ad-hoc)."
+        }
+      }
+      if ($dmg.Contains("notarization") -and ($dmg["notarization"] -is [System.Collections.IDictionary])) {
+        $notarization = $dmg["notarization"]
+        if ($notarization.Contains("enabled") -and $notarization["enabled"]) {
+          if (-not $notarization.Contains("keychainProfileEnvVar") -or -not (Test-StringValue $notarization["keychainProfileEnvVar"])) {
+            Add-Issue "backends.dmg.notarization.keychainProfileEnvVar must name an environment variable when notarization is enabled."
+          } elseif ([string]$notarization["keychainProfileEnvVar"] -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
+            Add-Issue "backends.dmg.notarization.keychainProfileEnvVar must be an environment variable name, not a value."
+          }
+        }
+      }
+      if ($dmg.Contains("smoke") -and ($dmg["smoke"] -is [System.Collections.IDictionary]) -and $dmg["smoke"].Contains("startupSeconds")) {
+        if (-not (Test-IntegerAtLeast -Value $dmg["smoke"]["startupSeconds"] -Minimum 1)) {
+          Add-Issue "backends.dmg.smoke.startupSeconds must be an integer greater than or equal to 1."
+        }
+      }
+    }
+  }
+
   if ($Manifest.Contains("updates") -and ($Manifest["updates"] -is [System.Collections.IDictionary])) {
     $updates = $Manifest["updates"]
     if ($updates.Contains("enabled") -and $updates["enabled"]) {
@@ -1741,7 +1898,7 @@ function Get-GpEnabledBackends {
   $enabled = [System.Collections.Generic.List[string]]::new()
 
   if ($Manifest.Contains("backends") -and ($Manifest["backends"] -is [System.Collections.IDictionary])) {
-    foreach ($backendName in @("msi", "appimage")) {
+    foreach ($backendName in @("msi", "appimage", "dmg")) {
       if ($Manifest["backends"].Contains($backendName)) {
         $backend = $Manifest["backends"][$backendName]
         if (($backend -is [System.Collections.IDictionary]) -and $backend.Contains("enabled") -and $backend["enabled"]) {
@@ -1774,6 +1931,7 @@ function Get-GpBackendRequiredPlatform {
   switch ($Backend) {
     "msi" { return "windows" }
     "appimage" { return "linux" }
+    "dmg" { return "macos" }
     default { return $null }
   }
 }
@@ -1833,6 +1991,7 @@ function Resolve-GpBackendPath {
   switch ($Backend) {
     "msi" { return (Convert-GpNativePathToWindows -Path $nativePath) }
     "appimage" { return (Convert-GpNativePathToPosix -Path $nativePath) }
+    "dmg" { return (Convert-GpNativePathToPosix -Path $nativePath) }
     default { return $nativePath }
   }
 }
@@ -1930,6 +2089,7 @@ function Get-GpUpdatePlatform {
   switch ($Backend) {
     "msi" { return "windows-x64" }
     "appimage" { return "linux-x64" }
+    "dmg" { return "macos" }
     default { return $Backend }
   }
 }
@@ -2943,6 +3103,31 @@ function Get-GpAppPayloadRoot {
   return $RootPath
 }
 
+# Where a backend places the generated THIRD-PARTY-NOTICES report, relative to the
+# packaged or installed root. Most backends mirror the staged metadata tree; the
+# DMG backend places the report at the volume root next to the app bundle.
+function Get-GpNoticeReportRelativePath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest,
+    [string]$Backend
+  )
+
+  if ($Backend -eq "dmg") {
+    $fileName = "THIRD-PARTY-NOTICES.txt"
+    if ($Manifest.Contains("backends") -and ($Manifest["backends"] -is [System.Collections.IDictionary]) -and
+        $Manifest["backends"].Contains("dmg") -and ($Manifest["backends"]["dmg"] -is [System.Collections.IDictionary]) -and
+        $Manifest["backends"]["dmg"].Contains("noticeReport") -and ($Manifest["backends"]["dmg"]["noticeReport"] -is [System.Collections.IDictionary]) -and
+        $Manifest["backends"]["dmg"]["noticeReport"].Contains("fileName") -and
+        -not [string]::IsNullOrWhiteSpace([string]$Manifest["backends"]["dmg"]["noticeReport"]["fileName"])) {
+      $fileName = [string]$Manifest["backends"]["dmg"]["noticeReport"]["fileName"]
+    }
+    return $fileName
+  }
+
+  return (Join-Path ([string]$Manifest["payload"]["metadataRoot"]) "THIRD-PARTY-NOTICES.txt")
+}
+
 function Get-GpUpdaterHelperCandidates {
   param(
     [Parameter(Mandatory = $true)]
@@ -3336,7 +3521,7 @@ function Invoke-GpPackageContractAssertions {
           continue
         }
 
-        $reportPath = Resolve-GpPathRelativeToBase -BasePath $payloadRoot -Path (Join-Path ([string]$payload["metadataRoot"]) "THIRD-PARTY-NOTICES.txt")
+        $reportPath = Resolve-GpPathRelativeToBase -BasePath $payloadRoot -Path (Get-GpNoticeReportRelativePath -Manifest $manifest -Backend $Backend)
         if (Test-Path $reportPath) {
           $lines.Add(("OK      {0}: {1}" -f $label, $reportPath)) | Out-Null
         } else {
@@ -4284,7 +4469,7 @@ function Get-GpManifestSummary {
     Name            = $package["name"]
     Version         = $package["version"]
     Manufacturer    = $package["manufacturer"]
-    Profiles        = [string[]](Get-GpRequestedProfiles -Manifest $Manifest)
+    Profiles        = [string[]]@(Get-GpRequestedProfiles -Manifest $Manifest)
     StageRoot       = $payload["stageRoot"]
     EntryRelative   = $launch["entryRelativePath"]
     BuildCommand    = $pipeline["build"]["command"]
@@ -4296,6 +4481,6 @@ function Get-GpManifestSummary {
     UpdatesEnabled  = [bool]($updates.Contains("enabled") -and $updates["enabled"])
     UpdateChannel   = $(if ($updates.Contains("channel")) { [string]$updates["channel"] } else { $null })
     ComplianceNoticeCount = @(Get-GpComplianceEntries -Manifest $Manifest).Count
-    EnabledBackends = [string[]](Get-GpEnabledBackends -Manifest $Manifest)
+    EnabledBackends = [string[]]@(Get-GpEnabledBackends -Manifest $Manifest)
   }
 }

@@ -760,6 +760,79 @@
         }
       }
     },
+    "platformOverrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-platform manifest overlays. The entry for the target platform (-Platform, else the requested backend's platform, else the host) merges over this manifest before defaults are applied: objects merge, arrays and scalars replace, and null removes a key.",
+      "properties": {
+        "windows": {
+          "type": "object",
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "schemaVersion"
+                ]
+              },
+              {
+                "required": [
+                  "package"
+                ]
+              },
+              {
+                "required": [
+                  "platformOverrides"
+                ]
+              }
+            ]
+          }
+        },
+        "linux": {
+          "type": "object",
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "schemaVersion"
+                ]
+              },
+              {
+                "required": [
+                  "package"
+                ]
+              },
+              {
+                "required": [
+                  "platformOverrides"
+                ]
+              }
+            ]
+          }
+        },
+        "macos": {
+          "type": "object",
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "schemaVersion"
+                ]
+              },
+              {
+                "required": [
+                  "package"
+                ]
+              },
+              {
+                "required": [
+                  "platformOverrides"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
     "backends": {
       "type": "object",
       "additionalProperties": false,
@@ -1022,6 +1095,234 @@
                   }
                 }
               ]
+            }
+          }
+        },
+        "dmg": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "appBundleName": {
+              "type": "string",
+              "minLength": 1,
+              "description": "App bundle under payload.appRoot. Supports {name}, {version}, {packageId}."
+            },
+            "volumeName": {
+              "type": "string",
+              "description": "Mounted volume name. Empty uses package.displayName (or package.name)."
+            },
+            "artifactNamePattern": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Supports {name}, {version}, {packageId}, {backend}, {arch} (universal, arm64 or x86_64, detected with lipo)."
+            },
+            "filesystem": {
+              "type": "string",
+              "enum": [
+                "APFS",
+                "HFS+"
+              ]
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "UDZO",
+                "ULFO"
+              ]
+            },
+            "applicationsLink": {
+              "type": "boolean"
+            },
+            "backgroundImageRelativePath": {
+              "type": "string",
+              "description": "Stage-relative background image (PNG or TIFF). Empty for none."
+            },
+            "finderLayout": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "applescript",
+                "off"
+              ]
+            },
+            "finderLayoutTimeoutSeconds": {
+              "type": "integer",
+              "minimum": 5
+            },
+            "window": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "x": {
+                  "type": "integer"
+                },
+                "y": {
+                  "type": "integer"
+                },
+                "width": {
+                  "type": "integer",
+                  "minimum": 200
+                },
+                "height": {
+                  "type": "integer",
+                  "minimum": 150
+                },
+                "iconSize": {
+                  "type": "integer",
+                  "minimum": 16,
+                  "maximum": 512
+                },
+                "textSize": {
+                  "type": "integer",
+                  "minimum": 10,
+                  "maximum": 16
+                },
+                "appIconPosition": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": {
+                      "type": "integer"
+                    },
+                    "y": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "applicationsIconPosition": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": {
+                      "type": "integer"
+                    },
+                    "y": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "noticeIconPosition": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": {
+                      "type": "integer"
+                    },
+                    "y": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            },
+            "noticeReport": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "fileName": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "signing": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "identity": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "codesign identity. '-' is ad-hoc."
+                },
+                "resign": {
+                  "type": "boolean"
+                },
+                "deep": {
+                  "type": "boolean"
+                },
+                "hardenedRuntime": {
+                  "type": "boolean"
+                },
+                "entitlementsPath": {
+                  "type": "string",
+                  "description": "Entitlements plist, relative to the manifest directory."
+                },
+                "keychain": {
+                  "type": "string"
+                },
+                "signDmg": {
+                  "type": "boolean"
+                },
+                "additionalArguments": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "notarization": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "keychainProfileEnvVar": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                  "description": "Name of the environment variable that holds the notarytool keychain profile name. Never the profile or a secret itself."
+                },
+                "staple": {
+                  "type": "boolean"
+                },
+                "required": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "validation": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "requireSignature": {
+                  "type": "boolean"
+                },
+                "requireGatekeeperAcceptance": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "smoke": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "startupSeconds": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "arguments": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "environment": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
             }
           }
         }

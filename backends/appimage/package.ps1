@@ -3,6 +3,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$Manifest,
   [string]$PackageVersion,
+  [string]$Platform,
   [switch]$DryRun,
   [string]$LogPath
 )
@@ -13,7 +14,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\\..\\scripts\\lib\\core.ps1")
 . (Join-Path $PSScriptRoot "lib\\appimage.ps1")
 
-$context = Get-GpManifestContext -Path $Manifest -PackageVersion $PackageVersion
+$context = Get-GpManifestContext -Path $Manifest -PackageVersion $PackageVersion -Backend "appimage" -Platform $Platform
 $result = Invoke-GpAppImagePackage -Context $context -DryRun:$DryRun -LogPath $LogPath
 
 if ($DryRun) {
