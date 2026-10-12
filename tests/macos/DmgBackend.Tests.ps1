@@ -269,6 +269,20 @@ Describe "DMG backend" {
       Assert-GpMatch -Actual $message -Pattern "GP_PESTER_UNSET_PROFILE is not set.*required is true" -Message "A required notarization without credentials should fail with the env var name."
     }
 
+    It "fails closed when notarization is required but not enabled" {
+      $config = [pscustomobject]@{
+        Signing = [pscustomobject]@{ IsAdHoc = $false }
+        Notarization = [pscustomobject]@{ Enabled = $false; KeychainProfileEnvVar = "GP_PESTER_NOTARY_PROFILE"; Staple = $true; Required = $true }
+      }
+      $message = $null
+      try {
+        Invoke-GpDmgNotarization -Config $config -ArtifactPath "/nonexistent.dmg" | Out-Null
+      } catch {
+        $message = $_.Exception.Message
+      }
+      Assert-GpMatch -Actual $message -Pattern "required is true, but notarization.enabled is false" -Message "A required notarization should not be skipped as disabled."
+    }
+
     It "reports a missing staged bundle clearly" {
       $missingManifest = New-GpSiblingManifest -Customize {
         param($manifest)

@@ -136,7 +136,7 @@ Enable the backend under `backends.dmg`. All fields are optional except
 | `signing.signDmg` | Sign the final image too when the identity is not ad-hoc |
 | `notarization.enabled` | Submit the image with `xcrun notarytool submit --wait`, then `xcrun stapler staple` (`staple`) |
 | `notarization.keychainProfileEnvVar` | Name of the environment variable that holds the `notarytool` keychain profile name. Never put the profile, an Apple ID or a password in the manifest |
-| `notarization.required` | Fail packaging when notarization cannot run (no credentials or ad-hoc identity). Default `false`: skip with a log line |
+| `notarization.required` | Fail packaging when notarization cannot run (no credentials or ad-hoc identity). Requires `notarization.enabled`: `manifest-check` rejects `required` without `enabled`, and packaging fails rather than ship an unnotarized DMG. Default `false`: skip with a log line |
 | `validation.requireSignature` | Fail when `codesign --verify --deep --strict` fails |
 | `validation.requireGatekeeperAcceptance` | Fail when `spctl --assess` rejects the app. Leave `false` until a Developer ID and notarization are in place |
 | `smoke.*` | Launch smoke settings. Runs with `-RunSmoke` or when `smoke.enabled` is `true` |
