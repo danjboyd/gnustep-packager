@@ -1817,6 +1817,10 @@ function Test-GpManifest {
             Add-Issue "backends.dmg.notarization.keychainProfileEnvVar must be an environment variable name, not a value."
           }
         }
+        $notarizationEnabled = $notarization.Contains("enabled") -and [bool]$notarization["enabled"]
+        if ($notarization.Contains("required") -and [bool]$notarization["required"] -and -not $notarizationEnabled) {
+          Add-Issue "backends.dmg.notarization.required is true, but notarization.enabled is not; a required notarization must be enabled."
+        }
       }
       if ($dmg.Contains("smoke") -and ($dmg["smoke"] -is [System.Collections.IDictionary]) -and $dmg["smoke"].Contains("startupSeconds")) {
         if (-not (Test-IntegerAtLeast -Value $dmg["smoke"]["startupSeconds"] -Minimum 1)) {
@@ -1841,7 +1845,7 @@ function Test-GpManifest {
       }
 
       $sharedFeedUrl = if ($updates.Contains("feedUrl") -and (Test-StringValue $updates["feedUrl"])) { [string]$updates["feedUrl"] } else { $null }
-      foreach ($backendName in @(Get-GpEnabledBackends -Manifest $Manifest)) {
+      foreach ($backendName in @(Get-GpEnabledBackends -Manifest $Manifest | Where-Object { Test-GpBackendEmitsUpdates -Backend $_ })) {
         $backendFeedUrl = $null
         if ($Manifest["backends"].Contains($backendName)) {
           $backendConfig = $Manifest["backends"][$backendName]
@@ -2078,6 +2082,17 @@ function Get-GpArtifactSidecarPath {
 
 function Get-GpUpdateProviderKind {
   return "github-release-feed"
+}
+
+# Backends that emit updater runtime config and update-feed sidecars. Others (dmg)
+# ignore the updates block and report that as a note, so they need no feed URL.
+function Test-GpBackendEmitsUpdates {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Backend
+  )
+
+  return ($Backend -in @("msi", "appimage"))
 }
 
 function Get-GpUpdatePlatform {

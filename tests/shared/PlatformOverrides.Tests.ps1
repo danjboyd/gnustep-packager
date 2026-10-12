@@ -171,6 +171,45 @@ Describe "Platform overrides and DMG manifest contract" {
     }
   }
 
+  It "requires an update feed URL only for backends that emit updater output" {
+    $updatesOn = @{
+      enabled = $true
+      github = @{ owner = "example"; repo = "sample"; tagPattern = "v{version}" }
+    }
+    $dmgOnlyPath = New-GpSiblingManifest -BaseManifestPath $script:macosManifestPath -Customize {
+      param($manifest)
+      $manifest["updates"] = $updatesOn
+    }
+    $withMsiPath = New-GpSiblingManifest -BaseManifestPath $script:macosManifestPath -Customize {
+      param($manifest)
+      $manifest["updates"] = $updatesOn
+      $manifest["backends"]["msi"] = @{ enabled = $true }
+    }
+    try {
+      $dmgOnlyIssues = @(Test-GpManifest -Manifest (Get-GpManifestContext -Path $dmgOnlyPath -Backend dmg).Manifest)
+      Assert-GpEqual -Actual @($dmgOnlyIssues | Where-Object { $_ -like "*feed URL*" }).Count -Expected 0 -Message "The DMG backend ignores updates, so it needs no feed URL. Issues: $([string]::Join('; ', $dmgOnlyIssues))"
+
+      $withMsiIssues = @(Test-GpManifest -Manifest (Get-GpManifestContext -Path $withMsiPath -Backend dmg).Manifest)
+      Assert-GpEqual -Actual @($withMsiIssues | Where-Object { $_ -like "*feed URL is required for backend 'msi'*" }).Count -Expected 1 -Message "MSI emits updater output and still needs a feed URL. Issues: $([string]::Join('; ', $withMsiIssues))"
+      Assert-GpEqual -Actual @($withMsiIssues | Where-Object { $_ -like "*feed URL is required for backend 'dmg'*" }).Count -Expected 0 -Message "DMG should not need a feed URL alongside MSI."
+    } finally {
+      Remove-Item -Force -ErrorAction SilentlyContinue $dmgOnlyPath, $withMsiPath
+    }
+  }
+
+  It "rejects a required DMG notarization that is not enabled" {
+    $path = New-GpSiblingManifest -BaseManifestPath $script:macosManifestPath -Customize {
+      param($manifest)
+      $manifest["backends"]["dmg"]["notarization"] = @{ enabled = $false; required = $true }
+    }
+    try {
+      $issues = @(Test-GpManifest -Manifest (Get-GpManifestContext -Path $path -Backend dmg).Manifest)
+      Assert-GpEqual -Actual @($issues | Where-Object { $_ -like "*notarization.required is true, but notarization.enabled is not*" }).Count -Expected 1 -Message "required without enabled should be rejected. Issues: $([string]::Join('; ', $issues))"
+    } finally {
+      Remove-Item -Force -ErrorAction SilentlyContinue $path
+    }
+  }
+
   It "maps lipo architectures to the artifact arch token" {
     Assert-GpEqual -Actual (Get-GpDmgArchToken -Archs @("x86_64", "arm64")) -Expected "universal" -Message "Two slices make a universal build."
     Assert-GpEqual -Actual (Get-GpDmgArchToken -Archs @("arm64")) -Expected "arm64" -Message "A single slice keeps its name."
