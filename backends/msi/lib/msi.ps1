@@ -1973,6 +1973,7 @@ function Invoke-GpMsiSmokeLaunch {
 
   $smokeArgument = Join-Path $env:TEMP "gnustep-packager-smoke.txt"
   $launcherErrorLog = Join-Path $env:TEMP ("gnustep-packager-launcher-error-" + [guid]::NewGuid().ToString("N") + ".log")
+  $launcherStderr = Join-Path $env:TEMP ("gnustep-packager-launcher-stderr-" + [guid]::NewGuid().ToString("N") + ".txt")
   $probeDeadline = (Get-Date).AddSeconds([Math]::Max($TimeoutSeconds, 1))
   $childProcesses = @()
   Set-Content -Path $smokeArgument -Value "gnustep-packager smoke"
@@ -1983,7 +1984,10 @@ function Invoke-GpMsiSmokeLaunch {
   try {
     $env:GP_LAUNCHER_NONINTERACTIVE = "1"
     $env:GP_LAUNCHER_ERROR_LOG = $launcherErrorLog
-    $proc = Start-Process $LauncherPath -ArgumentList @($smokeArgument) -PassThru -WorkingDirectory $WorkingDirectory
+    # Redirecting stderr makes Start-Process create the process directly with
+    # this environment, rather than through ShellExecute, so the GP_LAUNCHER_*
+    # variables reach the launcher; stderr is a second copy of its error.
+    $proc = Start-Process $LauncherPath -ArgumentList @($smokeArgument) -PassThru -WorkingDirectory $WorkingDirectory -RedirectStandardError $launcherStderr
   } finally {
     $env:GP_LAUNCHER_NONINTERACTIVE = $previousNonInteractive
     $env:GP_LAUNCHER_ERROR_LOG = $previousErrorLog
@@ -2001,8 +2005,11 @@ function Invoke-GpMsiSmokeLaunch {
 
     $proc.Refresh()
     $launcherError = ""
-    if (Test-Path -LiteralPath $launcherErrorLog) {
-      $launcherError = (Get-Content -Raw -LiteralPath $launcherErrorLog).Trim()
+    foreach ($errorSource in @($launcherErrorLog, $launcherStderr)) {
+      if ([string]::IsNullOrWhiteSpace($launcherError) -and (Test-Path -LiteralPath $errorSource)) {
+        $launcherError = [string](Get-Content -Raw -LiteralPath $errorSource)
+        $launcherError = $launcherError.Trim()
+      }
     }
     if (-not [string]::IsNullOrWhiteSpace($launcherError)) {
       Write-GpMsiLogLine -LogPath $LogPath -Message ("Launcher error: {0}" -f $launcherError)
@@ -2035,7 +2042,7 @@ function Invoke-GpMsiSmokeLaunch {
       }
     }
   } finally {
-    Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $launcherErrorLog
+    Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $launcherErrorLog, $launcherStderr
   }
 }
 
