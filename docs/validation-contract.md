@@ -97,6 +97,9 @@ literal paths.
 validation:
 - MSI checks run against the installed payload root after install.
 - AppImage checks run against the extracted AppDir root during validation.
+- DMG checks run against the mounted volume root (paths such as
+  `MyApp.app/Contents/MacOS/MyApp`); `notice-report` checks the report at the
+  volume root (`backends.dmg.noticeReport.fileName`).
 
 This is what lets validation distinguish between:
 - content missing in stage

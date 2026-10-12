@@ -1,0 +1,99 @@
+{
+  "$schema": "../../schemas/gnustep-packager.schema.json",
+  "schemaVersion": 1,
+  "package": {
+    "id": "com.example.SampleMacApp",
+    "name": "SampleMacApp",
+    "displayName": "Sample Mac App",
+    "version": "0.1.0",
+    "manufacturer": "Example Org",
+    "summary": "Reference manifest for macOS DMG packaging validation.",
+    "license": "MIT",
+    "homepage": "https://example.invalid/sample-mac-app"
+  },
+  "pipeline": {
+    "workingDirectory": ".",
+    "shell": {
+      "kind": "sh",
+      "bootstrapCommands": [],
+      "environment": {}
+    },
+    "build": {
+      "command": "./scripts/build-fixture.sh out/build"
+    },
+    "stage": {
+      "command": "./scripts/stage-fixture.sh dist/stage",
+      "outputRoot": "dist/stage"
+    }
+  },
+  "payload": {
+    "layoutVersion": 1,
+    "stageRoot": "dist/stage",
+    "appRoot": "app",
+    "runtimeRoot": "runtime"
+  },
+  "launch": {
+    "entryRelativePath": "app/SampleMacApp.app/Contents/MacOS/SampleMacApp",
+    "workingDirectory": "app"
+  },
+  "outputs": {
+    "root": "dist",
+    "packageRoot": "dist/packages",
+    "logRoot": "dist/logs",
+    "tempRoot": "dist/tmp",
+    "validationRoot": "dist/validation"
+  },
+  "validation": {
+    "smoke": {
+      "enabled": true,
+      "kind": "staged-layout",
+      "requiredPaths": [
+        "app/SampleMacApp.app/Contents/Info.plist",
+        "metadata/licenses/SampleMacApp.txt"
+      ],
+      "timeoutSeconds": 30
+    },
+    "logs": {
+      "retainOnSuccess": true
+    },
+    "installedResult": {
+      "requiredContent": [
+        {
+          "kind": "notice-report"
+        }
+      ],
+      "requiredPaths": [
+        "SampleMacApp.app/Contents/MacOS/SampleMacApp"
+      ]
+    }
+  },
+  "compliance": {
+    "runtimeNotices": [
+      {
+        "name": "SampleMacApp",
+        "version": "0.1.0",
+        "license": "MIT",
+        "source": "Reference macOS fixture application payload",
+        "homepage": "https://example.invalid/sample-mac-app",
+        "stageRelativePath": "metadata/licenses/SampleMacApp.txt"
+      }
+    ]
+  },
+  "backends": {
+    "dmg": {
+      "enabled": true,
+      "backgroundImageRelativePath": "metadata/dmg/background.png",
+      "finderLayout": "off",
+      "noticeReport": {
+        "enabled": true
+      },
+      "signing": {
+        "identity": "-"
+      },
+      "notarization": {
+        "enabled": true,
+        "keychainProfileEnvVar": "GP_SAMPLE_NOTARY_PROFILE"
+      }
+    }
+  }
+}
