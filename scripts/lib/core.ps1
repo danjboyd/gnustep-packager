@@ -789,14 +789,21 @@ function New-GpLaunchEnvironmentEntry {
   param(
     [AllowNull()]
     [string]$Value,
-    [ValidateSet("override", "ifUnset")]
-    [string]$Policy = "override"
+    [ValidateSet("override", "ifUnset", "prepend")]
+    [string]$Policy = "override",
+    [AllowNull()]
+    [string]$HostDefault = $null
   )
 
-  return [ordered]@{
+  $entry = [ordered]@{
     value = $Value
     policy = $Policy
   }
+  # prepend only: the host value assumed when the variable is unset.
+  if (-not [string]::IsNullOrEmpty($HostDefault)) {
+    $entry["hostDefault"] = $HostDefault
+  }
+  return $entry
 }
 
 function Get-GpNormalizedLaunchEnvironment {
@@ -823,7 +830,8 @@ function Get-GpNormalizedLaunchEnvironment {
       } else {
         "override"
       }
-      $normalized[[string]$key] = New-GpLaunchEnvironmentEntry -Value $value -Policy $policy
+      $hostDefault = if ($entry.Contains("hostDefault")) { [string]$entry["hostDefault"] } else { $null }
+      $normalized[[string]$key] = New-GpLaunchEnvironmentEntry -Value $value -Policy $policy -HostDefault $hostDefault
     } else {
       $normalized[[string]$key] = New-GpLaunchEnvironmentEntry -Value ([string]$entry) -Policy "override"
     }
@@ -1033,8 +1041,16 @@ function Test-GpManifest {
     if ($Value.Contains("policy")) {
       if (-not (Test-StringValue $Value["policy"])) {
         Add-Issue "$Label.$Key.policy must be a non-empty string when present."
-      } elseif ([string]$Value["policy"] -notin @("override", "ifUnset")) {
-        Add-Issue "$Label.$Key.policy must be one of: override, ifUnset."
+      } elseif ([string]$Value["policy"] -notin @("override", "ifUnset", "prepend")) {
+        Add-Issue "$Label.$Key.policy must be one of: override, ifUnset, prepend."
+      }
+    }
+
+    if ($Value.Contains("hostDefault")) {
+      if (-not ($Value["hostDefault"] -is [string])) {
+        Add-Issue "$Label.$Key.hostDefault must be a string."
+      } elseif ([string]$Value["policy"] -ne "prepend") {
+        Add-Issue "$Label.$Key.hostDefault is only used with policy prepend."
       }
     }
   }
