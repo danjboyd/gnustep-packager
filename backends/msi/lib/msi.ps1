@@ -1784,6 +1784,9 @@ function Build-GpMsiArtifacts {
       Add-SuppressedIce $ice
     }
   }
+  # ICE61 warns about AllowSameVersionUpgrades, which Product.wxs.template
+  # sets on purpose (prereleases and their release share x.y.z).
+  Add-SuppressedIce "ICE61"
   foreach ($ice in @($Config.WixSuppressedIces)) {
     Add-SuppressedIce $ice
   }

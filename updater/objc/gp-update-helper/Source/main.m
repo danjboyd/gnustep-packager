@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import "GPUpdaterDownload.h"
 #import "monocypher/monocypher-ed25519.h"
 
 #if defined(_WIN32)
@@ -219,24 +220,19 @@ static BOOL GPHelperCopyURLToPath(NSURL *url, NSString *destinationPath, NSStrin
   }
 
   GPHelperUpdateState(statePath, GPHelperStatusDownloading, @"Downloading update...", nil, nil, nil, nil);
-  NSData *data = [NSData dataWithContentsOfURL:url];
-  if (data == nil) {
+  unsigned long long totalBytes = 0;
+  NSError *downloadError = nil;
+  if (!GPUpdaterDownloadToFile(url, destinationPath, &totalBytes, &downloadError)) {
     if (error != NULL) {
-      *error = GPHelperSimpleError(4, @"The update payload could not be downloaded.");
+      NSString *reason = [downloadError localizedDescription];
+      *error = GPHelperSimpleError(4, [reason length] > 0
+        ? [NSString stringWithFormat:@"The update payload could not be downloaded: %@", reason]
+        : @"The update payload could not be downloaded.");
     }
     return NO;
   }
 
-  NSString *directory = [destinationPath stringByDeletingLastPathComponent];
-  [[NSFileManager defaultManager] createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL];
-  if (![data writeToFile:destinationPath atomically:YES]) {
-    if (error != NULL) {
-      *error = GPHelperSimpleError(9, @"The downloaded payload could not be written to disk.");
-    }
-    return NO;
-  }
 
-  unsigned long long totalBytes = [data length];
   NSDictionary *progress = [NSDictionary dictionaryWithObjectsAndKeys:
     [NSNumber numberWithDouble:1.0], @"fractionCompleted",
     [NSNumber numberWithUnsignedLongLong:totalBytes], @"bytesReceived",
