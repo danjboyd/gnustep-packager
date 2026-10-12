@@ -2,6 +2,7 @@
 param(
   [string]$Manifest = "examples/sample-gui/package.manifest.json",
   [string]$Backend,
+  [string]$Platform,
   [string]$PackageVersion,
   [switch]$InstallHostDependencies,
   [switch]$SkipHostPreflight,
@@ -39,6 +40,10 @@ function Invoke-GpPipelineStep {
 
   if (-not [string]::IsNullOrWhiteSpace($PackageVersion)) {
     $parameters["PackageVersion"] = $PackageVersion
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($Platform)) {
+    $parameters["Platform"] = $Platform
   }
 
   if ($InstallHostDependencies) {

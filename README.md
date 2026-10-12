@@ -19,6 +19,7 @@ AppImage without rewriting the entire packaging system.
 - A backend-neutral package manifest and staged payload contract
 - A Windows MSI backend suitable for MSYS2 `CLANG64` GNUstep apps
 - A Linux AppImage backend built on the same core packaging model
+- A macOS DMG backend for native app bundles built from GNUstep sources
 - Reusable local scripts and reusable GitHub Actions workflows
 - Clean validation paths for package smoke testing
 - A companion updater foundation for apps that publish MSI and AppImage
@@ -56,6 +57,23 @@ Current shape:
 - generated `AppRun`
 - desktop metadata, icon, and MIME handling
 - Linux validation path in CI
+
+### macOS DMG
+Supported backend for native macOS `.app` bundles (for example a GNUstep
+codebase built against Apple's AppKit with Xcode's clang).
+
+Current shape:
+- built only with Apple's tools (`hdiutil`, `codesign`, `ditto`, `osascript`,
+  `xcrun notarytool`/`stapler`)
+- `Applications` link, optional background and Finder window layout
+- APFS or HFS+, `UDZO` or `ULFO`, `<name>-<version>-macos-<arch>.dmg` with
+  `arch` detected by `lipo` (`universal` for arm64 + x86_64)
+- ad-hoc signing by default, optional re-signing with any identity, and a
+  Developer ID notarization path driven by a keychain profile named through an
+  environment variable
+- validation with `hdiutil verify`, a read-only hidden mount, `codesign`,
+  recorded `spctl` Gatekeeper assessment and an optional launch smoke
+- see [docs/dmg-backend.md](docs/dmg-backend.md)
 
 ## Repo Status
 This repo includes the phase 1 through phase 4 implementation baseline:
@@ -172,6 +190,17 @@ This repo now also includes the first phase 16 theme-input contract work:
 - bundled theme validation checks known executable conventions and resource
   metadata, and provisioning emits a staged theme payload report
 
+This repo now also includes the phase 17 macOS DMG work:
+
+- a `dmg` backend that packages a staged macOS `.app` into a DMG with Apple's
+  built-in tools, with signing, notarization hooks, and mounted-image
+  validation
+- backend-neutral `platformOverrides` so one manifest can describe a Linux or
+  Windows GNUstep payload and a native macOS payload, selected with
+  `-Platform`, the requested backend, or the host
+- a macOS reference fixture (`examples/sample-macos`), macOS Pester tests, and a
+  `macos-validation` CI job
+
 Current sample verification covers:
 - `build`
 - `stage`
@@ -180,6 +209,8 @@ Current sample verification covers:
 - `validate -Backend msi -RunSmoke`
 - `package -Backend appimage`
 - `validate -Backend appimage -RunSmoke`
+- `package -Backend dmg`
+- `validate -Backend dmg -RunSmoke`
 - `scripts/test-repo.ps1`
 
 ## Proposed Structure
@@ -191,6 +222,7 @@ Current sample verification covers:
 - `updater/`
 - `backends/msi/`
 - `backends/appimage/`
+- `backends/dmg/`
 - `examples/`
 - `docs/`
 - `.github/workflows/`
@@ -222,7 +254,15 @@ Examples:
 ./scripts/gnustep-packager.ps1 -Command validate -Backend msi -RunSmoke
 ./scripts/gnustep-packager.ps1 -Command package -Backend appimage
 ./scripts/gnustep-packager.ps1 -Command validate -Backend appimage -RunSmoke
+./scripts/gnustep-packager.ps1 -Command package -Backend dmg
+./scripts/gnustep-packager.ps1 -Command validate -Backend dmg -RunSmoke
+./scripts/gnustep-packager.ps1 -Command manifest-check -Platform linux
 ```
+
+`-Platform windows|linux|macos` selects which `platformOverrides` entry
+applies; without it the requested backend's platform, then the host, is used.
+`scripts/test-repo.ps1` runs `tests/shared` plus the host's platform tests
+(`tests/windows`, `tests/linux` or `tests/macos`).
 
 Backend design notes:
 - [docs/msi-boundary.md](docs/msi-boundary.md)
@@ -233,6 +273,7 @@ Backend design notes:
 - [docs/appimage-metadata-mapping.md](docs/appimage-metadata-mapping.md)
 - [docs/appimage-appdir-design.md](docs/appimage-appdir-design.md)
 - [docs/appimage-runtime-policy.md](docs/appimage-runtime-policy.md)
+- [docs/dmg-backend.md](docs/dmg-backend.md)
 
 Release and consumer docs:
 - [docs/local-ci-parity.md](docs/local-ci-parity.md)
@@ -254,6 +295,7 @@ Release and consumer docs:
 - [docs/updater-helper-contract.md](docs/updater-helper-contract.md)
 - [docs/windows-msi-triage.md](docs/windows-msi-triage.md)
 - [backends/appimage/README.md](backends/appimage/README.md)
+- [backends/dmg/README.md](backends/dmg/README.md)
 - [docs/appimage-extension-path.md](docs/appimage-extension-path.md)
 
 See [Roadmap.md](Roadmap.md) for the implementation phases.

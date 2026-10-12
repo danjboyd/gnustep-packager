@@ -23,6 +23,7 @@ The package manifest tells `gnustep-packager`:
 - `updates`
 - `integrations`
 - `compliance`
+- `platformOverrides`
 - `backends`
 
 ## `profiles`
@@ -79,13 +80,17 @@ Important fields:
 
 `launch.env` entries may be either:
 - a plain string, which means `policy: override`
-- an object with `value` plus optional `policy`
+- an object with `value` plus optional `policy` (and `hostDefault` with
+  `prepend`)
 
 Current launch environment policies:
 - `override`
   Always set the variable in the generated launcher.
 - `ifUnset`
   Set the variable only when the user has not already defined it.
+- `prepend`
+  Put the value in front of the variable's current value (see
+  `docs/launch-contract.md`), keeping the host's search-path entries.
 
 ## `outputs`
 Declares shared output roots for logs, packages, temporary files, and validation
@@ -299,9 +304,10 @@ Important fields:
 ## `backends`
 Backend-specific toggles and settings.
 
-Current planned backends:
+Current backends:
 - `msi`
 - `appimage`
+- `dmg`
 
 ### `backends.msi`
 Important fields:
@@ -393,13 +399,57 @@ AppImage runtime-closure validation modes:
 - `off`
   Skip backend ELF closure checks.
 
+### `backends.dmg`
+Important fields (see [dmg-backend.md](dmg-backend.md) for every field and its
+default):
+- `appBundleName`
+- `volumeName`
+- `artifactNamePattern` (supports `{arch}`)
+- `filesystem` (`APFS`, `HFS+`)
+- `format` (`UDZO`, `ULFO`)
+- `applicationsLink`
+- `backgroundImageRelativePath`
+- `finderLayout` (`auto`, `applescript`, `off`)
+- `finderLayoutTimeoutSeconds`
+- `window.*`
+- `noticeReport.enabled`
+- `noticeReport.fileName`
+- `signing.identity`
+- `signing.resign`
+- `signing.deep`
+- `signing.hardenedRuntime`
+- `signing.entitlementsPath`
+- `signing.keychain`
+- `signing.signDmg`
+- `signing.additionalArguments`
+- `notarization.enabled`
+- `notarization.keychainProfileEnvVar`
+- `notarization.staple`
+- `notarization.required`
+- `validation.requireSignature`
+- `validation.requireGatekeeperAcceptance`
+- `smoke.enabled`
+- `smoke.startupSeconds`
+- `smoke.arguments`
+- `smoke.environment`
+
+`notarization.keychainProfileEnvVar` names an environment variable; the
+manifest never holds notary credentials.
+
+## `platformOverrides`
+Optional per-platform overlays keyed by `windows`, `linux` or `macos`. The
+entry for the target platform merges over the manifest (objects merge, arrays
+and scalars replace, `null` removes a key). It cannot override
+`schemaVersion` or `package`. See
+[configuration-layering.md](configuration-layering.md#platform-overrides).
+
 ## Resolution
 The CLI resolves manifests through layered defaults before validation and
 execution:
 
 1. core defaults
 2. backend defaults
-3. app manifest
+3. app manifest (with `platformOverrides.<target platform>` merged over it)
 
 At execution time, the resolved manifest may also receive a package-version
 override from:

@@ -129,6 +129,9 @@ Describe "AppImage backend" {
 
       Assert-GpMatch -Actual $appRunText -Pattern 'if \[ -z "\$\{GSTheme\+x\}" \]; then' -Message "AppRun should only seed GSTheme when the user has not already set it."
       Assert-GpMatch -Actual $appRunText -Pattern 'export GSTheme="Adwaita"' -Message "AppRun should preserve the configured default theme value."
+      Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export XDG_DATA_DIRS="${RUNTIME_ROOT}/share:${GP_HOST_XDG_DATA_DIRS:-/usr/local/share:/usr/share}"')) -Message "AppRun should prepend packaged data dirs to the host's, with the XDG default when the host has none."
+      Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export GP_HOST_XDG_DATA_DIRS="${XDG_DATA_DIRS:-}"')) -Message "AppRun should remember the host's value at the first launch, so relaunches don't stack entries."
+      Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export GP_FIXTURE_SEARCH_PATH="${RUNTIME_ROOT}/lib${GP_HOST_GP_FIXTURE_SEARCH_PATH:+:${GP_HOST_GP_FIXTURE_SEARCH_PATH}}"')) -Message "AppRun should prepend to a host value only when there is one."
       Assert-GpMatch -Actual $appRunText -Pattern 'APP_DEFAULTS_TOOL="\$RUNTIME_ROOT/bin/defaults"' -Message "AppRun should look for a bundled defaults tool when app-domain defaults are declared."
       Assert-GpMatch -Actual $appRunText -Pattern 'read "com\.example\.SampleGNUstepLinuxApp" "GSTheme"' -Message "AppRun should seed GSTheme through GNUstep defaults as well as the env fallback."
       Assert-GpMatch -Actual $appRunText -Pattern 'write "com\.example\.SampleGNUstepLinuxApp" "GSTheme" "\\"Adwaita\\""' -Message "AppRun should serialize the packaged theme as a GNUstep defaults write."
@@ -154,6 +157,31 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $desktopText -Pattern "Exec=AppRun %F" -Message "Desktop entry should route launches through AppRun."
       Assert-GpMatch -Actual $desktopText -Pattern "MimeType=application/x-samplegnusteplinuxapp-samplelinux;" -Message "Desktop entry should include the generated MIME type."
       Assert-GpMatch -Actual $mimeText -Pattern "glob pattern='\*\.samplelinux'" -Message "Generated MIME package should describe the staged extension association."
+    }
+
+    It "packages an app that declares no file associations" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["integrations"]["fileAssociations"] = @()
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $logPath = Join-Path $script:packageConfig.OutputPaths.LogRoot "pester-appimage-package-no-associations.log"
+        $result = Invoke-GpAppImagePackage -Context $context -LogPath $logPath
+        $desktopText = Get-Content -Raw -Path $result.DesktopEntryPath
+        $metadata = Get-GpJsonFile -Path $result.MetadataPath
+
+        Assert-GpTrue -Condition (Test-Path $result.ArtifactPath) -Message "An app without file associations should still produce an AppImage."
+        Assert-GpTrue -Condition ([string]::IsNullOrWhiteSpace([string]$result.MimePackagePath)) -Message "No MIME package should be generated without file associations."
+        Assert-GpMatch -Actual $desktopText -Pattern "(?m)^Exec=AppRun\r?$" -Message "Without associations the desktop entry should not take file arguments."
+        Assert-GpTrue -Condition ($desktopText -notmatch "(?m)^MimeType=") -Message "Without associations the desktop entry should omit MimeType."
+        Assert-GpEqual -Actual @($metadata["desktop"]["mimeTypes"] | Where-Object { $_ }).Count -Expected 0 -Message "AppImage metadata should record no MIME types."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
     }
 
     It "can emit updater metadata and a feed sidecar when updates are enabled" {

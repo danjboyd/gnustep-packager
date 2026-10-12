@@ -37,6 +37,8 @@ function Get-GpDefaultTestPaths {
     $paths.Add((Join-Path $repoRoot "tests\\windows")) | Out-Null
   } elseif ($IsLinux) {
     $paths.Add((Join-Path $repoRoot "tests\\linux")) | Out-Null
+  } elseif ($IsMacOS) {
+    $paths.Add((Join-Path $repoRoot "tests\\macos")) | Out-Null
   } else {
     $paths.Add((Join-Path $repoRoot "tests")) | Out-Null
   }
