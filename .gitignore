@@ -10,5 +10,6 @@ tools/wix/
 *.msi
 *.zip
 *.AppImage
+*.zsync
 *.log
 *.pfx
