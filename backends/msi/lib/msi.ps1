@@ -678,7 +678,11 @@ function Get-GpPeImportedDllNames {
   }
 
   $output = & $objdump -p $Path 2>$null
-  if ($LASTEXITCODE -ne 0 -or -not $output) {
+  $exitCode = $LASTEXITCODE
+  # A non-PE file is skipped, not an error; don't leave its exit code in
+  # $LASTEXITCODE, where a calling CI shell would report it as a failure.
+  $global:LASTEXITCODE = 0
+  if ($exitCode -ne 0 -or -not $output) {
     return @()
   }
 

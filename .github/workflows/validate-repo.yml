@@ -47,6 +47,8 @@ jobs:
             cygpath -w "${GP_GNUSTEP_CLI_ROOT}/bin"
             cygpath -w "${GP_GNUSTEP_CLI_ROOT}/Tools"
             cygpath -w "${GP_GNUSTEP_CLI_ROOT}/System/Tools"
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/usr/bin"
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/clang64/bin"
           } >> "$GITHUB_PATH"
           {
             echo "GP_GNUSTEP_CLI_ROOT=$(cygpath -w "${GP_GNUSTEP_CLI_ROOT}")"
