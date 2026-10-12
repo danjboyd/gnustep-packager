@@ -178,7 +178,9 @@ if [ "$windows_host" -eq 1 ]; then
     env PATH="/c/Windows/System32:$PATH" "$pwsh_cmd" -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$bootstrap_path")" \
     --json --yes setup --user --root "$(cygpath -w "$install_root")" \
     --manifest "$manifest_url"
-  PATH="$install_root/bin:$install_root/Tools:$install_root/System/Tools:$install_root/usr/bin:$install_root/clang64/bin:$PATH"
+  # Keep the managed root's private usr/bin out of this shell: a second MSYS2
+  # runtime ahead of ours replaces cat, tail and friends mid-script.
+  PATH="$install_root/bin:$install_root/Tools:$install_root/System/Tools:$PATH"
 else
   chmod +x "$bootstrap_path"
   run_logged "$log_root/gnustep-cli-new-setup.log" \
