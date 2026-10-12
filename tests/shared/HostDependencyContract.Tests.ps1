@@ -173,6 +173,19 @@ Describe "Host dependency contract" {
     }
   }
 
+  It "carries MSYS2 package URLs on hosted runs and rejects them on verify-only runs" {
+    $context = Get-GpManifestContext -Path $script:manifestPath
+    $url = "https://github.com/example/libs-back/releases/download/carry-0.32.0.1/mingw-w64-clang-x86_64-gnustep-back-0.32.0.1-1-any.pkg.tar.zst"
+
+    $hosted = Get-GpWorkflowHostSetupPlan -Context $context -Backend "msi" -Msys2PackageUrls "$url $url"
+    Assert-GpEqual -Actual $hosted.Msys2PackageUrlText -Expected $url -Message "Hosted workflow plans should carry each package URL once."
+    Assert-GpEqual -Actual @($hosted.Errors) -Expected @() -Message "Hosted workflow plans should accept package URLs."
+
+    $verifyOnly = Get-GpWorkflowHostSetupPlan -Context $context -Backend "msi" -SkipDefaultHostSetup -Msys2PackageUrls $url
+    Assert-GpTrue -Condition (@($verifyOnly.Errors).Count -eq 1) -Message "Verify-only plans should reject package URLs they would ignore."
+    Assert-GpMatch -Actual $verifyOnly.Errors[0] -Pattern "msys2-package-urls" -Message "Verify-only planning should name the ignored input."
+  }
+
   It "fails early when declared Windows MSYS2 packages are missing and install mode is disabled" {
     $manifestPath = $null
     $logPath = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-host-deps-" + [guid]::NewGuid().ToString("N") + ".log")
