@@ -2007,8 +2007,8 @@ function Invoke-GpMsiSmokeLaunch {
     $launcherError = ""
     foreach ($errorSource in @($launcherErrorLog, $launcherStderr)) {
       if ([string]::IsNullOrWhiteSpace($launcherError) -and (Test-Path -LiteralPath $errorSource)) {
-        $launcherError = [string](Get-Content -Raw -LiteralPath $errorSource)
-        $launcherError = $launcherError.Trim()
+        # ReadAllText gives "" for an empty file, where Get-Content -Raw gives $null.
+        $launcherError = [System.IO.File]::ReadAllText($errorSource).Trim()
       }
     }
     if (-not [string]::IsNullOrWhiteSpace($launcherError)) {
