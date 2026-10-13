@@ -164,7 +164,11 @@
           "name": "Adwaita",
           "desktops": [
             "GNOME"
-          ]
+          ],
+          "defaults": {
+            "GSX11HandlesWindowDecorations": false,
+            "GSFirstCommandKey": "Control_R"
+          }
         }
       },
       "smoke": {

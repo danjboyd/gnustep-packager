@@ -151,10 +151,13 @@ Describe "AppImage backend" {
       $themedDir = Split-Path -Parent $script:packageResult.GnustepThemedConfigPath
       $themedDefaults = Get-Content -Raw -Path (Join-Path $themedDir "GlobalDefaults.plist")
       Assert-GpMatch -Actual $themedDefaults -Pattern '"GSTheme" = "Adwaita";' -Message "The themed config should default GSTheme through GlobalDefaults.plist."
-      Assert-GpMatch -Actual $themedDefaults -Pattern '"GSFirstCommandKey" = "Control_L";' -Message "The themed config should carry the manifest's global defaults too."
+      Assert-GpMatch -Actual $themedDefaults -Pattern '"GSX11HandlesWindowDecorations" = NO;' -Message "The themed config should carry the theme's own defaults."
+      Assert-GpMatch -Actual $themedDefaults -Pattern '"GSFirstCommandKey" = "Control_R";' -Message "A theme default should override a global default with the same key."
+      Assert-GpTrue -Condition ($themedDefaults -notmatch 'Control_L') -Message "The overridden global value should not also appear in the themed config."
       $plainDefaults = Get-Content -Raw -Path (Join-Path (Split-Path -Parent $script:packageResult.GnustepConfigPath) "GlobalDefaults.plist")
       Assert-GpMatch -Actual $plainDefaults -Pattern '"GSFirstCommandKey" = "Control_L";' -Message "The plain config should carry the manifest's global defaults."
       Assert-GpTrue -Condition ($plainDefaults -notmatch 'GSTheme') -Message "The plain config should set no theme."
+      Assert-GpTrue -Condition ($plainDefaults -notmatch 'GSX11HandlesWindowDecorations') -Message "The theme's own defaults should not apply without the theme."
       $mode = (& stat -c '%a' $script:packageResult.GnustepConfigPath).Trim()
       Assert-GpEqual -Actual $mode -Expected "644" -Message "gnustep-base ignores a GNUstep.conf that others can write."
 
