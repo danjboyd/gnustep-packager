@@ -155,6 +155,18 @@
       "enabled": true,
       "desktopEntryName": "sample-gnustep-linux.desktop",
       "iconRelativePath": "metadata/icons/sample-linux.png",
+      "gnustepConfig": {
+        "systemRoot": "runtime/System",
+        "globalDefaults": {
+          "GSFirstCommandKey": "Control_L"
+        },
+        "defaultTheme": {
+          "name": "Adwaita",
+          "desktops": [
+            "GNOME"
+          ]
+        }
+      },
       "smoke": {
         "mode": "launch-only"
       }

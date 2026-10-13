@@ -354,6 +354,10 @@ Important fields:
 - `toolRoot`
 - `downloadUrl`
 - `skipAppStreamValidation`
+- `gnustepConfig.systemRoot`
+- `gnustepConfig.globalDefaults`
+- `gnustepConfig.defaultTheme.name`
+- `gnustepConfig.defaultTheme.desktops`
 - `validation.runtimeClosure`
 - `validation.allowedSystemLibraries`
 - `validation.allowedExternalRunpaths`
@@ -379,6 +383,33 @@ Supported AppImage smoke modes:
 - `marker-file`
   Launch the packaged app with a marker-file compatibility argument and the
   same path exported as `GP_APPIMAGE_SMOKE_MARKER_PATH`.
+
+AppImage GNUstep configuration (`gnustepConfig`):
+
+- `systemRoot`
+  Stage-relative path of a bundled GNUstep-layout tree (`Library/`, `Tools/`,
+  as copied from a `/usr/GNUstep/System` install), for example
+  `runtime/System`. The backend writes a `GNUstep.conf` whose paths are
+  relative to the file (gnustep-base resolves `./` and `../` against the
+  config file's directory), and `AppRun` exports `GNUSTEP_CONFIG_FILE` to it.
+  Without it, the bundled gnustep-base reads the config file it was built
+  with, so it looks for its backend bundle, `gdnc`, `gpbs` and themes under
+  the build host's prefix: the AppImage then starts only on hosts that have
+  GNUstep installed there. Packaging logs a warning when the staged runtime
+  has a `System/Library` tree and `systemRoot` is unset. A `GNUSTEP_CONFIG_FILE`
+  in `launch.env` still takes precedence.
+- `globalDefaults`
+  Defaults written to `GlobalDefaults.plist` next to the generated
+  `GNUstep.conf`, for example `GSFirstCommandKey: "Control_L"` (Ctrl as the
+  Command key) or `NSMenuInterfaceStyle`. They rank below the user's own
+  defaults, so a user's setting still wins, and nothing is written to the
+  user's defaults database.
+- `defaultTheme.name`
+  A theme bundled under `<systemRoot>/Library/Themes/<name>.theme` to use as
+  the default `GSTheme`, through the same `GlobalDefaults.plist`.
+- `defaultTheme.desktops`
+  `XDG_CURRENT_DESKTOP` names (for example `GNOME`) on which the default theme
+  applies. Empty or omitted means every desktop.
 
 AppImage update settings:
 

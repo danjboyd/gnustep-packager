@@ -138,6 +138,14 @@ jobs:
         run: |
           ./scripts/run-packaging-pipeline.ps1 -Manifest examples/sample-linux/package.manifest.json -Backend appimage -RunSmoke
 
+      - name: Smoke Test Linux Example On A Clean Host
+        shell: bash
+        env:
+          # The fixture exits non-zero unless GNUSTEP_CONFIG_FILE reaches the bundled System/Library.
+          GP_CLEAN_SMOKE_ENV: GP_FIXTURE_EXPECT_GNUSTEP_CONFIG=1
+        run: |
+          ./scripts/ci/appimage-clean-smoke.sh examples/sample-linux/dist/packages/SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage ubuntu:24.04
+
       - name: Upload gnustep-cli-new Diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

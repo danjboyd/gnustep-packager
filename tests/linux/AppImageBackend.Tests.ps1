@@ -140,6 +140,65 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $appRunText -Pattern 'write "com\.example\.SampleGNUstepLinuxApp" "SampleWelcomeText" "\\"Packaged sample\\""' -Message "AppRun should serialize string app-domain defaults as GNUstep literals."
     }
 
+    It "writes a relocatable GNUstep.conf that points into the bundled runtime" {
+      Assert-GpTrue -Condition (Test-Path $script:packageResult.GnustepConfigPath) -Message "The AppDir should carry a GNUstep.conf."
+      Assert-GpTrue -Condition (Test-Path $script:packageResult.GnustepThemedConfigPath) -Message "A default theme should add a second GNUstep.conf."
+      $configText = Get-Content -Raw -Path $script:packageResult.GnustepConfigPath
+      Assert-GpMatch -Actual $configText -Pattern '(?m)^GNUSTEP_SYSTEM_LIBRARY=\.\./\.\./System/Library$' -Message "GNUSTEP_SYSTEM_LIBRARY should be relative to the config file."
+      Assert-GpMatch -Actual $configText -Pattern '(?m)^GNUSTEP_SYSTEM_TOOLS=\.\./\.\./System/Tools$' -Message "GNUSTEP_SYSTEM_TOOLS should point at the bundled tools (gdnc, gpbs)."
+      Assert-GpMatch -Actual $configText -Pattern '(?m)^GNUSTEP_LOCAL_LIBRARY=\.\./\.\./System/Library$' -Message "The LOCAL domain should not fall back to the host's /usr/GNUstep/Local."
+      Assert-GpTrue -Condition ($configText -notmatch '/usr/GNUstep') -Message "GNUstep.conf should name no host path."
+      $themedDir = Split-Path -Parent $script:packageResult.GnustepThemedConfigPath
+      $themedDefaults = Get-Content -Raw -Path (Join-Path $themedDir "GlobalDefaults.plist")
+      Assert-GpMatch -Actual $themedDefaults -Pattern '"GSTheme" = "Adwaita";' -Message "The themed config should default GSTheme through GlobalDefaults.plist."
+      Assert-GpMatch -Actual $themedDefaults -Pattern '"GSFirstCommandKey" = "Control_L";' -Message "The themed config should carry the manifest's global defaults too."
+      $plainDefaults = Get-Content -Raw -Path (Join-Path (Split-Path -Parent $script:packageResult.GnustepConfigPath) "GlobalDefaults.plist")
+      Assert-GpMatch -Actual $plainDefaults -Pattern '"GSFirstCommandKey" = "Control_L";' -Message "The plain config should carry the manifest's global defaults."
+      Assert-GpTrue -Condition ($plainDefaults -notmatch 'GSTheme') -Message "The plain config should set no theme."
+      $mode = (& stat -c '%a' $script:packageResult.GnustepConfigPath).Trim()
+      Assert-GpEqual -Actual $mode -Expected "644" -Message "gnustep-base ignores a GNUstep.conf that others can write."
+
+      $appRunText = Get-Content -Raw -Path $script:packageResult.AppRunPath
+      Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('GP_GNUSTEP_CONFIG_FILE="${USR}/runtime/etc/GNUstep/GNUstep.conf"')) -Message "AppRun should default to the plain bundled config."
+      Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('*:GNOME:*) GP_GNUSTEP_CONFIG_FILE="${USR}/runtime/etc/GNUstep-default-theme/GNUstep.conf" ;;')) -Message "AppRun should pick the themed config on the named desktops."
+      Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export GNUSTEP_CONFIG_FILE="$GP_GNUSTEP_CONFIG_FILE"')) -Message "AppRun should export GNUSTEP_CONFIG_FILE."
+    }
+
+    It "launches against the bundled GNUstep tree from any location, with the theme only on the named desktops" {
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-gnustep-config-" + [guid]::NewGuid().ToString("N"))
+      try {
+        # A copy elsewhere stands in for a different AppImage mount point.
+        $relocated = Join-Path $tempRoot "mnt/AppDir"
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $relocated) | Out-Null
+        & cp -a $script:packageResult.AppDirRoot $relocated
+        $appRun = Join-Path $relocated "AppRun"
+        $expectedLibrary = Join-Path $relocated "usr/runtime/System/Library"
+
+        foreach ($case in @(
+          @{ Desktop = "ubuntu:GNOME"; Config = "usr/runtime/etc/GNUstep-default-theme/GNUstep.conf"; Theme = "Adwaita" },
+          @{ Desktop = "KDE"; Config = "usr/runtime/etc/GNUstep/GNUstep.conf"; Theme = "" }
+        )) {
+          $marker = Join-Path $tempRoot ("marker-" + [guid]::NewGuid().ToString("N") + ".txt")
+          $run = Invoke-GpAppImageCapturedTool -FilePath $appRun -ArgumentList @() -Environment @{
+            HOME = $tempRoot
+            XDG_CURRENT_DESKTOP = $case.Desktop
+            GNUSTEP_CONFIG_FILE = "/etc/GNUstep/GNUstep.conf"
+            GP_APPIMAGE_SMOKE_MARKER_PATH = $marker
+            GP_FIXTURE_EXPECT_GNUSTEP_CONFIG = "1"
+          }
+          Assert-GpEqual -Actual $run.ExitCode -Expected 0 -Message "AppRun should reach the bundled System/Library on $($case.Desktop). Output: $($run.Text)"
+          $markerText = Get-Content -Raw -Path $marker
+          Assert-GpMatch -Actual $markerText -Pattern ("(?m)^gnustep_config=" + [regex]::Escape((Join-Path $relocated $case.Config)) + "$") -Message "AppRun should override a host GNUSTEP_CONFIG_FILE with the bundled one on $($case.Desktop)."
+          Assert-GpMatch -Actual $markerText -Pattern ("(?m)^gnustep_system_library=" + [regex]::Escape($expectedLibrary) + "$") -Message "GNUstep.conf should resolve into the relocated AppDir."
+          Assert-GpMatch -Actual $markerText -Pattern ("(?m)^gnustep_theme=" + [regex]::Escape($case.Theme) + "$") -Message "The default theme should apply only on the named desktops."
+        }
+      } finally {
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
+        }
+      }
+    }
+
     It "satisfies the semantic AppImage package contract in the AppDir" {
       $contract = Invoke-GpPackageContractAssertions -Context $script:packageContext -Scope "package" -Backend "appimage" -RootPath $script:packageResult.AppDirRoot
 

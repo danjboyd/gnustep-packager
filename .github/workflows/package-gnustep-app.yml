@@ -85,6 +85,15 @@ on:
         required: false
         type: boolean
         default: false
+      appimage-clean-smoke-image:
+        description: >-
+          AppImage only: also launch the AppImage in this container image (apt- or dnf-based, for
+          example ubuntu:24.04), which has no GNUstep, so a package that only works where the
+          build host's GNUstep is installed fails here. Needs Docker on the runner (not with
+          container-appimage). Empty skips it.
+        required: false
+        type: string
+        default: ""
       upload-artifacts:
         required: false
         type: boolean
@@ -640,6 +649,24 @@ jobs:
             throw "packaging pipeline entrypoint not found at $pipelineScript"
           }
           & $pipelineScript @parameters
+
+      - name: Smoke Test AppImage On A Clean Host
+        if: ${{ inputs.backend == 'appimage' && inputs.appimage-clean-smoke-image != '' }}
+        shell: bash
+        env:
+          CLEAN_SMOKE_IMAGE: ${{ inputs.appimage-clean-smoke-image }}
+          PACKAGE_ROOT: ${{ steps.manifest.outputs.package_root }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          appimages=("${PACKAGE_ROOT}"/*.AppImage)
+          if [ "${#appimages[@]}" -eq 0 ]; then
+            echo "No AppImage in ${PACKAGE_ROOT}" >&2
+            exit 1
+          fi
+          for appimage in "${appimages[@]}"; do
+            ./.gnustep-packager-toolkit/scripts/ci/appimage-clean-smoke.sh "${appimage}" "${CLEAN_SMOKE_IMAGE}"
+          done
 
       - name: Upload Package Artifacts
         if: ${{ inputs.upload-artifacts }}

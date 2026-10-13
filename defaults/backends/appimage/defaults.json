@@ -16,6 +16,9 @@
       "toolRoot": "tools/appimage",
       "downloadUrl": "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage",
       "skipAppStreamValidation": true,
+      "gnustepConfig": {
+        "systemRoot": ""
+      },
       "validation": {
         "runtimeClosure": "strict",
         "allowedSystemLibraries": [],

@@ -72,6 +72,19 @@ Supported smoke modes:
 - `custom-arguments`
 - `marker-file`
 
+## GNUstep Configuration
+A GNUstep runtime copied from a `/usr/GNUstep` install still reads the
+`GNUstep.conf` it was built with, and so looks for its backend bundle, `gdnc`,
+`gpbs` and themes on the host. Set `backends.appimage.gnustepConfig.systemRoot`
+to the staged GNUstep tree (for example `runtime/System`): the backend writes a
+relocatable `GNUstep.conf` into the AppDir and `AppRun` points
+`GNUSTEP_CONFIG_FILE` at it. `globalDefaults` and `defaultTheme` (optionally
+limited to some desktops, such as `GNOME`) go into a `GlobalDefaults.plist`
+beside it, below the user's own defaults. See `docs/manifest.md`.
+
+Check the result on a host without GNUstep: the reusable workflow's
+`appimage-clean-smoke-image` input launches the AppImage in such a container.
+
 ## Known Limitations
 - current artifact generation targets x86_64 only
 - the staged Linux payload must still include its runtime closure; the backend validates that closure but does not harvest missing libraries for you

@@ -1019,6 +1019,58 @@
             "skipAppStreamValidation": {
               "type": "boolean"
             },
+            "gnustepConfig": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "systemRoot": {
+                  "type": "string"
+                },
+                "globalDefaults": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  }
+                },
+                "defaultTheme": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "desktops": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_.-]+$"
+                      }
+                    }
+                  }
+                }
+              }
+            },
             "validation": {
               "type": "object",
               "additionalProperties": false,
