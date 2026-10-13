@@ -2,9 +2,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # Runs a real gp-update-helper. Set GP_UPDATE_HELPER_PATH to a built helper
-# (on Windows, with the GNUstep runtime DLLs reachable on Path); otherwise
-# the test builds a copy of updater/objc under dist/ when gnustep-config and
-# make are available, and is skipped when they are not.
+# (on Windows, with the GNUstep runtime DLLs reachable on Path). Otherwise,
+# off Windows, the test builds a copy of updater/objc under dist/ when
+# gnustep-config and make are available, and is skipped when they are not.
+# On Windows the helper has to be built in an MSYS2 CLANG64 shell, so there
+# the test runs only with GP_UPDATE_HELPER_PATH.
 Describe "Updater helper runtime" {
   BeforeAll {
     $script:repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\\.."))
@@ -13,6 +15,10 @@ Describe "Updater helper runtime" {
     function Get-GpTestHelperPath {
       if (-not [string]::IsNullOrWhiteSpace($env:GP_UPDATE_HELPER_PATH)) {
         return $env:GP_UPDATE_HELPER_PATH
+      }
+
+      if ($IsWindows) {
+        return $null
       }
 
       if (-not (Get-Command gnustep-config -ErrorAction SilentlyContinue) -or -not (Get-Command make -ErrorAction SilentlyContinue)) {
@@ -47,7 +53,7 @@ Describe "Updater helper runtime" {
 
   It "verifies a download when run outside the system directory with Windows' Path spelling" {
     if ($null -eq $script:helperPath) {
-      Set-ItResult -Skipped -Because "gp-update-helper is not built and gnustep-config or make is unavailable"
+      Set-ItResult -Skipped -Because "GP_UPDATE_HELPER_PATH is not set and the helper can't be built here"
       return
     }
 
@@ -98,6 +104,17 @@ Describe "Updater helper runtime" {
         $pathValue = $startInfo.Environment["PATH"]
         $startInfo.Environment.Remove("PATH") | Out-Null
         $startInfo.Environment.Add("Path", $pathValue)
+      } elseif (Get-Command gnustep-config -ErrorAction SilentlyContinue) {
+        # GNUstep's libraries need not be on the default search path.
+        $libraryDirectories = @(
+          foreach ($variable in @("GNUSTEP_USER_LIBRARIES", "GNUSTEP_LOCAL_LIBRARIES", "GNUSTEP_SYSTEM_LIBRARIES")) {
+            & gnustep-config "--variable=$variable"
+          }
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        if (-not [string]::IsNullOrWhiteSpace($env:LD_LIBRARY_PATH)) {
+          $libraryDirectories += $env:LD_LIBRARY_PATH
+        }
+        $startInfo.Environment["LD_LIBRARY_PATH"] = ($libraryDirectories -join ":")
       }
 
       $process = [System.Diagnostics.Process]::Start($startInfo)
