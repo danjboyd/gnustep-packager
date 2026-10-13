@@ -9,6 +9,8 @@
 #   GP_CLEAN_SMOKE_SECONDS     how long the app has to stay up (default: 10)
 #   GP_CLEAN_SMOKE_ARGS        extra arguments for the app (word-split)
 #   GP_CLEAN_SMOKE_ENV         extra NAME=value environment for the app (word-split)
+#   GP_CLEAN_SMOKE_PACKAGES    distribution packages to add first (word-split), for libraries the
+#                              AppImage leaves to the host on purpose, as a desktop install has
 #
 # As with the launch-only smoke mode, the app passes when it is still running after the startup
 # window or has exited with status 0.
@@ -25,6 +27,7 @@ DESKTOP="${GP_CLEAN_SMOKE_DESKTOP:-GNOME}"
 SECONDS_UP="${GP_CLEAN_SMOKE_SECONDS:-10}"
 APP_ARGS="${GP_CLEAN_SMOKE_ARGS:-}"
 APP_ENV="${GP_CLEAN_SMOKE_ENV:-}"
+EXTRA_PACKAGES="${GP_CLEAN_SMOKE_PACKAGES:-}"
 
 [[ -f "${APPIMAGE}" ]] || { echo "appimage-clean-smoke: no AppImage at ${APPIMAGE}" >&2; exit 2; }
 command -v docker >/dev/null || { echo "appimage-clean-smoke: docker is needed" >&2; exit 2; }
@@ -38,15 +41,17 @@ echo "appimage-clean-smoke: ${APPIMAGE_NAME} on ${IMAGE} (XDG_CURRENT_DESKTOP=${
 "${DOCKER[@]}" run --rm -i \
   -v "${APPIMAGE_DIR}:/package:ro" \
   -e APPIMAGE_NAME="${APPIMAGE_NAME}" -e DESKTOP="${DESKTOP}" -e SECONDS_UP="${SECONDS_UP}" \
-  -e APP_ARGS="${APP_ARGS}" -e APP_ENV="${APP_ENV}" \
+  -e APP_ARGS="${APP_ARGS}" -e APP_ENV="${APP_ENV}" -e EXTRA_PACKAGES="${EXTRA_PACKAGES}" \
   "${IMAGE}" bash -s <<'EOF_CONTAINER'
 set -euo pipefail
 if command -v apt-get >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq >/dev/null
-  apt-get install -y -qq --no-install-recommends xvfb xauth >/dev/null
+  # shellcheck disable=SC2086
+  apt-get install -y -qq --no-install-recommends xvfb xauth ${EXTRA_PACKAGES} >/dev/null
 elif command -v dnf >/dev/null; then
-  dnf install -y -q xorg-x11-server-Xvfb shadow-utils util-linux >/dev/null
+  # shellcheck disable=SC2086
+  dnf install -y -q xorg-x11-server-Xvfb shadow-utils util-linux ${EXTRA_PACKAGES} >/dev/null
 else
   echo "appimage-clean-smoke: the image has neither apt-get nor dnf" >&2
   exit 2
