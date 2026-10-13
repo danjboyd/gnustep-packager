@@ -642,6 +642,10 @@ static BOOL GPHelperLaunchMSIApplyScript(NSString *scriptPath) {
   if ([cmdPath length] == 0) {
     return NO;
   }
+  // GNUstep joins the system directory and the name with '/', and cmd.exe
+  // reads "/system32/cmd.exe" in its own command line as /s and /c, so it
+  // would never run the script.
+  cmdPath = GPHelperWindowsPath(cmdPath);
 
   NSString *windowsScriptPath = GPHelperWindowsPath(scriptPath);
   NSString *workingDirectory = [windowsScriptPath stringByDeletingLastPathComponent];
