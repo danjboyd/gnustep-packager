@@ -358,6 +358,7 @@ Important fields:
 - `gnustepConfig.globalDefaults`
 - `gnustepConfig.defaultTheme.name`
 - `gnustepConfig.defaultTheme.desktops`
+- `gnustepConfig.defaultTheme.defaults`
 - `validation.runtimeClosure`
 - `validation.allowedSystemLibraries`
 - `validation.allowedExternalRunpaths`
@@ -410,6 +411,12 @@ AppImage GNUstep configuration (`gnustepConfig`):
 - `defaultTheme.desktops`
   `XDG_CURRENT_DESKTOP` names (for example `GNOME`) on which the default theme
   applies. Empty or omitted means every desktop.
+- `defaultTheme.defaults`
+  Defaults that go with the default theme only, in the same
+  `GlobalDefaults.plist`: on other desktops (or with the user's own theme
+  setting) they don't apply. For example, `GSX11HandlesWindowDecorations: false`
+  lets a theme that draws its own header bar do so where it is the default.
+  They override `globalDefaults` with the same key.
 
 AppImage update settings:
 

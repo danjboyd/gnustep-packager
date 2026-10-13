@@ -206,6 +206,25 @@ function Resolve-GpAppImageArtifactNamePattern {
   })
 }
 
+function ConvertTo-GpAppImageGlobalDefaultEntries {
+  param(
+    [AllowNull()]
+    [object]$Values
+  )
+
+  # A manifest map of defaults, as typed entries for GlobalDefaults.plist.
+  if (-not ($Values -is [System.Collections.IDictionary])) {
+    return @()
+  }
+  return @(
+    foreach ($key in @($Values.Keys | Sort-Object)) {
+      $value = $Values[$key]
+      $type = if ($value -is [bool]) { "bool" } elseif ($value -is [int] -or $value -is [long]) { "integer" } elseif ($value -is [double] -or $value -is [decimal]) { "number" } else { "string" }
+      [pscustomobject]@{ Key = [string]$key; Type = $type; Value = $value }
+    }
+  )
+}
+
 function Get-GpAppImageConfig {
   param(
     [Parameter(Mandatory = $true)]
@@ -259,19 +278,16 @@ function Get-GpAppImageConfig {
     $gnustepDefaultTheme = [pscustomobject]@{
       Name = [string]$gnustepConfig["defaultTheme"]["name"]
       Desktops = [string[]]@($gnustepConfig["defaultTheme"]["desktops"] | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+      Defaults = @(ConvertTo-GpAppImageGlobalDefaultEntries -Values $gnustepConfig["defaultTheme"]["defaults"])
     }
   }
 
-  $gnustepGlobalDefaults = [System.Collections.Generic.List[psobject]]::new()
+  $gnustepGlobalDefaults = @()
   if ($gnustepConfig.Contains("globalDefaults") -and ($gnustepConfig["globalDefaults"] -is [System.Collections.IDictionary])) {
     if ([string]::IsNullOrWhiteSpace($gnustepSystemRoot)) {
       throw "backends.appimage.gnustepConfig.globalDefaults requires backends.appimage.gnustepConfig.systemRoot."
     }
-    foreach ($key in @($gnustepConfig["globalDefaults"].Keys | Sort-Object)) {
-      $value = $gnustepConfig["globalDefaults"][$key]
-      $type = if ($value -is [bool]) { "bool" } elseif ($value -is [int] -or $value -is [long]) { "integer" } elseif ($value -is [double] -or $value -is [decimal]) { "number" } else { "string" }
-      $gnustepGlobalDefaults.Add([pscustomobject]@{ Key = [string]$key; Type = $type; Value = $value }) | Out-Null
-    }
+    $gnustepGlobalDefaults = @(ConvertTo-GpAppImageGlobalDefaultEntries -Values $gnustepConfig["globalDefaults"])
   }
 
   $downloadUrl = [string]$backend["downloadUrl"]
@@ -341,7 +357,7 @@ function Get-GpAppImageConfig {
       Enabled = -not [string]::IsNullOrWhiteSpace($gnustepSystemRoot)
       SystemRootRelative = $gnustepSystemRoot
       DefaultTheme = $gnustepDefaultTheme
-      GlobalDefaults = @($gnustepGlobalDefaults.ToArray())
+      GlobalDefaults = @($gnustepGlobalDefaults)
     }
     Validation = [pscustomobject]@{
       RuntimeClosure = [string]$validation["runtimeClosure"]
@@ -1104,7 +1120,10 @@ function Write-GpAppImageGnustepConfig {
     $themedPath = Join-Path $themedDir "GNUstep.conf"
     Set-Content -Path $themedPath -Value (Get-GpAppImageGnustepConfigText -ConfigDirectory $themedDir -SystemRoot $systemRoot) -Encoding ascii -NoNewline
     $writtenPaths.Add($themedPath) | Out-Null
-    $themedDefaults = @($globalDefaults | Where-Object { $_.Key -ne "GSTheme" }) + @([pscustomobject]@{ Key = "GSTheme"; Type = "string"; Value = $theme.Name })
+    # The theme's own defaults (for example its window decorations) apply only with it, over the
+    # global ones; GSTheme is the theme's name.
+    $themeKeys = @(@($theme.Defaults) | ForEach-Object { $_.Key }) + @("GSTheme")
+    $themedDefaults = @($globalDefaults | Where-Object { $themeKeys -notcontains $_.Key }) + @($theme.Defaults | Where-Object { $_.Key -ne "GSTheme" }) + @([pscustomobject]@{ Key = "GSTheme"; Type = "string"; Value = $theme.Name })
     $writtenPaths.Add((Write-GpAppImageGlobalDefaults -Directory $themedDir -Entries $themedDefaults)) | Out-Null
     Write-GpAppImageLogLine -LogPath $LogPath -Message ("Generated GNUstep.conf with default theme {0}: {1}" -f $theme.Name, $themedPath)
   }
