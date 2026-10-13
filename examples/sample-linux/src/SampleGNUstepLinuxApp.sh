@@ -36,6 +36,8 @@ if [ -n "$marker_path" ]; then
     printf 'argv1=%s\n' "${1:-}"
     printf 'path=%s\n' "${PATH:-}"
     printf 'home=%s\n' "${HOME:-}"
+    printf 'gnustep_home=%s\n' "${GNUSTEP_HOME:-}"
+    printf 'wayland=%s\n' "${WAYLAND_DISPLAY:-}"
     printf 'dbus=%s\n' "${DBUS_SESSION_BUS_ADDRESS:-}"
   } >"$marker_path"
 fi

@@ -498,8 +498,12 @@ $script:GpAppImageSmokeFailurePatterns = @(
 # The environment the smoke launch starts from, in place of the caller's:
 # a minimal PATH and fresh home, XDG, and temporary directories under the
 # validation root, so the app cannot lean on the build machine (a GNUstep
-# tool on PATH, a services cache in ~/GNUstep, a session bus). Only the
-# display variables are passed through.
+# tool on PATH, a services cache in ~/GNUstep, a session bus) or write to
+# the user's own files. gnustep-base takes the home directory from the
+# passwd database, not HOME, unless GNUSTEP_HOME is set, so both are set.
+# Only the display variables are passed through, and WAYLAND_DISPLAY only
+# when there is no DISPLAY: with an X display (often a private Xvfb), it
+# would let GTK reach the user's desktop session.
 function Get-GpAppImageSmokeBaseEnvironment {
   param(
     [Parameter(Mandatory = $true)]
@@ -522,6 +526,7 @@ function Get-GpAppImageSmokeBaseEnvironment {
   $environment = [ordered]@{
     PATH = "/usr/bin:/bin"
     HOME = $homePath
+    GNUSTEP_HOME = $homePath
     XDG_CONFIG_HOME = Join-Path $homePath ".config"
     XDG_DATA_HOME = Join-Path $homePath ".local/share"
     XDG_CACHE_HOME = Join-Path $homePath ".cache"
@@ -531,7 +536,11 @@ function Get-GpAppImageSmokeBaseEnvironment {
     LANG = "C.UTF-8"
     DBUS_SESSION_BUS_ADDRESS = "unix:path=" + (Join-Path $runtimePath "no-session-bus")
   }
-  foreach ($name in @("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY")) {
+  $displayNames = @("DISPLAY", "XAUTHORITY")
+  if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("DISPLAY"))) {
+    $displayNames = @("WAYLAND_DISPLAY")
+  }
+  foreach ($name in $displayNames) {
     $value = [Environment]::GetEnvironmentVariable($name)
     if (-not [string]::IsNullOrWhiteSpace($value)) {
       $environment[$name] = $value
@@ -658,7 +667,9 @@ function Get-GpAppImageSmokeAlertWindows {
     }
   }
 
-  return [string[]]@($alerts.ToArray())
+  # The comma keeps an empty list an array: PowerShell would unroll it to
+  # $null, which means the check was skipped.
+  return ,([string[]]$alerts.ToArray())
 }
 
 function Invoke-GpAppImageExternalTool {
@@ -2600,6 +2611,10 @@ function Invoke-GpAppImageSmoke {
   $smokeEnvironment = Get-GpAppImageSmokeBaseEnvironment -ValidationRoot $ValidationRoot
   foreach ($key in @($smokePlan.Environment.Keys)) {
     $smokeEnvironment[$key] = $smokePlan.Environment[$key]
+  }
+  # A HOME from smoke.environment is GNUstep's home too.
+  if ($smokePlan.Environment.ContainsKey("HOME") -and -not $smokePlan.Environment.ContainsKey("GNUSTEP_HOME")) {
+    $smokeEnvironment["GNUSTEP_HOME"] = $smokePlan.Environment["HOME"]
   }
   $smokeEnvironment["APPIMAGE_EXTRACT_AND_RUN"] = "1"
   $stdoutPath = Join-Path $ValidationRoot "smoke.stdout.txt"

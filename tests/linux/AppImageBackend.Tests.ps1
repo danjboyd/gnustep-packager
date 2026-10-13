@@ -399,6 +399,10 @@ Describe "AppImage backend" {
         Assert-GpMatch -Actual $markerText -Pattern "(?m)^path=(\S*/usr/runtime/bin:)?/usr/bin:/bin$" -Message "The smoke launch should get a minimal PATH (after AppRun's own runtime/bin), not the caller's."
         Assert-GpMatch -Actual $markerText -Pattern "(?m)^home=.*smoke-env/home$" -Message "The smoke launch should get a fresh HOME under the validation output."
         Assert-GpMatch -Actual $markerText -Pattern "(?m)^dbus=unix:path=.*no-session-bus$" -Message "The smoke launch should not reach the caller's session bus."
+        Assert-GpMatch -Actual $markerText -Pattern "(?m)^gnustep_home=.*smoke-env/home$" -Message "The smoke launch should give GNUstep a fresh home too: gnustep-base ignores HOME."
+        if (-not [string]::IsNullOrWhiteSpace($env:DISPLAY)) {
+          Assert-GpMatch -Actual $markerText -Pattern "(?m)^wayland=$" -Message "With an X display, the smoke launch should not get the caller's WAYLAND_DISPLAY."
+        }
       } finally {
         if (Test-Path $manifestPath) {
           Remove-Item -Force $manifestPath
@@ -501,6 +505,22 @@ Describe "AppImage backend" {
         Assert-GpTrue -Condition ($null -ne (Get-GpAppImageSmokeFailure -Output ("ok`n" + $line + "`nmore"))) -Message "Smoke output should count as a failure: $line"
       }
       Assert-GpTrue -Condition ($null -eq (Get-GpAppImageSmokeFailure -Output "Sample GNUstep Linux fixture running`nFailed to get _NET_WORKAREA")) -Message "Ordinary GNUstep noise should not fail the smoke launch."
+    }
+
+    It "reports no alert panels as an empty list, not as a skipped check" {
+      if ([string]::IsNullOrWhiteSpace($env:DISPLAY) -or -not (Get-Command xwininfo -ErrorAction SilentlyContinue)) {
+        Set-ItResult -Skipped -Because "it needs an X display and xwininfo"
+        return
+      }
+
+      $process = Start-Process -FilePath "sleep" -ArgumentList @("5") -PassThru
+      try {
+        $alerts = Get-GpAppImageSmokeAlertWindows -Process $process -Environment @{ DISPLAY = $env:DISPLAY }
+        Assert-GpTrue -Condition ($null -ne $alerts) -Message "A check that ran should return a list, even an empty one."
+        Assert-GpEqual -Actual @($alerts).Count -Expected 0 -Message "A process with no windows has no alert panels."
+      } finally {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+      }
     }
   }
 
