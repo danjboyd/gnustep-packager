@@ -299,3 +299,10 @@ Release and consumer docs:
 - [docs/appimage-extension-path.md](docs/appimage-extension-path.md)
 
 See [Roadmap.md](Roadmap.md) for the implementation phases.
+
+## License
+
+gnustep-packager, including the updater in `updater/`, is released under the
+[MIT License](LICENSE). Monocypher, bundled with `gp-update-helper`, keeps its
+own license (BSD-2-Clause or CC0;
+`updater/objc/gp-update-helper/Source/monocypher/LICENCE.md`).
