@@ -409,6 +409,15 @@ Describe "MSI backend" {
       }
     }
 
+    It "shows the product icon in Installed apps when an icon is configured" {
+      Assert-GpEqual -Actual (Get-GpMsiProductIconXml -IconPath "") -Expected "" -Message "No icon should mean no Icon element or ARPPRODUCTICON."
+      Assert-GpEqual -Actual (Get-GpMsiProductIconXml -IconPath $null) -Expected "" -Message "An unset icon should mean no Icon element or ARPPRODUCTICON."
+
+      $xml = Get-GpMsiProductIconXml -IconPath "C:\stage\metadata\icons\Dan's & App.ico"
+      Assert-GpMatch -Actual $xml -Pattern ([regex]::Escape('<Icon Id="ProductIcon.ico" SourceFile="C:\stage\metadata\icons\Dan&apos;s &amp; App.ico" />')) -Message "The staged .ico should be embedded, with its path escaped for XML."
+      Assert-GpMatch -Actual $xml -Pattern ([regex]::Escape('<Property Id="ARPPRODUCTICON" Value="ProductIcon.ico" />')) -Message "ARPPRODUCTICON should name the embedded icon."
+    }
+
     It "supports dry-run packaging with a version override" {
       try {
         & (Join-Path $script:repoRoot "scripts\\run-packaging-pipeline.ps1") `

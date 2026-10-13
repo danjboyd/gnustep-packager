@@ -1730,6 +1730,25 @@ function Get-GpMsiStopRuntimeDaemonsXml {
 "@
 }
 
+# The icon Settings > Apps > Installed apps (and Programs and Features) shows for the product:
+# the launcher's .ico, embedded in the MSI and named by ARPPRODUCTICON. No icon, no element.
+function Get-GpMsiProductIconXml {
+  param(
+    [AllowNull()]
+    [AllowEmptyString()]
+    [string]$IconPath
+  )
+
+  if ([string]::IsNullOrWhiteSpace($IconPath)) {
+    return ""
+  }
+
+  return @"
+    <Icon Id="ProductIcon.ico" SourceFile="$(Escape-GpXmlText -Value $IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon.ico" />
+"@
+}
+
 function Get-GpMsiOpenWithRegistration {
   param(
     [Parameter(Mandatory = $true)]
@@ -1853,6 +1872,11 @@ function Write-GpMsiSources {
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Listed under Open with for {0}" -f ($openWith.Extensions -join ", "))
   }
 
+  $productIconXml = Get-GpMsiProductIconXml -IconPath (Resolve-GpMsiIconSourcePath -Config $Config)
+  if (-not [string]::IsNullOrEmpty($productIconXml)) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed apps shows the icon from {0}" -f $Config.IconRelativePath)
+  }
+
   $registryRoot = "HKCU"
   $rootDirectoryId = if ($Config.InstallScope -eq "perMachine") { "ProgramFiles64Folder" } else { "LocalAppDataFolder" }
   $tokens = @{
@@ -1873,6 +1897,7 @@ function Write-GpMsiSources {
     "__STOP_RUNTIME_DAEMONS__" = $stopDaemonsXml
     "__OPEN_WITH_REGISTRATION__" = $openWith.RegistrationXml
     "__OPEN_WITH_COMPONENT_REF__" = $openWith.ComponentRefXml
+    "__PRODUCT_ICON__" = $productIconXml
   }
 
   $productContent = Render-GpMsiTemplateText -TemplatePath $Config.ProductTemplatePath -Tokens $tokens
