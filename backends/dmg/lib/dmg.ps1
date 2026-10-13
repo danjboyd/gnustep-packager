@@ -1465,6 +1465,10 @@ function Invoke-GpDmgValidation {
   }
 
   Write-GpDmgLogLine -LogPath $LogPath -Message ("Validating DMG artifact: {0}" -f $config.ArtifactPath)
+  $artifactBudgetLine = Assert-GpArtifactSizeBudget -Manifest $Context.Manifest -Backend "dmg" -ArtifactPath $config.ArtifactPath
+  if ($null -ne $artifactBudgetLine) {
+    Write-GpDmgLogLine -LogPath $LogPath -Message $artifactBudgetLine
+  }
 
   $verify = Invoke-GpDmgTool -FilePath "hdiutil" -ArgumentList @("verify", $config.ArtifactPath) -LogPath $LogPath -AllowFailure -Quiet
   Add-GpDmgCheck -Name "hdiutil-verify" -Status $(if ($verify.ExitCode -eq 0) { "pass" } else { "fail" }) -Detail $(if ($verify.ExitCode -eq 0) { "checksum valid" } else { "exit $($verify.ExitCode)" })

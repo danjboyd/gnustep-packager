@@ -2880,6 +2880,10 @@ function Invoke-GpAppImageValidation {
   }
 
   Ensure-GpDirectory -Path (Split-Path -Parent $LogPath) | Out-Null
+  $artifactBudgetLine = Assert-GpArtifactSizeBudget -Manifest $Context.Manifest -Backend "appimage" -ArtifactPath $config.ArtifactPlan.ArtifactPath
+  if ($null -ne $artifactBudgetLine) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message $artifactBudgetLine
+  }
   $validationRoot = Split-Path -Parent $LogPath
   $extractLog = Join-Path $validationRoot "extract.log"
   $smokeLog = Join-Path $validationRoot "smoke.log"

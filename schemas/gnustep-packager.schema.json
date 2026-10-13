@@ -572,6 +572,17 @@
                   }
                 }
               }
+            },
+            "forbiddenFiles": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "maxPayloadBytes": {
+              "type": "integer",
+              "minimum": 1
             }
           }
         },
@@ -625,6 +636,17 @@
                   }
                 }
               }
+            },
+            "forbiddenFiles": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "maxPayloadBytes": {
+              "type": "integer",
+              "minimum": 1
             }
           }
         }
@@ -967,6 +989,16 @@
                   }
                 }
               }
+            },
+            "validation": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "maxArtifactBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
             }
           }
         },
@@ -1118,6 +1150,10 @@
                     "type": "string",
                     "minLength": 1
                   }
+                },
+                "maxArtifactBytes": {
+                  "type": "integer",
+                  "minimum": 1
                 }
               }
             },
@@ -1378,6 +1414,10 @@
                 },
                 "requireGatekeeperAcceptance": {
                   "type": "boolean"
+                },
+                "maxArtifactBytes": {
+                  "type": "integer",
+                  "minimum": 1
                 }
               }
             },

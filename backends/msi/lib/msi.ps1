@@ -2415,6 +2415,10 @@ function Invoke-GpMsiValidation {
   }
 
   Ensure-GpDirectory -Path (Split-Path -Parent $LogPath) | Out-Null
+  $artifactBudgetLine = Assert-GpArtifactSizeBudget -Manifest $Context.Manifest -Backend "msi" -ArtifactPath $artifactPath
+  if ($null -ne $artifactBudgetLine) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message $artifactBudgetLine
+  }
   $validationRoot = Split-Path -Parent $LogPath
   $installLog = Join-Path $validationRoot "install.log"
   $uninstallLog = Join-Path $validationRoot "uninstall.log"

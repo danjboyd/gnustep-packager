@@ -587,4 +587,60 @@ Describe "AppImage backend" {
       }
     }
   }
+
+  Context "Payload limits" {
+    It "fails AppImage validation on a forbidden file in the extracted payload" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["validation"]["installedResult"] = @{
+          forbiddenFiles = @("theme.conf")
+        }
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $validationPath = Join-Path $script:packageConfig.OutputPaths.ValidationRoot "pester-appimage-validate-forbidden.log"
+        $message = $null
+        try {
+          Invoke-GpAppImageValidation -Context $context -LogPath $validationPath | Out-Null
+        } catch {
+          $message = $_.Exception.Message
+        }
+
+        Assert-GpTrue -Condition ($null -ne $message) -Message "A forbidden file in the AppImage should fail validation."
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $validationPath) -Pattern "FORBIDDEN theme\.conf -> runtime/config/theme\.conf" -Message "The log should name the forbidden file relative to the payload root."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
+    }
+
+    It "fails AppImage validation when the AppImage is over its size budget" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["validation"] = @{
+          maxArtifactBytes = 1024
+        }
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $validationPath = Join-Path $script:packageConfig.OutputPaths.ValidationRoot "pester-appimage-validate-budget.log"
+        $message = $null
+        try {
+          Invoke-GpAppImageValidation -Context $context -LogPath $validationPath | Out-Null
+        } catch {
+          $message = $_.Exception.Message
+        }
+
+        Assert-GpTrue -Condition ($null -ne $message) -Message "An AppImage over its budget should fail validation."
+        Assert-GpMatch -Actual $message -Pattern "appimage artifact is .*over the backends\.appimage\.validation\.maxArtifactBytes budget" -Message "The failure should name the budget setting."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
+    }
+  }
 }
