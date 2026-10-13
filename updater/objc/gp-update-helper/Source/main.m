@@ -131,9 +131,42 @@ static BOOL GPHelperUpdateState(NSString *statePath,
   return GPHelperWriteJSONFile(state, statePath, &error);
 }
 
-static NSString *GPHelperFindExecutable(NSArray *candidateNames) {
+// Windows names the variable "Path", and a process started by the MSI
+// launcher keeps that spelling, so the lookup must ignore case there.
+static NSString *GPHelperPathVariable(void) {
   NSDictionary *environment = [[NSProcessInfo processInfo] environment];
-  NSString *pathVariable = GPHelperStringValue([environment objectForKey:@"PATH"]);
+#if defined(_WIN32)
+  NSEnumerator *keyEnumerator = [environment keyEnumerator];
+  NSString *key = nil;
+  while ((key = [keyEnumerator nextObject]) != nil) {
+    if ([key caseInsensitiveCompare:@"PATH"] == NSOrderedSame) {
+      return GPHelperStringValue([environment objectForKey:key]);
+    }
+  }
+  return nil;
+#else
+  return GPHelperStringValue([environment objectForKey:@"PATH"]);
+#endif
+}
+
+#if defined(_WIN32)
+// System tools (certutil, msiexec) come from the system directory, never
+// from PATH or the working directory.
+static NSString *GPHelperSystemExecutable(NSString *name) {
+  wchar_t directory[MAX_PATH];
+  UINT length = GetSystemDirectoryW(directory, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH) {
+    return nil;
+  }
+
+  NSString *systemDirectory = [NSString stringWithCharacters:(const unichar *)directory length:length];
+  NSString *path = [systemDirectory stringByAppendingPathComponent:name];
+  return [[NSFileManager defaultManager] isExecutableFileAtPath:path] ? path : nil;
+}
+#endif
+
+static NSString *GPHelperFindExecutable(NSArray *candidateNames) {
+  NSString *pathVariable = GPHelperPathVariable();
 #if defined(_WIN32)
   NSString *separator = @";";
 #else
@@ -148,7 +181,8 @@ static NSString *GPHelperFindExecutable(NSArray *candidateNames) {
       continue;
     }
 
-    if ([[NSFileManager defaultManager] isExecutableFileAtPath:candidateName]) {
+    // A bare name is only looked up on PATH, never in the working directory.
+    if ([candidateName isAbsolutePath] && [[NSFileManager defaultManager] isExecutableFileAtPath:candidateName]) {
       return candidateName;
     }
 
@@ -245,7 +279,7 @@ static BOOL GPHelperCopyURLToPath(NSURL *url, NSString *destinationPath, NSStrin
 
 static NSString *GPHelperSHA256ForFile(NSString *path) {
 #if defined(_WIN32)
-  NSString *toolPath = GPHelperFindExecutable([NSArray arrayWithObjects:@"certutil.exe", @"certutil", nil]);
+  NSString *toolPath = GPHelperSystemExecutable(@"certutil.exe");
   if ([toolPath length] == 0) {
     return nil;
   }
@@ -719,7 +753,11 @@ static int GPHelperApply(NSDictionary *plan, NSString *statePath, NSInteger wait
   }
 
   if ([mode isEqualToString:@"msi-install"]) {
+#if defined(_WIN32)
+    NSString *msiexecPath = GPHelperSystemExecutable(@"msiexec.exe");
+#else
     NSString *msiexecPath = GPHelperFindExecutable([NSArray arrayWithObjects:@"msiexec.exe", @"msiexec", nil]);
+#endif
     if ([msiexecPath length] == 0) {
       GPHelperUpdateState(statePath, GPHelperStatusFailed, @"msiexec was not found.", nil, apply, downloadedPath, [NSDictionary dictionaryWithObject:@"msiexec was not found." forKey:@"message"]);
       return 1;

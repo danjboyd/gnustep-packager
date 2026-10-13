@@ -15,7 +15,9 @@ Current backend behavior:
 
 - `msi`
   Downloads the target MSI, verifies the configured SHA-256 when available, and
-  hands off to `msiexec` during apply
+  hands off to `msiexec` during apply. `certutil` (for the SHA-256) and
+  `msiexec` are always taken from the Windows system directory, never from
+  `Path` or the working directory
 - `appimage`
   Prefers `appimageupdatetool` when it is present and the app is running from
   an AppImage; otherwise downloads and verifies the new AppImage. When the
