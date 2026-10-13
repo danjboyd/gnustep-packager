@@ -111,6 +111,14 @@ Describe "Updater helper runtime" {
             & gnustep-config "--variable=$variable"
           }
         ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        # libgnustep-base needs libdispatch, which a managed install may keep
+        # elsewhere under its root (gnustep-config is in <root>/System/Tools).
+        $gnustepRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Get-Command gnustep-config).Source))
+        $libraryDirectories += @(
+          Get-ChildItem -Path $gnustepRoot -Recurse -Filter "libdispatch.so*" -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.DirectoryName } |
+            Select-Object -Unique
+        )
         if (-not [string]::IsNullOrWhiteSpace($env:LD_LIBRARY_PATH)) {
           $libraryDirectories += $env:LD_LIBRARY_PATH
         }
