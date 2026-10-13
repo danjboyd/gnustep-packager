@@ -18,6 +18,7 @@
     <MajorUpgrade AllowSameVersionUpgrades="yes"
                   DowngradeErrorMessage="A newer version of __PRODUCT_NAME__ is already installed." />
     <MediaTemplate EmbedCab="yes" />
+__PRODUCT_ICON__
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="__ROOT_DIRECTORY_ID__">
