@@ -165,6 +165,7 @@ function Get-GpMsiConfig {
     DisplayName = $displayName
     ProductName = $productName
     Manufacturer = [string]$package["manufacturer"]
+    Summary = [string]$package["summary"]
     Version = [string]$package["version"]
     MsiVersion = $normalizedVersion
     UpgradeCode = [string]$backend["upgradeCode"]
@@ -186,6 +187,7 @@ function Get-GpMsiConfig {
     RuntimeRootRelative = [string]$payload["runtimeRoot"]
     MetadataRootRelative = [string]$payload["metadataRoot"]
     RuntimeSeedPaths = [string[]]@($payload["runtimeSeedPaths"])
+    FileAssociations = @($(if ($integrations -and $integrations.Contains("fileAssociations")) { $integrations["fileAssociations"] }))
     WixToolRoot = $wixToolRoot
     WixVersion = [string]$wixConfig["version"]
     WixDownloadUrl = [string]$wixConfig["downloadUrl"]
@@ -1671,6 +1673,142 @@ function Render-GpMsiTemplateText {
   return $text
 }
 
+function ConvertTo-GpMsiFormattedLiteral {
+  param(
+    [Parameter(Mandatory = $true)]
+    [AllowEmptyString()]
+    [string]$Value
+  )
+
+  # Brackets and braces have meaning in an MSI formatted string; [\x] is the literal character x.
+  return [regex]::Replace($Value, "[\[\]{}]", { param($match) "[\{0}]" -f $match.Value })
+}
+
+function Get-GpMsiRuntimeDaemonNames {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$InstallRoot
+  )
+
+  # GNUstep starts these on demand from the bundled runtime (gdnc at launch, gpbs on the first
+  # pasteboard use) and they outlive the app, so a running one holds its .exe in the install folder.
+  $names = foreach ($name in @("gdnc", "gpbs", "gdomap")) {
+    if (Get-ChildItem -Path $InstallRoot -Recurse -File -Filter ("{0}.exe" -f $name) -ErrorAction SilentlyContinue | Select-Object -First 1) {
+      $name
+    }
+  }
+  return [string[]]@($names)
+}
+
+function Get-GpMsiStopRuntimeDaemonsXml {
+  param(
+    [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
+    [string[]]$DaemonNames,
+    [Parameter(Mandatory = $true)]
+    [string]$InstallDirectoryName
+  )
+
+  if ($DaemonNames.Count -eq 0) {
+    return ""
+  }
+
+  # Matches only daemons running from this product's install folder, never another app's runtime.
+  # The pattern is a single-quoted PowerShell wildcard inside an MSI formatted string, so it is
+  # escaped for each in turn. Exiting 0 keeps "none running" from being logged as a failure.
+  $pattern = "*\{0}\*" -f [System.Management.Automation.WildcardPattern]::Escape($InstallDirectoryName)
+  $pattern = $pattern.Replace("'", "''")
+  $pattern = ConvertTo-GpMsiFormattedLiteral -Value $pattern
+  $command = "`"[System64Folder]WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"Get-Process -Name {0} -ErrorAction SilentlyContinue | Where-Object Path -Like '{1}' | Stop-Process -Force; exit 0`"" -f ($DaemonNames -join ","), $pattern
+
+  return @"
+    <SetProperty Id="WixQuietExec64CmdLine" Value="$(Escape-GpXmlText -Value $command)" Before="GpStopRuntimeDaemons" Sequence="execute" />
+    <CustomAction Id="GpStopRuntimeDaemons" BinaryKey="WixCA" DllEntry="WixQuietExec64" Execute="immediate" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="GpStopRuntimeDaemons" Before="InstallValidate" />
+    </InstallExecuteSequence>
+"@
+}
+
+function Get-GpMsiOpenWithRegistration {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config
+  )
+
+  $extensions = [System.Collections.Generic.List[psobject]]::new()
+  $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  foreach ($association in @($Config.FileAssociations)) {
+    if ($null -eq $association -or [string]$association["kind"] -ne "extension") {
+      continue
+    }
+    $value = ([string]$association["value"]).Trim().ToLowerInvariant()
+    if ($value -notmatch '^\.?[a-z0-9][a-z0-9_+-]*$') {
+      continue
+    }
+    $extension = if ($value.StartsWith(".")) { $value } else { ".$value" }
+    if ($seen.Add($extension)) {
+      $extensions.Add([pscustomobject]@{
+        Extension = $extension
+        Description = [string]$association["description"]
+      }) | Out-Null
+    }
+  }
+
+  if ($extensions.Count -eq 0) {
+    return [pscustomobject]@{ RegistrationXml = ""; ComponentRefXml = ""; Extensions = [string[]]@() }
+  }
+
+  # "Open with" only: the app is listed for each extension (OpenWithProgids, SupportedTypes) and in
+  # Default Apps (Capabilities), but no extension's default handler or UserChoice is written, so
+  # whatever opens these files today keeps opening them.
+  $root = if ($Config.InstallScope -eq "perMachine") { "HKLM" } else { "HKCU" }
+  $progIdPrefix = [regex]::Replace([string]$Config.PackageName, "[^A-Za-z0-9]", "")
+  if ([string]::IsNullOrWhiteSpace($progIdPrefix)) {
+    $progIdPrefix = [regex]::Replace([System.IO.Path]::GetFileNameWithoutExtension($Config.LauncherFileName), "[^A-Za-z0-9]", "")
+  }
+  $productName = ConvertTo-GpMsiFormattedLiteral -Value ([string]$Config.ProductName)
+  $applicationKey = "Software\Classes\Applications\{0}" -f $Config.LauncherFileName
+  $capabilitiesKey = "Software\{0}\{1}\Capabilities" -f (ConvertTo-GpMsiFormattedLiteral -Value ([string]$Config.Manufacturer)), $productName
+  $command = '"[INSTALLDIR]{0}" "%1"' -f $Config.LauncherFileName
+  $icon = "[INSTALLDIR]{0},0" -f $Config.LauncherFileName
+  $description = if ([string]::IsNullOrWhiteSpace($Config.Summary)) { $productName } else { ConvertTo-GpMsiFormattedLiteral -Value $Config.Summary }
+
+  $lines = [System.Collections.Generic.List[string]]::new()
+  function Add-Value([string]$Key, [string]$Name, [string]$Value, [switch]$KeyPath) {
+    $nameAttribute = if ($Name) { ' Name="{0}"' -f (Escape-GpXmlText -Value $Name) } else { "" }
+    $keyPathAttribute = if ($KeyPath) { ' KeyPath="yes"' } else { "" }
+    $lines.Add(('        <RegistryValue Root="{0}" Key="{1}"{2} Type="string" Value="{3}"{4} />' -f $root, (Escape-GpXmlText -Value $Key), $nameAttribute, $(if ($Value) { Escape-GpXmlText -Value $Value } else { "" }), $keyPathAttribute)) | Out-Null
+  }
+
+  $lines.Add('    <DirectoryRef Id="INSTALLDIR">') | Out-Null
+  $lines.Add(('      <Component Id="OpenWithRegistration" Guid="{0}">' -f ([guid]::NewGuid().ToString()))) | Out-Null
+  Add-Value -Key "Software\RegisteredApplications" -Name $productName -Value $capabilitiesKey -KeyPath
+  Add-Value -Key $capabilitiesKey -Name "ApplicationName" -Value $productName
+  Add-Value -Key $capabilitiesKey -Name "ApplicationDescription" -Value $description
+  Add-Value -Key $applicationKey -Name "FriendlyAppName" -Value $productName
+  Add-Value -Key "$applicationKey\DefaultIcon" -Value $icon
+  Add-Value -Key "$applicationKey\shell\open\command" -Value $command
+  foreach ($entry in $extensions) {
+    $progId = "{0}{1}" -f $progIdPrefix, $entry.Extension
+    $typeName = if ([string]::IsNullOrWhiteSpace($entry.Description)) { "{0} file" -f $entry.Extension } else { ConvertTo-GpMsiFormattedLiteral -Value $entry.Description }
+    Add-Value -Key "$applicationKey\SupportedTypes" -Name $entry.Extension -Value ""
+    Add-Value -Key "$capabilitiesKey\FileAssociations" -Name $entry.Extension -Value $progId
+    Add-Value -Key "Software\Classes\$progId" -Value $typeName
+    Add-Value -Key "Software\Classes\$progId\DefaultIcon" -Value $icon
+    Add-Value -Key "Software\Classes\$progId\shell\open\command" -Value $command
+    Add-Value -Key ("Software\Classes\{0}\OpenWithProgids" -f $entry.Extension) -Name $progId -Value ""
+  }
+  $lines.Add('      </Component>') | Out-Null
+  $lines.Add('    </DirectoryRef>') | Out-Null
+
+  return [pscustomobject]@{
+    RegistrationXml = ($lines -join "`r`n")
+    ComponentRefXml = '      <ComponentRef Id="OpenWithRegistration" />'
+    Extensions = [string[]]@($extensions | ForEach-Object { $_.Extension })
+  }
+}
+
 function Write-GpMsiSources {
   param(
     [Parameter(Mandatory = $true)]
@@ -1703,6 +1841,18 @@ function Write-GpMsiSources {
     "-out", $harvestPath
   ) -LogPath $LogPath
 
+  # @() keeps an empty result an array: a bare call unrolls it to $null.
+  $daemonNames = @(Get-GpMsiRuntimeDaemonNames -InstallRoot $WorkPaths.InstallRoot)
+  $stopDaemonsXml = Get-GpMsiStopRuntimeDaemonsXml -DaemonNames $daemonNames -InstallDirectoryName $Config.InstallDirectoryName
+  if ($daemonNames.Count -gt 0) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Install, upgrade and uninstall end running {0} from the install folder first" -f ($daemonNames -join ", "))
+  }
+
+  $openWith = Get-GpMsiOpenWithRegistration -Config $Config
+  if ($openWith.Extensions.Count -gt 0) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Listed under Open with for {0}" -f ($openWith.Extensions -join ", "))
+  }
+
   $registryRoot = "HKCU"
   $rootDirectoryId = if ($Config.InstallScope -eq "perMachine") { "ProgramFiles64Folder" } else { "LocalAppDataFolder" }
   $tokens = @{
@@ -1720,6 +1870,9 @@ function Write-GpMsiSources {
     "__REGISTRY_ROOT__" = $registryRoot
     "__REGISTRY_MANUFACTURER__" = Escape-GpXmlText -Value $Config.Manufacturer
     "__REGISTRY_PRODUCT_NAME__" = Escape-GpXmlText -Value $Config.ProductName
+    "__STOP_RUNTIME_DAEMONS__" = $stopDaemonsXml
+    "__OPEN_WITH_REGISTRATION__" = $openWith.RegistrationXml
+    "__OPEN_WITH_COMPONENT_REF__" = $openWith.ComponentRefXml
   }
 
   $productContent = Render-GpMsiTemplateText -TemplatePath $Config.ProductTemplatePath -Tokens $tokens
@@ -1728,6 +1881,7 @@ function Write-GpMsiSources {
   return [pscustomobject]@{
     HarvestPath = $harvestPath
     ProductPath = $productPath
+    WixExtensions = [string[]]@($(if ($stopDaemonsXml) { "WixUtilExtension" }))
   }
 }
 
@@ -1760,13 +1914,15 @@ function Build-GpMsiArtifacts {
   }
 
   $outputBase = Join-Path $WorkPaths.WixRoot ""
-  Invoke-GpMsiExternalTool -FilePath $WixTools.Candle -ArgumentList @(
+  $extensionArgs = [string[]]@(foreach ($extension in @($Sources.WixExtensions)) { if ($extension) { "-ext", $extension } })
+  Invoke-GpMsiExternalTool -FilePath $WixTools.Candle -ArgumentList (@(
     "-arch", "x64",
     "-dInstallSourceDir=$($WorkPaths.InstallRoot)",
-    "-out", $outputBase,
+    "-out", $outputBase
+  ) + $extensionArgs + @(
     $Sources.ProductPath,
     $Sources.HarvestPath
-  ) -LogPath $LogPath
+  )) -LogPath $LogPath
 
   $lightArgs = [System.Collections.Generic.List[string]]::new()
   $suppressedIces = [System.Collections.Generic.List[string]]::new()
@@ -1778,6 +1934,9 @@ function Build-GpMsiArtifacts {
     }
   }
 
+  foreach ($extensionArg in $extensionArgs) {
+    $lightArgs.Add($extensionArg) | Out-Null
+  }
   $lightArgs.Add("-out") | Out-Null
   $lightArgs.Add($msiPath) | Out-Null
   if ($skipValidation) {
@@ -2023,6 +2182,7 @@ function Start-GpMsiSmokeLauncher {
     [Parameter(Mandatory = $true)]
     [string]$WorkingDirectory,
     [string[]]$ArgumentList = @(),
+    [string]$RedirectStandardError,
     [string]$LogPath
   )
 
@@ -2042,7 +2202,16 @@ function Start-GpMsiSmokeLauncher {
         Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke launch unset: {0}" -f ([string]::Join(", ", @($savedGnustep | ForEach-Object { $_.Name }))))
       }
     }
-    return Start-Process $LauncherPath -ArgumentList $ArgumentList -PassThru -WorkingDirectory $WorkingDirectory
+    $startArguments = @{
+      FilePath = $LauncherPath
+      ArgumentList = $ArgumentList
+      PassThru = $true
+      WorkingDirectory = $WorkingDirectory
+    }
+    if (-not [string]::IsNullOrWhiteSpace($RedirectStandardError)) {
+      $startArguments.RedirectStandardError = $RedirectStandardError
+    }
+    return Start-Process @startArguments
   } finally {
     $env:PATH = $savedPath
     foreach ($variable in $savedGnustep) {
@@ -2063,6 +2232,108 @@ function Get-GpMsiInstalledRuntimeAuditFailureMessage {
   }
 
   return ("MSI validation failed: installed runtime closure is incomplete. {0}" -f $primary)
+}
+
+# Runs the installed launcher once, as the smoke check. The launcher runs in its
+# non-interactive mode (GP_LAUNCHER_NONINTERACTIVE), so a launch error is written
+# to GP_LAUNCHER_ERROR_LOG and ends the launcher with a nonzero code, instead of
+# a modal dialog that holds the run until the timeout. The error text is put in
+# the thrown message.
+# The launcher starts as a clean machine would (Start-GpMsiSmokeLauncher), and
+# with StayAliveSeconds the packaged app must still be running that long after.
+function Invoke-GpMsiSmokeLaunch {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath,
+    [Parameter(Mandatory = $true)]
+    [string]$AppPath,
+    [Parameter(Mandatory = $true)]
+    [string]$WorkingDirectory,
+    [int]$TimeoutSeconds = 30,
+    [int]$StayAliveSeconds = 0,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  $smokeArgument = Join-Path $env:TEMP "gnustep-packager-smoke.txt"
+  $launcherErrorLog = Join-Path $env:TEMP ("gnustep-packager-launcher-error-" + [guid]::NewGuid().ToString("N") + ".log")
+  $launcherStderr = Join-Path $env:TEMP ("gnustep-packager-launcher-stderr-" + [guid]::NewGuid().ToString("N") + ".txt")
+  $probeDeadline = (Get-Date).AddSeconds([Math]::Max($TimeoutSeconds, 1))
+  $childProcesses = @()
+  Set-Content -Path $smokeArgument -Value "gnustep-packager smoke"
+  Write-GpMsiLogLine -LogPath $LogPath -Message ("Running MSI smoke launch: {0}" -f $LauncherPath)
+
+  $previousNonInteractive = $env:GP_LAUNCHER_NONINTERACTIVE
+  $previousErrorLog = $env:GP_LAUNCHER_ERROR_LOG
+  try {
+    $env:GP_LAUNCHER_NONINTERACTIVE = "1"
+    $env:GP_LAUNCHER_ERROR_LOG = $launcherErrorLog
+    # Redirecting stderr makes Start-Process create the process directly with
+    # this environment, rather than through ShellExecute, so the GP_LAUNCHER_*
+    # variables reach the launcher; stderr is a second copy of its error.
+    $proc = Start-GpMsiSmokeLauncher -LauncherPath $LauncherPath -WorkingDirectory $WorkingDirectory -ArgumentList @($smokeArgument) -RedirectStandardError $launcherStderr -LogPath $LogPath
+  } finally {
+    $env:GP_LAUNCHER_NONINTERACTIVE = $previousNonInteractive
+    $env:GP_LAUNCHER_ERROR_LOG = $previousErrorLog
+  }
+
+  try {
+    do {
+      Start-Sleep -Milliseconds 500
+      $proc.Refresh()
+      if ($proc.HasExited -and $proc.ExitCode -ne 0) {
+        break
+      }
+      $childProcesses = @(Get-GpMsiProcessesByExecutablePath -ExecutablePath $AppPath)
+    } while (((-not $proc.HasExited) -or $childProcesses.Count -eq 0) -and (Get-Date) -lt $probeDeadline)
+
+    $proc.Refresh()
+    $launcherError = ""
+    foreach ($errorSource in @($launcherErrorLog, $launcherStderr)) {
+      if ([string]::IsNullOrWhiteSpace($launcherError) -and (Test-Path -LiteralPath $errorSource)) {
+        # ReadAllText gives "" for an empty file, where Get-Content -Raw gives $null.
+        $launcherError = [System.IO.File]::ReadAllText($errorSource).Trim()
+      }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($launcherError)) {
+      Write-GpMsiLogLine -LogPath $LogPath -Message ("Launcher error: {0}" -f $launcherError)
+    }
+    $launcherErrorSuffix = if ([string]::IsNullOrWhiteSpace($launcherError)) { "" } else { " Launcher error: $launcherError" }
+
+    if (-not $proc.HasExited) {
+      try {
+        $proc | Stop-Process -Force
+      } catch {
+      }
+      throw "Smoke launcher did not exit within $TimeoutSeconds seconds: $LauncherPath.$launcherErrorSuffix See $(Get-GpMsiDiagnosticsDocPath)."
+    }
+
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke process exit code: {0}" -f $proc.ExitCode)
+    if ($proc.ExitCode -ne 0) {
+      throw "MSI smoke failed: launcher exited with code $($proc.ExitCode): $LauncherPath.$launcherErrorSuffix See $(Get-GpMsiDiagnosticsDocPath)."
+    }
+
+    $childProcesses = @(Get-GpMsiProcessesByExecutablePath -ExecutablePath $AppPath)
+    if ($childProcesses.Count -eq 0) {
+      throw "MSI smoke failed: launcher exited successfully but the packaged application was not observed running: $AppPath. See $(Get-GpMsiDiagnosticsDocPath)."
+    }
+
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke child process count: {0}" -f $childProcesses.Count)
+
+    if ($StayAliveSeconds -gt 0) {
+      Wait-GpMsiSmokeAppAlive -Processes $childProcesses -Seconds $StayAliveSeconds -AppPath $AppPath
+      Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke: the packaged application was still running after {0} seconds" -f $StayAliveSeconds)
+    }
+
+    foreach ($child in $childProcesses) {
+      try {
+        $child | Stop-Process -Force
+      } catch {
+      }
+    }
+  } finally {
+    Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $launcherErrorLog, $launcherStderr
+  }
 }
 
 function Invoke-GpMsiValidation {
@@ -2177,49 +2448,13 @@ function Invoke-GpMsiValidation {
   }
 
   if ($RunSmoke -or $validationPlan.Enabled) {
-    $smokeArgument = Join-Path $env:TEMP "gnustep-packager-smoke.txt"
-    $probeDeadline = (Get-Date).AddSeconds([Math]::Max($validationPlan.TimeoutSeconds, 1))
-    $childProcesses = @()
-    Set-Content -Path $smokeArgument -Value "gnustep-packager smoke"
-    Write-GpMsiLogLine -LogPath $LogPath -Message ("Running MSI smoke launch: {0}" -f $launcherPath)
-    $proc = Start-GpMsiSmokeLauncher -LauncherPath $launcherPath -WorkingDirectory $installPath -ArgumentList @($smokeArgument) -LogPath $LogPath
-
-    do {
-      Start-Sleep -Milliseconds 500
-      $proc.Refresh()
-      $childProcesses = @(Get-GpMsiProcessesByExecutablePath -ExecutablePath $appPath)
-    } while (((-not $proc.HasExited) -or $childProcesses.Count -eq 0) -and (Get-Date) -lt $probeDeadline)
-
-    $proc.Refresh()
-    if (-not $proc.HasExited) {
-      try {
-        $proc | Stop-Process -Force
-      } catch {
-      }
-      throw "Smoke launcher did not exit within $($validationPlan.TimeoutSeconds) seconds: $launcherPath. See $(Get-GpMsiDiagnosticsDocPath)."
-    }
-
-    Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke process exit code: {0}" -f $proc.ExitCode)
-    if ($proc.ExitCode -ne 0) {
-      throw "MSI smoke failed: launcher exited with code $($proc.ExitCode): $launcherPath. See $(Get-GpMsiDiagnosticsDocPath)."
-    }
-
-    $childProcesses = @(Get-GpMsiProcessesByExecutablePath -ExecutablePath $appPath)
-    if ($childProcesses.Count -eq 0) {
-      throw "MSI smoke failed: launcher exited successfully but the packaged application was not observed running: $appPath. See $(Get-GpMsiDiagnosticsDocPath)."
-    }
-
-    Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke child process count: {0}" -f $childProcesses.Count)
-
-    Wait-GpMsiSmokeAppAlive -Processes $childProcesses -Seconds $validationPlan.StayAliveSeconds -AppPath $appPath
-    Write-GpMsiLogLine -LogPath $LogPath -Message ("Smoke: the packaged application was still running after {0} seconds" -f $validationPlan.StayAliveSeconds)
-
-    foreach ($child in $childProcesses) {
-      try {
-        $child | Stop-Process -Force
-      } catch {
-      }
-    }
+    Invoke-GpMsiSmokeLaunch `
+      -LauncherPath $launcherPath `
+      -AppPath $appPath `
+      -WorkingDirectory $installPath `
+      -TimeoutSeconds $validationPlan.TimeoutSeconds `
+      -StayAliveSeconds $validationPlan.StayAliveSeconds `
+      -LogPath $LogPath
   }
 
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Uninstalling MSI: {0}" -f $artifactPath)

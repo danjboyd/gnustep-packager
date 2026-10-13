@@ -222,6 +222,61 @@ Describe "MSI backend" {
       Assert-GpMatch -Actual $configText -Pattern 'appDefault=SampleWelcomeText=\"Packaged sample\"' -Message "Launcher config should serialize string app defaults as quoted GNUstep literals."
     }
 
+    It "reports launcher errors without a dialog in non-interactive mode" {
+      # A text file posing as defaults.exe: the launcher cannot run it to seed
+      # packaged defaults. Interactively that error is a modal dialog, which
+      # hangs a headless run until the smoke timeout.
+      $brokenRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msi-broken-launch-" + [guid]::NewGuid().ToString("N"))
+      $stderrPath = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msi-broken-launch-" + [guid]::NewGuid().ToString("N") + ".err")
+      $previousNonInteractive = $env:GP_LAUNCHER_NONINTERACTIVE
+      try {
+        Copy-Item -Recurse -Path $script:transform.InstallRoot -Destination $brokenRoot
+        Set-Content -Path (Join-Path $brokenRoot "runtime\bin\defaults.exe") -Value "not an executable"
+        $launcher = Join-Path $brokenRoot (Split-Path -Leaf $script:transform.LauncherPath)
+
+        $env:GP_LAUNCHER_NONINTERACTIVE = "1"
+        $proc = Start-Process $launcher -PassThru -WorkingDirectory $brokenRoot -RedirectStandardError $stderrPath
+        $exited = $proc.WaitForExit(15000)
+        if (-not $exited) {
+          $proc | Stop-Process -Force
+        }
+
+        Assert-GpTrue -Condition $exited -Message "The launcher should exit instead of waiting on an error dialog."
+        Assert-GpTrue -Condition ($proc.ExitCode -ne 0) -Message "A failed launch should exit with a nonzero code."
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $stderrPath) -Pattern "Unable to read packaged app default" -Message "The launcher error should be written to stderr."
+      } finally {
+        $env:GP_LAUNCHER_NONINTERACTIVE = $previousNonInteractive
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $brokenRoot, $stderrPath
+      }
+    }
+
+    It "fails the smoke launch fast with the launcher's error for a broken payload" {
+      $brokenRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msi-broken-smoke-" + [guid]::NewGuid().ToString("N"))
+      $smokeLog = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msi-broken-smoke-" + [guid]::NewGuid().ToString("N") + ".log")
+      try {
+        Copy-Item -Recurse -Path $script:transform.InstallRoot -Destination $brokenRoot
+        Set-Content -Path (Join-Path $brokenRoot "runtime\bin\defaults.exe") -Value "not an executable"
+        $launcher = Join-Path $brokenRoot (Split-Path -Leaf $script:transform.LauncherPath)
+        $app = Join-Path $brokenRoot "app\SampleGNUstepApp.app\SampleGNUstepApp.exe"
+
+        $message = $null
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        try {
+          Invoke-GpMsiSmokeLaunch -LauncherPath $launcher -AppPath $app -WorkingDirectory $brokenRoot -TimeoutSeconds 30 -LogPath $smokeLog
+        } catch {
+          $message = $_.Exception.Message
+        }
+        $stopwatch.Stop()
+
+        Assert-GpTrue -Condition ($null -ne $message) -Message "The smoke launch should fail for a broken payload."
+        Assert-GpTrue -Condition ($stopwatch.Elapsed.TotalSeconds -lt 20) -Message "The smoke launch should fail fast, not at the timeout. Took $($stopwatch.Elapsed.TotalSeconds) s."
+        Assert-GpMatch -Actual $message -Pattern "launcher exited with code" -Message "The smoke failure should report the launcher exit."
+        Assert-GpMatch -Actual $message -Pattern "Launcher error: .*Unable to read packaged app default" -Message "The smoke failure should include the launcher's error message."
+      } finally {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $brokenRoot, $smokeLog
+      }
+    }
+
     It "writes a bundled notice report from compliance entries" {
       $noticeText = Get-Content -Raw -Path $script:transform.NoticeReportPath
 
@@ -244,6 +299,50 @@ Describe "MSI backend" {
 
       Assert-GpMatch -Actual $templateText -Pattern '<DirectoryRef Id="ProgramMenuFolder">' -Message "Shortcut template should write directly to the Start Menu root."
       Assert-GpFalse -Condition ($templateText -match 'ApplicationProgramsFolder') -Message "Shortcut template should not create an extra Start Menu folder."
+    }
+
+    It "ends the runtime's daemons running from the install folder before files are replaced or removed" {
+      $installRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-daemons-" + [guid]::NewGuid().ToString("N"))
+      $toolsRoot = Join-Path $installRoot "runtime\System\Tools"
+      New-Item -ItemType Directory -Force -Path $toolsRoot | Out-Null
+      try {
+        Assert-GpEqual -Actual @(Get-GpMsiRuntimeDaemonNames -InstallRoot $installRoot) -Expected @() -Message "An install tree without daemons should report none."
+        Assert-GpEqual -Actual (Get-GpMsiStopRuntimeDaemonsXml -DaemonNames @() -InstallDirectoryName "SampleGui") -Expected "" -Message "No daemons should mean no custom action."
+
+        foreach ($name in @("gdnc.exe", "gpbs.exe")) {
+          Set-Content -Path (Join-Path $toolsRoot $name) -Value ""
+        }
+        $names = @(Get-GpMsiRuntimeDaemonNames -InstallRoot $installRoot)
+        Assert-GpEqual -Actual $names -Expected @("gdnc", "gpbs") -Message "The bundled daemons should be found anywhere in the install tree."
+
+        $xml = Get-GpMsiStopRuntimeDaemonsXml -DaemonNames $names -InstallDirectoryName "SampleGui"
+        Assert-GpMatch -Actual $xml -Pattern 'DllEntry="WixQuietExec64" Execute="immediate" Return="ignore"' -Message "The daemons should be ended quietly, and a failure should not fail the install."
+        Assert-GpMatch -Actual $xml -Pattern '<Custom Action="GpStopRuntimeDaemons" Before="InstallValidate" />' -Message "The daemons should be ended before Windows Installer checks for files in use."
+        Assert-GpMatch -Actual $xml -Pattern 'Get-Process -Name gdnc,gpbs ' -Message "Only the bundled daemons should be ended."
+        Assert-GpMatch -Actual $xml -Pattern ([regex]::Escape("Where-Object Path -Like &apos;*\SampleGui\*&apos;")) -Message "Only daemons running from this product's install folder should be ended."
+
+        $escaped = Get-GpMsiStopRuntimeDaemonsXml -DaemonNames $names -InstallDirectoryName "Dan's [App]"
+        Assert-GpMatch -Actual $escaped -Pattern ([regex]::Escape("-Like &apos;*\Dan&apos;&apos;s ``[\[]App``[\]]\*&apos;")) -Message "Quotes and brackets in the folder name should be escaped for PowerShell and for the MSI formatted string."
+      } finally {
+        Remove-Item -Recurse -Force -Path $installRoot -ErrorAction SilentlyContinue
+      }
+    }
+
+    It "lists the app under Open with for its file extensions without taking over their defaults" {
+      $registration = Get-GpMsiOpenWithRegistration -Config $script:transformConfig
+      $xml = $registration.RegistrationXml
+
+      Assert-GpEqual -Actual $registration.Extensions -Expected @(".sample") -Message "The manifest's extension associations should be registered."
+      Assert-GpMatch -Actual $xml -Pattern ([regex]::Escape('Key="Software\Classes\.sample\OpenWithProgids"')) -Message "Each extension should list the app's ProgID under OpenWithProgids."
+      Assert-GpMatch -Actual $xml -Pattern ([regex]::Escape('\SupportedTypes" Name=".sample"')) -Message "The launcher should declare the extension as a supported type."
+      Assert-GpMatch -Actual $xml -Pattern ([regex]::Escape('Key="Software\RegisteredApplications"')) -Message "The app should be offered in Default Apps."
+      Assert-GpMatch -Actual $xml -Pattern ([regex]::Escape('Value="&quot;[INSTALLDIR]')) -Message "Open commands should run the installed launcher."
+      Assert-GpFalse -Condition ($xml -match ([regex]::Escape('Key="Software\Classes\.sample"'))) -Message "The extension's default handler should never be written."
+      Assert-GpFalse -Condition ($xml -match 'UserChoice') -Message "The user's choice of default app should never be written."
+      Assert-GpMatch -Actual $registration.ComponentRefXml -Pattern 'ComponentRef Id="OpenWithRegistration"' -Message "The registration should be part of the main feature."
+
+      $none = Get-GpMsiOpenWithRegistration -Config ([pscustomobject]@{ FileAssociations = @(@{ kind = "mime"; value = "image/png" }) })
+      Assert-GpEqual -Actual $none.RegistrationXml -Expected "" -Message "MIME associations have no MSI registration."
     }
 
     It "writes bundled updater metadata into the MSI install tree when enabled" {

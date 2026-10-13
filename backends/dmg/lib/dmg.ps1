@@ -913,6 +913,10 @@ function Invoke-GpDmgNotarization {
   }
 
   if (-not $notarization.Enabled) {
+    if ($notarization.Required) {
+      # Fail closed: a required notarization never ships an unnotarized DMG.
+      throw "backends.dmg.notarization.required is true, but notarization.enabled is false."
+    }
     Write-GpDmgLogLine -LogPath $LogPath -Message $result.message
     return [pscustomobject]$result
   }
