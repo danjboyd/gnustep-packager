@@ -624,21 +624,26 @@ function Get-GpAppImageSmokeProcessNames {
 # exception in a GNUstep app shows a modal "Critical Error" panel and logs
 # nothing until it is dismissed, so the app looks healthy from outside.
 # Every GNUstep alert panel has the window title " " (one space); the
-# panel's WM_CLASS is the process name. Returns $null when the check can't
-# run (no X display or no xwininfo).
+# panel's WM_CLASS is the process name. GNUstep sets no _NET_WM_PID, so a
+# panel from another process with the same name would match: the caller
+# passes the panels already on screen before the launch to ignore. Returns
+# $null when the check can't run (no X display or no xwininfo).
 function Get-GpAppImageSmokeAlertWindows {
   param(
-    [Parameter(Mandatory = $true)]
+    [AllowNull()]
     [System.Diagnostics.Process]$Process,
     [Parameter(Mandatory = $true)]
-    [System.Collections.IDictionary]$Environment
+    [System.Collections.IDictionary]$Environment,
+    [string[]]$IgnoreWindowIds = @()
   )
 
   if (-not $Environment.Contains("DISPLAY") -or -not (Get-Command xwininfo -ErrorAction SilentlyContinue)) {
     return $null
   }
 
-  $processNames = @(Get-GpAppImageSmokeProcessNames -RootProcessId $Process.Id)
+  # Without a process, any viewable alert panel counts: used to note the
+  # panels already on screen before the launch.
+  $processNames = if ($null -ne $Process) { @(Get-GpAppImageSmokeProcessNames -RootProcessId $Process.Id) } else { $null }
   $displayArguments = @("DISPLAY=" + [string]$Environment["DISPLAY"])
   if ($Environment.Contains("XAUTHORITY")) {
     $displayArguments += "XAUTHORITY=" + [string]$Environment["XAUTHORITY"]
@@ -651,8 +656,11 @@ function Get-GpAppImageSmokeAlertWindows {
       continue
     }
     $className = $match.Groups[2].Value
-    $owned = $false
-    foreach ($name in $processNames) {
+    if ($IgnoreWindowIds -contains $match.Groups[1].Value) {
+      continue
+    }
+    $owned = ($null -eq $processNames)
+    foreach ($name in @($processNames)) {
       if ($className.StartsWith($name) -or $name.StartsWith($className)) {
         $owned = $true
         break
@@ -2523,24 +2531,109 @@ function Start-GpAppImageSmokeProcess {
   return (Start-Process -FilePath "env" -ArgumentList @($quotedParts) -PassThru -RedirectStandardOutput $StdOutPath -RedirectStandardError $StdErrPath)
 }
 
+# Processes that belong to a smoke launch: those under the smoke process,
+# and any process whose environment has the smoke's GNUSTEP_HOME. gdnc and
+# gpbs detach from the app's process tree, but they keep its environment.
+function Get-GpAppImageSmokeProcessIds {
+  param(
+    [int]$RootProcessId = 0,
+    [string]$GnustepHome
+  )
+
+  $ids = [System.Collections.Generic.HashSet[int]]::new()
+  if ($RootProcessId -gt 0) {
+    $children = @{}
+    foreach ($line in @(& ps -e -o pid=,ppid= 2>$null)) {
+      $fields = ([string]$line).Trim() -split '\s+'
+      if ($fields.Count -lt 2) {
+        continue
+      }
+      $parentId = [int]$fields[1]
+      if (-not $children.ContainsKey($parentId)) {
+        $children[$parentId] = [System.Collections.Generic.List[int]]::new()
+      }
+      $children[$parentId].Add([int]$fields[0]) | Out-Null
+    }
+
+    $pending = [System.Collections.Generic.Queue[int]]::new()
+    $pending.Enqueue($RootProcessId)
+    while ($pending.Count -gt 0) {
+      $current = $pending.Dequeue()
+      if ($ids.Add($current) -and $children.ContainsKey($current)) {
+        foreach ($child in $children[$current]) {
+          $pending.Enqueue($child)
+        }
+      }
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($GnustepHome) -and (Test-Path "/proc")) {
+    $marker = [System.Text.Encoding]::UTF8.GetBytes("GNUSTEP_HOME=" + $GnustepHome)
+    foreach ($directory in @(Get-ChildItem -LiteralPath "/proc" -Directory -ErrorAction SilentlyContinue)) {
+      $processId = 0
+      if (-not [int]::TryParse($directory.Name, [ref]$processId) -or $processId -eq $PID) {
+        continue
+      }
+      try {
+        $environ = [System.IO.File]::ReadAllBytes((Join-Path $directory.FullName "environ"))
+      } catch {
+        continue
+      }
+      # Entries are NUL-separated; match a whole entry.
+      $start = 0
+      for ($index = 0; $index -le $environ.Length; $index++) {
+        if ($index -eq $environ.Length -or $environ[$index] -eq 0) {
+          if (($index - $start) -eq $marker.Length -and
+              [System.Linq.Enumerable]::SequenceEqual([byte[]]$environ[$start..($index - 1)], [byte[]]$marker)) {
+            $ids.Add($processId) | Out-Null
+            break
+          }
+          $start = $index + 1
+        }
+      }
+    }
+  }
+
+  return [int[]]@($ids)
+}
+
+# Ends a smoke launch and everything it started: TERM, a short wait, then
+# KILL. Returns the processes still alive afterwards.
 function Stop-GpAppImageSmokeProcess {
   param(
     [AllowNull()]
-    [System.Diagnostics.Process]$Process
+    [System.Diagnostics.Process]$Process,
+    [string]$GnustepHome
   )
 
-  if ($null -eq $Process) {
-    return
+  $rootId = if ($null -ne $Process) { $Process.Id } else { 0 }
+  $targets = @(Get-GpAppImageSmokeProcessIds -RootProcessId $rootId -GnustepHome $GnustepHome)
+  if ($targets.Count -eq 0) {
+    return [int[]]@()
   }
 
-  try {
-    $Process.Refresh()
-    if (-not $Process.HasExited) {
-      Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
-      $Process.WaitForExit(5000) | Out-Null
+  foreach ($signal in @("TERM", "KILL")) {
+    $alive = @($targets | Where-Object { Test-Path ("/proc/{0}" -f $_) })
+    if ($alive.Count -eq 0) {
+      break
     }
-  } catch {
+    & env kill ("-" + $signal) @($alive | ForEach-Object { [string]$_ }) 2>$null
+    $deadline = (Get-Date).AddSeconds(3)
+    while ((Get-Date) -lt $deadline -and @($alive | Where-Object { Test-Path ("/proc/{0}" -f $_) }).Count -gt 0) {
+      Start-Sleep -Milliseconds 100
+    }
+    # Pick up anything started while the first ones were stopping.
+    $targets = @(@($targets) + @(Get-GpAppImageSmokeProcessIds -GnustepHome $GnustepHome) | Select-Object -Unique)
   }
+
+  if ($null -ne $Process) {
+    try {
+      $Process.WaitForExit(2000) | Out-Null
+    } catch {
+    }
+  }
+
+  return [int[]]@($targets | Where-Object { Test-Path ("/proc/{0}" -f $_) })
 }
 
 function Complete-GpAppImageSmokeProcess {
@@ -2608,6 +2701,9 @@ function Invoke-GpAppImageSmoke {
   )
 
   $smokePlan = Get-GpAppImageSmokePlan -Context $Context -Config $Config -ValidationRoot $ValidationRoot
+  # Leftovers from an earlier smoke launch here (same GNUstep home) would
+  # still have its windows up; end them before starting over.
+  $leftovers = @(Stop-GpAppImageSmokeProcess -Process $null -GnustepHome (Join-Path $ValidationRoot "smoke-env/home"))
   $smokeEnvironment = Get-GpAppImageSmokeBaseEnvironment -ValidationRoot $ValidationRoot
   foreach ($key in @($smokePlan.Environment.Keys)) {
     $smokeEnvironment[$key] = $smokePlan.Environment[$key]
@@ -2623,6 +2719,10 @@ function Invoke-GpAppImageSmoke {
   $successReason = $null
 
   Set-Content -Path $SmokeLog -Value ("[{0}] AppImage smoke validation" -f (Get-Date).ToString("o"))
+  if ($leftovers.Count -gt 0) {
+    Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Processes from an earlier smoke launch survived being stopped: {0}" -f [string]::Join(", ", @($leftovers)))
+  }
+  $preexistingAlerts = @(Get-GpAppImageSmokeAlertWindows -Process $null -Environment $smokeEnvironment | ForEach-Object { ([string]$_ -split ' ')[0] })
   Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Smoke mode: {0}" -f $smokePlan.Mode)
   if (-not [string]::IsNullOrWhiteSpace($smokePlan.DocumentPath)) {
     Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Smoke document path: {0}" -f $smokePlan.DocumentPath)
@@ -2697,7 +2797,7 @@ function Invoke-GpAppImageSmoke {
             $successReason = "process-exited-cleanly"
           } else {
             $successReason = "process-remained-running-through-startup-window"
-            $alertWindows = Get-GpAppImageSmokeAlertWindows -Process $process -Environment $smokeEnvironment
+            $alertWindows = Get-GpAppImageSmokeAlertWindows -Process $process -Environment $smokeEnvironment -IgnoreWindowIds $preexistingAlerts
             if ($null -eq $alertWindows) {
               Write-GpAppImageLogLine -LogPath $SmokeLog -Message "Alert panel check skipped: no X display or no xwininfo."
             } elseif (@($alertWindows).Count -gt 0) {
@@ -2712,7 +2812,10 @@ function Invoke-GpAppImageSmoke {
       }
     }
   } finally {
-    Stop-GpAppImageSmokeProcess -Process $process
+    $survivors = @(Stop-GpAppImageSmokeProcess -Process $process -GnustepHome ([string]$smokeEnvironment["GNUSTEP_HOME"]))
+    if ($survivors.Count -gt 0) {
+      Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Smoke processes still running after KILL: {0}" -f [string]::Join(", ", @($survivors)))
+    }
     $completion = Complete-GpAppImageSmokeProcess -Process $process -StdOutPath $stdoutPath -StdErrPath $stderrPath -LogPath $SmokeLog
     Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Smoke process exit code: {0}" -f $completion.ExitCode)
   }

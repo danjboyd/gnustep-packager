@@ -507,6 +507,33 @@ Describe "AppImage backend" {
       Assert-GpTrue -Condition ($null -eq (Get-GpAppImageSmokeFailure -Output "Sample GNUstep Linux fixture running`nFailed to get _NET_WORKAREA")) -Message "Ordinary GNUstep noise should not fail the smoke launch."
     }
 
+    It "stops the smoke process tree and detached processes that carry the smoke's GNUstep home" {
+      $gnustepHome = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-smoke-stop-" + [guid]::NewGuid().ToString("N"))
+      # A parent with a child, and a detached process (as gdnc and gpbs are)
+      # outside the tree that only shares the smoke environment.
+      $tree = Start-Process -FilePath "sh" -ArgumentList @("-c", '"sleep 300 & sleep 300"') -PassThru
+      $detached = Start-Process -FilePath "setsid" -ArgumentList @("env", "GNUSTEP_HOME=$gnustepHome", "sleep", "300") -PassThru
+      $other = Start-Process -FilePath "env" -ArgumentList @("GNUSTEP_HOME=$gnustepHome-other", "sleep", "300") -PassThru
+      try {
+        Start-Sleep -Milliseconds 500
+        $treeIds = @(Get-GpAppImageSmokeProcessIds -RootProcessId $tree.Id)
+        Assert-GpTrue -Condition ($treeIds.Count -ge 3) -Message "The tree should include the shell and both sleeps. Found: $($treeIds -join ',')"
+
+        $survivors = @(Stop-GpAppImageSmokeProcess -Process $tree -GnustepHome $gnustepHome)
+        Assert-GpEqual -Actual $survivors.Count -Expected 0 -Message "Nothing from the smoke launch should survive."
+        foreach ($id in $treeIds) {
+          Assert-GpTrue -Condition (-not (Test-Path "/proc/$id")) -Message "Process $id from the smoke tree should be gone."
+        }
+        Assert-GpTrue -Condition (-not (Test-Path "/proc/$($detached.Id)")) -Message "A detached process with the smoke's GNUstep home should be gone."
+        Assert-GpTrue -Condition (Test-Path "/proc/$($other.Id)") -Message "A process with a different GNUstep home should be left alone."
+      } finally {
+        foreach ($process in @($tree, $detached, $other)) {
+          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        }
+        & env pkill -f "^sleep 300$" 2>$null
+      }
+    }
+
     It "reports no alert panels as an empty list, not as a skipped check" {
       if ([string]::IsNullOrWhiteSpace($env:DISPLAY) -or -not (Get-Command xwininfo -ErrorAction SilentlyContinue)) {
         Set-ItResult -Skipped -Because "it needs an X display and xwininfo"
