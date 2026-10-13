@@ -101,6 +101,49 @@ Describe "MSI backend" {
       Assert-GpEqual -Actual @(Get-GpComplianceEntries -Manifest $context.Manifest).Count -Expected 2 -Message "Resolved manifest should surface compliance notice entries."
     }
 
+    It "defaults the smoke stay-alive period to five seconds" {
+      $context = Get-GpManifestContext -Path $script:manifestPath
+      $plan = Get-GpValidationPlan -Context $context
+
+      Assert-GpEqual -Actual $plan.StayAliveSeconds -Expected 5 -Message "The packaged app should have to stay running for five seconds by default."
+    }
+
+    It "fails a smoke launch whose app exits soon after it starts" {
+      $quick = Start-Process cmd.exe -ArgumentList @("/c", "ping -n 2 127.0.0.1 >nul & exit 3") -PassThru -WindowStyle Hidden
+      $failed = $false
+      try {
+        Wait-GpMsiSmokeAppAlive -Processes @($quick) -Seconds 4 -AppPath "quick.exe"
+      } catch {
+        $failed = $_.Exception.Message -like "*exited within 4 seconds*0x00000003*"
+      }
+      Assert-GpTrue -Condition $failed -Message "An app that exits within the stay-alive period should fail the smoke launch with its exit code."
+
+      $steady = Start-Process cmd.exe -ArgumentList @("/c", "ping -n 11 127.0.0.1 >nul") -PassThru -WindowStyle Hidden
+      try {
+        Wait-GpMsiSmokeAppAlive -Processes @($steady) -Seconds 2 -AppPath "steady.exe"
+      } finally {
+        Stop-Process -Id $steady.Id -Force -ErrorAction SilentlyContinue
+      }
+    }
+
+    It "keeps the build toolchain off the smoke launch PATH" {
+      $hostPath = @(
+        "C:\Windows\system32",
+        "D:\gnustep-cli\clang64\bin",
+        "D:\gnustep-cli\usr\bin",
+        "C:\msys64\clang64\bin",
+        "C:\msys64\usr\bin",
+        "C:\clang64\bin",
+        "C:\tools\mingw64\bin",
+        "C:\Program Files\Git\cmd",
+        "C:\Windows"
+      ) -join ";"
+
+      $cleanPath = Get-GpMsiCleanSmokePath -Path $hostPath -ToolchainRoots @("D:\gnustep-cli", "C:\msys64", "C:\clang64")
+
+      Assert-GpEqual -Actual $cleanPath -Expected "C:\Windows\system32;C:\Program Files\Git\cmd;C:\Windows" -Message "Toolchain directories should be removed from the smoke launch PATH."
+    }
+
     It "resolves enabled backends from the manifest" {
       $context = Get-GpManifestContext -Path $script:manifestPath
 

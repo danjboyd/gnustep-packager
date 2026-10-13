@@ -37,7 +37,8 @@
       "enabled": true,
       "kind": "staged-layout",
       "requiredPaths": [],
-      "timeoutSeconds": 30
+      "timeoutSeconds": 30,
+      "stayAliveSeconds": 5
     },
     "logs": {
       "retainOnSuccess": true
