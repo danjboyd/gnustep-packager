@@ -559,6 +559,137 @@ static NSString *GPHelperWriteAppImageApplyScript(NSString *workingRoot,
 }
 #endif
 
+#if defined(_WIN32)
+// GNUstep writes Windows paths with '/', and Windows Installer drops the
+// drive from such a path (error 1619, package not found).
+static NSString *GPHelperWindowsPath(NSString *path) {
+  return [path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"];
+}
+
+// A value for set "NAME=value" in a .cmd file: only '%' is special there.
+static NSString *GPHelperCmdValue(NSString *value) {
+  return [GPHelperWindowsPath(value != nil ? value : @"") stringByReplacingOccurrencesOfString:@"%" withString:@"%%"];
+}
+
+// The script that installs an MSI update and starts the app again, run with
+// the system's cmd.exe. The helper runs from the install folder and loads
+// the runtime DLLs there, so Windows Installer's Restart Manager closes it
+// partway through the install; the script uses nothing in that folder. It
+// records the outcome in the state file, as the helper would, and starts
+// the app (relaunchPath, the package's launcher) after an install, unless
+// Windows is already restarting (1641). The paths are set with
+// set "NAME=value" and always used quoted, so spaces, '&', '^' and '('
+// in them are literal; '%' is doubled.
+static NSString *GPHelperWriteMSIApplyScript(NSString *statePath,
+                                             NSString *msiexecPath,
+                                             NSString *packagePath,
+                                             NSString *logPath,
+                                             NSString *relaunchPath) {
+  NSMutableString *script = [NSMutableString string];
+  [script appendString:@"@echo off\r\n"
+    "rem Written by gp-update-helper; run as: cmd.exe /d /c apply-msi.cmd\r\n"
+    "chcp 65001 >nul\r\n"
+    "setlocal\r\n"];
+  [script appendFormat:@"set \"STATE=%@\"\r\n", GPHelperCmdValue(statePath)];
+  [script appendFormat:@"set \"MSIEXEC=%@\"\r\n", GPHelperCmdValue(msiexecPath)];
+  [script appendFormat:@"set \"PACKAGE=%@\"\r\n", GPHelperCmdValue(packagePath)];
+  [script appendFormat:@"set \"LOG=%@\"\r\n", GPHelperCmdValue(logPath)];
+  [script appendFormat:@"set \"APP=%@\"\r\n", GPHelperCmdValue(relaunchPath)];
+  [script appendString:
+    @"rem A progress window but no questions (/passive), no reboot by the\r\n"
+    "rem installer (/norestart; 3010 and 1641 mean one is needed or under\r\n"
+    "rem way, and the update is still installed), and a verbose log.\r\n"
+    "\"%MSIEXEC%\" /i \"%PACKAGE%\" /passive /norestart /l*v \"%LOG%\"\r\n"
+    "set \"CODE=%ERRORLEVEL%\"\r\n"
+    "if \"%CODE%\"==\"0\" goto installed\r\n"
+    "if \"%CODE%\"==\"3010\" goto installedRestart\r\n"
+    "if \"%CODE%\"==\"1641\" goto installedRestarting\r\n"
+    "if \"%CODE%\"==\"1602\" goto cancelled\r\n"
+    "echo {\"formatVersion\": 1, \"status\": \"failed\", \"message\": \"MSI installation failed.\", \"error\": {\"message\": \"msiexec exit code %CODE%; see msiexec.log beside the state file\"}}>\"%STATE%.tmp\"\r\n"
+    "goto finish\r\n"
+    ":cancelled\r\n"
+    "echo {\"formatVersion\": 1, \"status\": \"failed\", \"message\": \"The MSI installation was cancelled.\", \"error\": {\"message\": \"msiexec exit code 1602: cancelled by the user.\"}}>\"%STATE%.tmp\"\r\n"
+    "goto finish\r\n"
+    ":installedRestarting\r\n"
+    "echo {\"formatVersion\": 1, \"status\": \"completed\", \"message\": \"MSI installation completed; Windows is restarting to finish it.\"}>\"%STATE%.tmp\"\r\n"
+    "move /y \"%STATE%.tmp\" \"%STATE%\" >nul\r\n"
+    "exit /b 0\r\n"
+    ":installedRestart\r\n"
+    "echo {\"formatVersion\": 1, \"status\": \"completed\", \"message\": \"MSI installation completed; Windows needs a restart to finish it.\"}>\"%STATE%.tmp\"\r\n"
+    "goto relaunch\r\n"
+    ":installed\r\n"
+    "echo {\"formatVersion\": 1, \"status\": \"completed\", \"message\": \"MSI installation completed.\"}>\"%STATE%.tmp\"\r\n"
+    ":relaunch\r\n"
+    "move /y \"%STATE%.tmp\" \"%STATE%\" >nul\r\n"
+    "if defined APP start \"\" \"%APP%\"\r\n"
+    "exit /b 0\r\n"
+    ":finish\r\n"
+    "move /y \"%STATE%.tmp\" \"%STATE%\" >nul\r\n"
+    "exit /b 1\r\n"];
+
+  NSString *scriptPath = [[statePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"apply-msi.cmd"];
+  if (![[script dataUsingEncoding:NSUTF8StringEncoding] writeToFile:scriptPath atomically:YES]) {
+    return nil;
+  }
+  return scriptPath;
+}
+
+// Starts cmd.exe on the script with no window, no inherited handles and the
+// script's directory as the working directory, so nothing it holds is in
+// the install folder, and does not wait for it.
+static BOOL GPHelperLaunchMSIApplyScript(NSString *scriptPath) {
+  NSString *cmdPath = GPHelperSystemExecutable(@"cmd.exe");
+  if ([cmdPath length] == 0) {
+    return NO;
+  }
+  // GNUstep joins the system directory and the name with '/', and cmd.exe
+  // reads "/system32/cmd.exe" in its own command line as /s and /c, so it
+  // would never run the script.
+  cmdPath = GPHelperWindowsPath(cmdPath);
+
+  NSString *windowsScriptPath = GPHelperWindowsPath(scriptPath);
+  NSString *workingDirectory = [windowsScriptPath stringByDeletingLastPathComponent];
+  workingDirectory = GPHelperWindowsPath(workingDirectory);
+  // cmd /c drops the outer quotes, leaving the quoted script path.
+  NSString *commandLine = [NSString stringWithFormat:@"\"%@\" /d /c \"\"%@\"\"", cmdPath, windowsScriptPath];
+
+  NSUInteger cmdLength = [cmdPath length];
+  NSUInteger commandLength = [commandLine length];
+  NSUInteger directoryLength = [workingDirectory length];
+  unichar *cmdBuffer = calloc(cmdLength + 1, sizeof(unichar));
+  unichar *commandBuffer = calloc(commandLength + 1, sizeof(unichar));
+  unichar *directoryBuffer = calloc(directoryLength + 1, sizeof(unichar));
+  if (cmdBuffer == NULL || commandBuffer == NULL || directoryBuffer == NULL) {
+    free(cmdBuffer);
+    free(commandBuffer);
+    free(directoryBuffer);
+    return NO;
+  }
+  [cmdPath getCharacters:cmdBuffer];
+  [commandLine getCharacters:commandBuffer];
+  [workingDirectory getCharacters:directoryBuffer];
+
+  STARTUPINFOW startupInfo;
+  PROCESS_INFORMATION processInfo;
+  ZeroMemory(&startupInfo, sizeof(startupInfo));
+  startupInfo.cb = sizeof(startupInfo);
+  ZeroMemory(&processInfo, sizeof(processInfo));
+  BOOL launched = CreateProcessW((LPCWSTR)cmdBuffer, (LPWSTR)commandBuffer, NULL, NULL, FALSE,
+                                 CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP, NULL,
+                                 (LPCWSTR)directoryBuffer, &startupInfo, &processInfo);
+  free(cmdBuffer);
+  free(commandBuffer);
+  free(directoryBuffer);
+  if (!launched) {
+    return NO;
+  }
+
+  CloseHandle(processInfo.hThread);
+  CloseHandle(processInfo.hProcess);
+  return YES;
+}
+#endif
+
 static NSDictionary *GPHelperLoadApplyState(NSString *statePath, NSError **error) {
   NSDictionary *state = GPHelperLoadJSONFile(statePath, error);
   if (state == nil) {
@@ -768,6 +899,17 @@ static int GPHelperApply(NSDictionary *plan, NSString *statePath, NSInteger wait
     // way, and the update is still installed), and a verbose log beside
     // the state file for when it fails.
     NSString *logPath = [[statePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"msiexec.log"];
+#if defined(_WIN32)
+    // Restart Manager would close this helper partway through the install
+    // (it runs from the install folder), before it records the result and
+    // starts the app again, so a script outside the folder does all three.
+    NSString *scriptPath = GPHelperWriteMSIApplyScript(statePath, msiexecPath, downloadedPath, logPath, relaunchPath);
+    if ([scriptPath length] == 0 || !GPHelperLaunchMSIApplyScript(scriptPath)) {
+      GPHelperUpdateState(statePath, GPHelperStatusFailed, @"The MSI install could not be started.", nil, apply, downloadedPath, [NSDictionary dictionaryWithObject:@"The apply-msi.cmd script could not be written or started." forKey:@"message"]);
+      return 1;
+    }
+    return 0;
+#else
     NSArray *arguments = [NSArray arrayWithObjects:@"/i", downloadedPath, @"/passive", @"/norestart", @"/l*v", logPath, nil];
     NSDictionary *result = GPHelperRunTask(msiexecPath, arguments);
     int exitCode = [[result objectForKey:@"exitCode"] intValue];
@@ -786,6 +928,7 @@ static int GPHelperApply(NSDictionary *plan, NSString *statePath, NSInteger wait
       nil, apply, downloadedPath, nil);
     GPHelperLaunchProcess(relaunchPath, [NSArray array]);
     return 0;
+#endif
   }
 
   if ([mode isEqualToString:@"appimage-update"]) {
