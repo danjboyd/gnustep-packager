@@ -396,6 +396,9 @@ Describe "AppImage backend" {
         Assert-GpEqual -Actual $result.SmokeMode -Expected "marker-file" -Message "Marker-file smoke validation should report its configured mode."
         Assert-GpTrue -Condition (Test-Path $result.SmokeMarkerPath) -Message "Marker-file smoke validation should create the requested marker."
         Assert-GpMatch -Actual $markerText -Pattern "fixture=sample-linux" -Message "Marker-file smoke validation should preserve the fixture marker behavior."
+        Assert-GpMatch -Actual $markerText -Pattern "(?m)^path=(\S*/usr/runtime/bin:)?/usr/bin:/bin$" -Message "The smoke launch should get a minimal PATH (after AppRun's own runtime/bin), not the caller's."
+        Assert-GpMatch -Actual $markerText -Pattern "(?m)^home=.*smoke-env/home$" -Message "The smoke launch should get a fresh HOME under the validation output."
+        Assert-GpMatch -Actual $markerText -Pattern "(?m)^dbus=unix:path=.*no-session-bus$" -Message "The smoke launch should not reach the caller's session bus."
       } finally {
         if (Test-Path $manifestPath) {
           Remove-Item -Force $manifestPath
@@ -453,6 +456,51 @@ Describe "AppImage backend" {
           Remove-Item -Force $manifestPath
         }
       }
+    }
+  }
+
+  Context "Smoke failure detection" {
+    It "fails the smoke launch when the app logs a missing GNUstep tool and keeps running" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["smoke"] = @{
+          mode = "launch-only"
+          environment = @{
+            GP_FIXTURE_STDERR_LINE = "Unable to find the make_services tool."
+          }
+        }
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $validationPath = Join-Path $script:packageConfig.OutputPaths.ValidationRoot "pester-appimage-validate-tool-missing.log"
+        $message = $null
+        try {
+          Invoke-GpAppImageValidation -Context $context -RunSmoke -LogPath $validationPath | Out-Null
+        } catch {
+          $message = $_.Exception.Message
+        }
+
+        Assert-GpTrue -Condition ($null -ne $message) -Message "Smoke validation should fail when the app logs a missing GNUstep tool."
+        Assert-GpMatch -Actual $message -Pattern "could not find a runtime component: Unable to find the make_services tool" -Message "The failure should name the reason and the logged line."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
+    }
+
+    It "recognizes GNUstep exception and loader failures in smoke output" {
+      foreach ($line in @(
+        "*** NSTimer ignoring exception 'NSInternalInconsistencyException' (reason 'x') raised during posting of timer",
+        "Problem posting <GSNotification: 0x1> Name: NSApplicationDidFinishLaunchingNotification: <NSException: 0x2> NAME:NSInternalInconsistencyException",
+        "Terminating app due to uncaught exception NSRangeException",
+        "./app: error while loading shared libraries: libgnustep-gui.so.0.32: cannot open shared object file",
+        "Unable to find backend back-0_31"
+      )) {
+        Assert-GpTrue -Condition ($null -ne (Get-GpAppImageSmokeFailure -Output ("ok`n" + $line + "`nmore"))) -Message "Smoke output should count as a failure: $line"
+      }
+      Assert-GpTrue -Condition ($null -eq (Get-GpAppImageSmokeFailure -Output "Sample GNUstep Linux fixture running`nFailed to get _NET_WORKAREA")) -Message "Ordinary GNUstep noise should not fail the smoke launch."
     }
   }
 

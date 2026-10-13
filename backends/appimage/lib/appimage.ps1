@@ -392,6 +392,7 @@ function Get-GpAppImageConfig {
         $null
       })
       StartupSeconds = $(if ($smoke.Contains("startupSeconds")) { [int]$smoke["startupSeconds"] } else { 5 })
+      AllowStartupAlert = $(if ($smoke.Contains("allowStartupAlert")) { [bool]$smoke["allowStartupAlert"] } else { $false })
     }
   }
 }
@@ -432,7 +433,8 @@ function Get-GpAppImageSmokePlan {
   $appDefaults = Get-GpAppImageAppDomainDefaults -Context $Context
 
   if ($null -ne $appDefaults -and @($appDefaults.Entries).Count -gt 0 -and -not $environment.ContainsKey("HOME")) {
-    $environment["HOME"] = Join-Path $ValidationRoot "home"
+    # The smoke launch's fresh home (Get-GpAppImageSmokeBaseEnvironment).
+    $environment["HOME"] = Join-Path $ValidationRoot "smoke-env/home"
   }
 
   switch ($smoke.Mode) {
@@ -478,7 +480,185 @@ function Get-GpAppImageSmokePlan {
     MarkerPath = $markerPath
     DocumentPath = $documentPath
     StartupSeconds = [int]$smoke.StartupSeconds
+    AllowStartupAlert = [bool]$smoke.AllowStartupAlert
   }
+}
+
+# Output that means the app is missing part of its runtime or hit an
+# exception, even when it keeps running. GNUstep logs these and carries on.
+$script:GpAppImageSmokeFailurePatterns = @(
+  [pscustomobject]@{ Pattern = 'Unable to find (the )?(backend|gdnc|gpbs|\S+ tool)'; Reason = "the app could not find a runtime component" },
+  [pscustomobject]@{ Pattern = '[Uu]ncaught exception'; Reason = "the app raised an uncaught exception" },
+  [pscustomobject]@{ Pattern = 'ignoring exception'; Reason = "the app raised an exception during startup" },
+  [pscustomobject]@{ Pattern = 'Problem posting .*NSException'; Reason = "the app raised an exception during startup" },
+  [pscustomobject]@{ Pattern = 'error while loading shared libraries'; Reason = "a shared library is missing from the AppImage" },
+  [pscustomobject]@{ Pattern = 'version .GLIBC_[0-9.]+. not found'; Reason = "a bundled library needs a newer glibc than the host has" }
+)
+
+# The environment the smoke launch starts from, in place of the caller's:
+# a minimal PATH and fresh home, XDG, and temporary directories under the
+# validation root, so the app cannot lean on the build machine (a GNUstep
+# tool on PATH, a services cache in ~/GNUstep, a session bus). Only the
+# display variables are passed through.
+function Get-GpAppImageSmokeBaseEnvironment {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ValidationRoot
+  )
+
+  $smokeRoot = Join-Path $ValidationRoot "smoke-env"
+  if (Test-Path $smokeRoot) {
+    Remove-Item -Recurse -Force $smokeRoot
+  }
+
+  $homePath = Join-Path $smokeRoot "home"
+  $runtimePath = Join-Path $smokeRoot "runtime"
+  $tempPath = Join-Path $smokeRoot "tmp"
+  foreach ($directory in @($homePath, $runtimePath, $tempPath)) {
+    Ensure-GpDirectory -Path $directory | Out-Null
+  }
+  & chmod 700 $runtimePath
+
+  $environment = [ordered]@{
+    PATH = "/usr/bin:/bin"
+    HOME = $homePath
+    XDG_CONFIG_HOME = Join-Path $homePath ".config"
+    XDG_DATA_HOME = Join-Path $homePath ".local/share"
+    XDG_CACHE_HOME = Join-Path $homePath ".cache"
+    XDG_STATE_HOME = Join-Path $homePath ".local/state"
+    XDG_RUNTIME_DIR = $runtimePath
+    TMPDIR = $tempPath
+    LANG = "C.UTF-8"
+    DBUS_SESSION_BUS_ADDRESS = "unix:path=" + (Join-Path $runtimePath "no-session-bus")
+  }
+  foreach ($name in @("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY")) {
+    $value = [Environment]::GetEnvironmentVariable($name)
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+      $environment[$name] = $value
+    }
+  }
+
+  return $environment
+}
+
+function Get-GpAppImageSmokeFailure {
+  param(
+    [AllowNull()]
+    [string]$Output
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Output)) {
+    return $null
+  }
+
+  foreach ($entry in $script:GpAppImageSmokeFailurePatterns) {
+    $match = [regex]::Match($Output, $entry.Pattern)
+    if ($match.Success) {
+      $lineStart = $Output.LastIndexOf("`n", $match.Index) + 1
+      $lineEnd = $Output.IndexOf("`n", $match.Index)
+      if ($lineEnd -lt 0) {
+        $lineEnd = $Output.Length
+      }
+      return [pscustomobject]@{
+        Reason = $entry.Reason
+        Line = $Output.Substring($lineStart, $lineEnd - $lineStart).Trim()
+      }
+    }
+  }
+
+  return $null
+}
+
+# The smoke process and every process under it (env, the AppImage runtime,
+# AppRun, the app), as name prefixes: /proc's comm is cut to 15 characters.
+function Get-GpAppImageSmokeProcessNames {
+  param(
+    [Parameter(Mandatory = $true)]
+    [int]$RootProcessId
+  )
+
+  $children = @{}
+  $names = @{}
+  foreach ($line in @(& ps -e -o pid=,ppid=,comm= 2>$null)) {
+    $fields = ([string]$line).Trim() -split '\s+', 3
+    if ($fields.Count -lt 3) {
+      continue
+    }
+    $processId = [int]$fields[0]
+    $parentId = [int]$fields[1]
+    $names[$processId] = $fields[2]
+    if (-not $children.ContainsKey($parentId)) {
+      $children[$parentId] = [System.Collections.Generic.List[int]]::new()
+    }
+    $children[$parentId].Add($processId) | Out-Null
+  }
+
+  $result = [System.Collections.Generic.List[string]]::new()
+  $pending = [System.Collections.Generic.Queue[int]]::new()
+  $pending.Enqueue($RootProcessId)
+  while ($pending.Count -gt 0) {
+    $current = $pending.Dequeue()
+    if ($names.ContainsKey($current)) {
+      $result.Add([string]$names[$current]) | Out-Null
+    }
+    if ($children.ContainsKey($current)) {
+      foreach ($child in $children[$current]) {
+        $pending.Enqueue($child)
+      }
+    }
+  }
+
+  return [string[]]@($result.ToArray())
+}
+
+# GNUstep alert panels the smoke process has on screen. An uncaught
+# exception in a GNUstep app shows a modal "Critical Error" panel and logs
+# nothing until it is dismissed, so the app looks healthy from outside.
+# Every GNUstep alert panel has the window title " " (one space); the
+# panel's WM_CLASS is the process name. Returns $null when the check can't
+# run (no X display or no xwininfo).
+function Get-GpAppImageSmokeAlertWindows {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Diagnostics.Process]$Process,
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Environment
+  )
+
+  if (-not $Environment.Contains("DISPLAY") -or -not (Get-Command xwininfo -ErrorAction SilentlyContinue)) {
+    return $null
+  }
+
+  $processNames = @(Get-GpAppImageSmokeProcessNames -RootProcessId $Process.Id)
+  $displayArguments = @("DISPLAY=" + [string]$Environment["DISPLAY"])
+  if ($Environment.Contains("XAUTHORITY")) {
+    $displayArguments += "XAUTHORITY=" + [string]$Environment["XAUTHORITY"]
+  }
+
+  $alerts = [System.Collections.Generic.List[string]]::new()
+  foreach ($line in @(& env @displayArguments xwininfo -root -tree 2>$null)) {
+    $match = [regex]::Match([string]$line, '^\s*(0x[0-9a-fA-F]+) " ": \("([^"]*)"')
+    if (-not $match.Success) {
+      continue
+    }
+    $className = $match.Groups[2].Value
+    $owned = $false
+    foreach ($name in $processNames) {
+      if ($className.StartsWith($name) -or $name.StartsWith($className)) {
+        $owned = $true
+        break
+      }
+    }
+    if (-not $owned) {
+      continue
+    }
+    $windowInfo = [string]::Join("`n", @(& env @displayArguments xwininfo -id $match.Groups[1].Value 2>$null))
+    if ($windowInfo -match 'Map State:\s*IsViewable') {
+      $alerts.Add(("{0} ({1})" -f $match.Groups[1].Value, $className)) | Out-Null
+    }
+  }
+
+  return [string[]]@($alerts.ToArray())
 }
 
 function Invoke-GpAppImageExternalTool {
@@ -2317,8 +2497,19 @@ function Start-GpAppImageSmokeProcess {
     $commandParts.Add($argument) | Out-Null
   }
 
+  # env -i: the app gets only $Environment, not this process's environment.
+  $commandParts.Insert(0, "-i")
   Write-GpAppImageLogLine -LogPath $LogPath -Message ("RUN env {0}" -f ([string]::Join(" ", @($commandParts.ToArray()))))
-  return (Start-Process -FilePath "env" -ArgumentList @($commandParts.ToArray()) -PassThru -RedirectStandardOutput $StdOutPath -RedirectStandardError $StdErrPath)
+  # Start-Process joins the arguments with spaces, so quote any that have
+  # spaces or quotes in them.
+  $quotedParts = foreach ($part in $commandParts) {
+    if ($part.Length -eq 0 -or $part -match '[\s"]') {
+      '"' + $part.Replace('"', '\"') + '"'
+    } else {
+      $part
+    }
+  }
+  return (Start-Process -FilePath "env" -ArgumentList @($quotedParts) -PassThru -RedirectStandardOutput $StdOutPath -RedirectStandardError $StdErrPath)
 }
 
 function Stop-GpAppImageSmokeProcess {
@@ -2354,6 +2545,7 @@ function Complete-GpAppImageSmokeProcess {
   )
 
   $exitCode = 0
+  $output = [System.Text.StringBuilder]::new()
   if ($null -ne $Process) {
     try {
       $Process.Refresh()
@@ -2375,6 +2567,7 @@ function Complete-GpAppImageSmokeProcess {
     if (Test-Path $stream.Path) {
       $content = Get-Content -Raw -Path $stream.Path
       if (-not [string]::IsNullOrWhiteSpace($content)) {
+        $output.AppendLine($content) | Out-Null
         Add-Content -Path $LogPath -Value ""
         Add-Content -Path $LogPath -Value ("[{0}]" -f $stream.Label)
         Add-Content -Path $LogPath -Value $content
@@ -2383,7 +2576,10 @@ function Complete-GpAppImageSmokeProcess {
     }
   }
 
-  return $exitCode
+  return [pscustomobject]@{
+    ExitCode = $exitCode
+    Output = $output.ToString()
+  }
 }
 
 function Invoke-GpAppImageSmoke {
@@ -2401,7 +2597,10 @@ function Invoke-GpAppImageSmoke {
   )
 
   $smokePlan = Get-GpAppImageSmokePlan -Context $Context -Config $Config -ValidationRoot $ValidationRoot
-  $smokeEnvironment = [hashtable](Copy-GpValue -Value $smokePlan.Environment)
+  $smokeEnvironment = Get-GpAppImageSmokeBaseEnvironment -ValidationRoot $ValidationRoot
+  foreach ($key in @($smokePlan.Environment.Keys)) {
+    $smokeEnvironment[$key] = $smokePlan.Environment[$key]
+  }
   $smokeEnvironment["APPIMAGE_EXTRACT_AND_RUN"] = "1"
   $stdoutPath = Join-Path $ValidationRoot "smoke.stdout.txt"
   $stderrPath = Join-Path $ValidationRoot "smoke.stderr.txt"
@@ -2483,14 +2682,30 @@ function Invoke-GpAppImageSmoke {
             $successReason = "process-exited-cleanly"
           } else {
             $successReason = "process-remained-running-through-startup-window"
+            $alertWindows = Get-GpAppImageSmokeAlertWindows -Process $process -Environment $smokeEnvironment
+            if ($null -eq $alertWindows) {
+              Write-GpAppImageLogLine -LogPath $SmokeLog -Message "Alert panel check skipped: no X display or no xwininfo."
+            } elseif (@($alertWindows).Count -gt 0) {
+              $alertList = [string]::Join(", ", @($alertWindows))
+              Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Alert panel on screen at the end of startup: {0}" -f $alertList)
+              if (-not $smokePlan.AllowStartupAlert) {
+                throw ("AppImage smoke launch is showing a GNUstep alert panel ({0}). An uncaught exception shows a modal 'Critical Error' panel and logs nothing, so this usually means a startup failure; set backends.appimage.smoke.allowStartupAlert if the app shows an alert on purpose. See $SmokeLog." -f $alertList)
+              }
+            }
           }
         }
       }
     }
   } finally {
     Stop-GpAppImageSmokeProcess -Process $process
-    $exitCode = Complete-GpAppImageSmokeProcess -Process $process -StdOutPath $stdoutPath -StdErrPath $stderrPath -LogPath $SmokeLog
-    Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Smoke process exit code: {0}" -f $exitCode)
+    $completion = Complete-GpAppImageSmokeProcess -Process $process -StdOutPath $stdoutPath -StdErrPath $stderrPath -LogPath $SmokeLog
+    Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Smoke process exit code: {0}" -f $completion.ExitCode)
+  }
+
+  $failure = Get-GpAppImageSmokeFailure -Output $completion.Output
+  if ($null -ne $failure) {
+    Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Smoke output shows a failure: {0}: {1}" -f $failure.Reason, $failure.Line)
+    throw ("AppImage smoke launch failed: {0}: {1}. See $SmokeLog." -f $failure.Reason, $failure.Line)
   }
 
   Write-GpAppImageLogLine -LogPath $SmokeLog -Message ("Smoke validation succeeded: {0}" -f $successReason)
