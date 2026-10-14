@@ -74,7 +74,9 @@ typedef NS_ENUM(NSInteger, GPUpdateCheckStatus) {
 + (instancetype)configurationWithDictionary:(NSDictionary *)dictionary error:(NSError **)error;
 // The configuration packaged next to the executable. Its feed URL can be
 // overridden for testing by the GP_UPDATER_FEED_URL environment variable,
-// or else the GPUpdaterFeedURL user default.
+// or else the GPUpdaterFeedURL user default: an https URL, an http URL to
+// localhost or 127.0.0.1, or a file URL. Its use is logged; any other URL
+// is ignored (and logged).
 + (instancetype)packagedConfigurationWithError:(NSError **)error;
 @end
 

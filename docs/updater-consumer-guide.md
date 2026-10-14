@@ -137,6 +137,19 @@ Check timing stays in the packaged config generated from the manifest:
 - `updates.minimumCheckIntervalHours`
 - `updates.startupDelaySeconds`
 
+## Testing Against Another Feed
+To try an update without publishing it, point an installed app at another
+feed, without editing its packaged configuration:
+
+- the `GP_UPDATER_FEED_URL` environment variable, or else
+- the `GPUpdaterFeedURL` user default (`defaults write <app> GPUpdaterFeedURL <url>`)
+
+This is for testing only. The URL must be `https://`, `http://` to `localhost`,
+`127.0.0.1` or `[::1]` (a feed served on the test machine), or `file://`; any
+other value is ignored. Both cases are logged (`GPUpdater: TESTING: the update
+feed is overridden by ...`, or `GPUpdater: ignoring the test feed in ...`).
+Signature checks still apply when the package has `updates.publicEDKey`.
+
 ## Linux Notes
 The AppImage path is intentionally ecosystem-friendly:
 
