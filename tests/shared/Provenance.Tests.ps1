@@ -150,6 +150,38 @@ Describe "Release provenance" {
     }
   }
 
+  It "records a checkout's commit, and whether a tracked file changed" {
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+      Set-ItResult -Skipped -Because "git is not available"
+      return
+    }
+
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-provenance-git-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    try {
+      & git -C $root init -q
+      Set-Content -Path (Join-Path $root "one.txt") -Value "one"
+      Set-Content -Path (Join-Path $root "two.txt") -Value "two"
+      & git -C $root add one.txt two.txt
+      & git -C $root -c user.name=test -c user.email=test@example.invalid commit -q -m fixture
+      $commit = (& git -C $root rev-parse HEAD).Trim()
+
+      $clean = Get-GpSourceRevision -Path $root
+      Assert-GpEqual -Actual $clean["commit"] -Expected $commit -Message "The commit should be recorded."
+      Assert-GpEqual -Actual $clean["dirty"] -Expected $false -Message "A clean checkout is not dirty."
+
+      # One changed file: a single status line, which must still count.
+      Add-Content -Path (Join-Path $root "one.txt") -Value "changed"
+      Assert-GpEqual -Actual (Get-GpSourceRevision -Path $root)["dirty"] -Expected $true -Message "One changed tracked file makes the checkout dirty."
+
+      Add-Content -Path (Join-Path $root "two.txt") -Value "changed"
+      Assert-GpEqual -Actual (Get-GpSourceRevision -Path $root)["dirty"] -Expected $true -Message "Two changed tracked files make the checkout dirty."
+      Assert-GpEqual -Actual (Get-GpSourceRevision -Path ([System.IO.Path]::GetTempPath())) -Expected $null -Message "Outside a checkout there's no revision."
+    } finally {
+      Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+    }
+  }
+
   It "lists the GNUstep runtime libraries by default and can be turned off" {
     $manifest = Get-GpDefaultManifest
     $settings = Get-GpProvenanceSettings -Context ([pscustomobject]@{ Manifest = $manifest })

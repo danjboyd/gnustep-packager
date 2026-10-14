@@ -2310,7 +2310,7 @@ function Get-GpSourceRevision {
 
   return [ordered]@{
     commit = ([string]$commit).Trim()
-    dirty = (@($changes) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0
+    dirty = @(@($changes) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0
   }
 }
 
