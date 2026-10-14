@@ -354,11 +354,28 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
 
 @end
 
+// Whether a feed override may be used: https anywhere, http only to this
+// machine (a feed served locally for a test), or a file. Anything else is
+// ignored, so the knob can't point an installed app at an unprotected feed
+// elsewhere.
+static BOOL GPFeedOverrideURLAllowed(NSURL *url) {
+  NSString *scheme = [[url scheme] lowercaseString];
+  NSString *host = [[url host] lowercaseString];
+  if ([scheme isEqualToString:@"https"]) {
+    return [host length] > 0;
+  }
+  if ([scheme isEqualToString:@"http"]) {
+    return [host isEqualToString:@"localhost"] || [host isEqualToString:@"127.0.0.1"] ||
+      [host isEqualToString:@"::1"] || [host isEqualToString:@"[::1]"];
+  }
+  return [scheme isEqualToString:@"file"];
+}
+
 // A feed other than the packaged one, for testing an update without
 // touching the published feed: the GP_UPDATER_FEED_URL environment
-// variable, or else the GPUpdaterFeedURL user default (http, https or
-// file URL). Signature checks still apply when the configuration has a
-// public key.
+// variable, or else the GPUpdaterFeedURL user default. Only for testing:
+// its use is logged, and it is ignored unless GPFeedOverrideURLAllowed.
+// Signature checks still apply when the configuration has a public key.
 static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
   if (configuration == nil) {
     return;
@@ -373,12 +390,11 @@ static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
     return;
   }
   NSURL *url = GPURLFromString(value);
-  NSString *scheme = [[url scheme] lowercaseString];
-  if (url == nil || !([scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"] || [scheme isEqualToString:@"file"])) {
-    NSLog(@"GPUpdater: ignoring %@ '%@': not an http, https or file URL.", source, value);
+  if (url == nil || !GPFeedOverrideURLAllowed(url)) {
+    NSLog(@"GPUpdater: ignoring the test feed in %@ '%@': it must be https, http to localhost or 127.0.0.1, or a file URL.", source, value);
     return;
   }
-  NSLog(@"GPUpdater: update feed overridden by %@: %@", source, [url absoluteString]);
+  NSLog(@"GPUpdater: TESTING: the update feed is overridden by %@: %@ (packaged feed: %@)", source, [url absoluteString], [configuration.feedURL absoluteString]);
   configuration.feedURL = url;
 }
 
