@@ -290,6 +290,29 @@ function Get-GpAppImageConfig {
     $gnustepGlobalDefaults = @(ConvertTo-GpAppImageGlobalDefaultEntries -Values $gnustepConfig["globalDefaults"])
   }
 
+  $bundledFonts = @()
+  if ($backend.Contains("fonts") -and ($backend["fonts"] -is [System.Collections.IDictionary]) -and $backend["fonts"].Contains("bundle")) {
+    $bundledFonts = @(
+      foreach ($font in @($backend["fonts"]["bundle"])) {
+        $fontName = [string]$font["name"]
+        if ([string]::IsNullOrWhiteSpace($fontName)) {
+          throw "backends.appimage.fonts.bundle entries need a name."
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$font["licenseFile"])) {
+          throw "backends.appimage.fonts.bundle '$fontName' needs a licenseFile: the font's license ships with it."
+        }
+        [pscustomobject]@{
+          Name = $fontName
+          DirectoryName = Convert-GpAppImageIdentifierFragment -Value $fontName
+          Files = [string[]]@(@($font["files"]) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { Resolve-GpManifestPath -Context $Context -RelativePath ([string]$_) })
+          LicenseFile = Resolve-GpManifestPath -Context $Context -RelativePath ([string]$font["licenseFile"])
+          License = $(if ($font.Contains("license")) { [string]$font["license"] } else { $null })
+          Homepage = $(if ($font.Contains("homepage")) { [string]$font["homepage"] } else { $null })
+        }
+      }
+    )
+  }
+
   $downloadUrl = [string]$backend["downloadUrl"]
   $downloadLeaf = Split-Path -Leaf $downloadUrl
   if ([string]::IsNullOrWhiteSpace($downloadLeaf)) {
@@ -359,6 +382,7 @@ function Get-GpAppImageConfig {
       DefaultTheme = $gnustepDefaultTheme
       GlobalDefaults = @($gnustepGlobalDefaults)
     }
+    BundledFonts = @($bundledFonts)
     Validation = [pscustomobject]@{
       RuntimeClosure = [string]$validation["runtimeClosure"]
       AllowedSystemLibraries = [string[]]@($validation["allowedSystemLibraries"])
@@ -1019,11 +1043,12 @@ function Write-GpAppImageNoticeReport {
     [Parameter(Mandatory = $true)]
     [string]$AppDirRoot,
     [Parameter(Mandatory = $true)]
-    [string]$LogPath
+    [string]$LogPath,
+    [object[]]$AdditionalEntries = @()
   )
 
   $package = $Context.Manifest["package"]
-  $entries = @(Get-GpAppImageRuntimeNoticeEntries -Context $Context -AppDirRoot $AppDirRoot)
+  $entries = @(Get-GpAppImageRuntimeNoticeEntries -Context $Context -AppDirRoot $AppDirRoot) + @($AdditionalEntries)
   $metadataRoot = Ensure-GpDirectory -Path (Join-Path (Join-Path $AppDirRoot "usr") ($Config.MetadataRootRelative -replace "/", [System.IO.Path]::DirectorySeparatorChar))
   $reportPath = Join-Path $metadataRoot "THIRD-PARTY-NOTICES.txt"
   $lines = [System.Collections.Generic.List[string]]::new()
@@ -1340,6 +1365,88 @@ function Write-GpAppImageGnustepConfig {
   }
 }
 
+function Write-GpAppImageBundledFonts {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [Parameter(Mandatory = $true)]
+    [string]$AppDirRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  $fonts = @($Config.BundledFonts)
+  if ($fonts.Count -eq 0) {
+    return @()
+  }
+
+  # Fonts go under <runtimeRoot>/share/fonts, the fontconfig file that adds them under
+  # <runtimeRoot>/etc/fonts, where AppRun points FONTCONFIG_FILE.
+  $usrRoot = Join-Path $AppDirRoot "usr"
+  $runtimeRoot = Join-Path $usrRoot ($Config.RuntimeRootRelative -replace "/", [System.IO.Path]::DirectorySeparatorChar)
+  $fontConfigDir = Join-Path (Join-Path $runtimeRoot "etc") "fonts"
+  $fontConfigPath = Join-Path $fontConfigDir "fonts.conf"
+  if (Test-Path $fontConfigPath) {
+    throw "backends.appimage.fonts.bundle needs to write $fontConfigPath, but the staged runtime already has one."
+  }
+  $fontsRoot = Ensure-GpDirectory -Path (Join-Path (Join-Path $runtimeRoot "share") "fonts")
+  $metadataRelative = ($Config.MetadataRootRelative -replace "\\", "/").Trim("/")
+  $licenseDirRelative = if ([string]::IsNullOrWhiteSpace($metadataRelative) -or $metadataRelative -eq ".") { "licenses/fonts" } else { "$metadataRelative/licenses/fonts" }
+  $licenseDir = Ensure-GpDirectory -Path (Join-Path $usrRoot ($licenseDirRelative -replace "/", [System.IO.Path]::DirectorySeparatorChar))
+
+  $notices = [System.Collections.Generic.List[psobject]]::new()
+  foreach ($font in $fonts) {
+    if (@($font.Files).Count -eq 0) {
+      throw "backends.appimage.fonts.bundle '$($font.Name)' lists no files."
+    }
+    $fontDir = Ensure-GpDirectory -Path (Join-Path $fontsRoot $font.DirectoryName)
+    foreach ($file in @($font.Files)) {
+      if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+        throw "backends.appimage.fonts.bundle '$($font.Name)': font file not found: $file"
+      }
+      Copy-Item -LiteralPath $file -Destination $fontDir -Force
+    }
+    if (-not (Test-Path -LiteralPath $font.LicenseFile -PathType Leaf)) {
+      throw "backends.appimage.fonts.bundle '$($font.Name)': license file not found: $($font.LicenseFile)"
+    }
+    $licenseName = $font.DirectoryName + ".txt"
+    Copy-Item -LiteralPath $font.LicenseFile -Destination (Join-Path $licenseDir $licenseName) -Force
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("Bundled font {0}: {1} file(s) in {2}" -f $font.Name, @($font.Files).Count, $fontDir)
+
+    $notices.Add([pscustomobject]@{
+      Name = ("{0} (font)" -f $font.Name)
+      Version = $null
+      License = $font.License
+      Source = "Font bundled for hosts that lack it"
+      Homepage = $font.Homepage
+      StageRelativePath = "$licenseDirRelative/$licenseName"
+      InstalledPath = Join-Path $licenseDir $licenseName
+    }) | Out-Null
+  }
+
+  # The host's own configuration comes first, so its fonts, aliases and preferences still decide
+  # what a family name matches; the bundled fonts only join the set. That way an app whose
+  # toolkit falls back to a fixed family (gnustep-back to DejaVu Sans) still finds it on hosts
+  # without it, such as Fedora, and changes nothing on hosts that have it. The directory is
+  # relative to this file, so it works wherever the AppImage is mounted.
+  Ensure-GpDirectory -Path $fontConfigDir | Out-Null
+  $relativeFontsRoot = [System.IO.Path]::GetRelativePath($fontConfigDir, $fontsRoot) -replace "\\", "/"
+  $configText = @(
+    '<?xml version="1.0"?>'
+    '<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">'
+    '<!-- Generated by gnustep-packager: the host configuration, then the bundled fonts. -->'
+    '<fontconfig>'
+    '  <include ignore_missing="yes">/etc/fonts/fonts.conf</include>'
+    ('  <dir prefix="relative">{0}</dir>' -f $relativeFontsRoot)
+    '  <cachedir prefix="xdg">fontconfig</cachedir>'
+    '</fontconfig>'
+  )
+  Set-Content -Path $fontConfigPath -Value $configText -Encoding ascii
+  Write-GpAppImageLogLine -LogPath $LogPath -Message ("Generated fonts.conf: {0}" -f $fontConfigPath)
+
+  return @($notices.ToArray())
+}
+
 function Write-GpAppImageAppRun {
   param(
     [Parameter(Mandatory = $true)]
@@ -1558,8 +1665,9 @@ function Prepare-GpAppDir {
   $desktopEntry = Write-GpAppImageDesktopEntry -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -MimeEntries $mimeEntries -LogPath $LogPath
   $iconAssets = Copy-GpAppImageIconAssets -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
   $gnustepConfig = Write-GpAppImageGnustepConfig -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
+  $fontNotices = @(Write-GpAppImageBundledFonts -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath)
   $appRunPath = Write-GpAppImageAppRun -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
-  $noticeReport = Write-GpAppImageNoticeReport -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
+  $noticeReport = Write-GpAppImageNoticeReport -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath -AdditionalEntries $fontNotices
   $metadataRoot = Ensure-GpDirectory -Path (Join-Path (Join-Path $WorkPaths.AppDirRoot "usr") ($Config.MetadataRootRelative -replace "/", [System.IO.Path]::DirectorySeparatorChar))
   $updateRuntimeConfigPath = Write-GpUpdateRuntimeConfig -Context $Context -Backend "appimage" -MetadataRoot $metadataRoot
   if (-not [string]::IsNullOrWhiteSpace($updateRuntimeConfigPath)) {

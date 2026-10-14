@@ -87,6 +87,16 @@ relocatable `GNUstep.conf` into the AppDir and `AppRun` points
 limited to some desktops, such as `GNOME`) go into a `GlobalDefaults.plist`
 beside it, below the user's own defaults. See `docs/manifest.md`.
 
+## Fonts
+`gnustep-back` falls back to DejaVu Sans when a requested font isn't installed,
+and not every distribution has it: Fedora installs Cantarell and Noto, and a
+GNUstep app there draws no text and maps no window. List the fonts to carry in
+`backends.appimage.fonts.bundle`, each with its license file. The backend copies
+them into the AppDir, adds the license to the notice report, and writes a
+`fonts.conf` that includes the host's configuration first and only then adds the
+bundled fonts, so on hosts that have their own fonts nothing changes. See
+`docs/manifest.md`.
+
 Check the result on a host without GNUstep: the reusable workflow's
 `appimage-clean-smoke-image` input launches the AppImage in such a container.
 
