@@ -281,7 +281,7 @@ Describe "Theme input contract" {
 
       Assert-GpEqual -Actual @($result.Themes.Name) -Expected @("WinUITheme") -Message "Dry-run provisioning should report the active theme input."
       Assert-GpMatch -Actual $logText -Pattern "REPO\s+https://example\.invalid/WinUITheme\.git" -Message "Provisioning logs should include the theme source."
-      Assert-GpMatch -Actual $logText -Pattern "BUILD\s+make clean; make; make install GNUSTEP_INSTALLATION_DOMAIN=USER" -Message "Provisioning logs should include the default build/install command."
+      Assert-GpMatch -Actual $logText -Pattern 'BUILD\s+make clean; make; make install GNUSTEP_INSTALLATION_DOMAIN=USER GNUSTEP_HOME="\$GNUSTEP_HOME"' -Message "Provisioning logs should include the default build/install command."
     } finally {
       if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
         Remove-Item -Force $manifestPath
@@ -613,10 +613,9 @@ Describe "Theme input contract" {
     }
   }
 
-  It "fails required AppImage theme inputs with an explicit unsupported-backend diagnostic" {
+  It "plans AppImage theme input provisioning" {
     $manifestPath = $null
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-appimage-" + [guid]::NewGuid().ToString("N"))
-    $threw = $false
 
     try {
       $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
@@ -638,16 +637,71 @@ Describe "Theme input contract" {
         )
       }
 
-      $context = Get-GpManifestContext -Path $manifestPath
-      try {
-        Invoke-GpThemeProvisioning -Context $context -Backend "appimage" -DryRun | Out-Null
-      } catch {
-        $threw = $true
-        Assert-GpMatch -Actual $_.Exception.Message -Pattern "Theme input provisioning for AppImage is not implemented yet" -Message "Required AppImage theme inputs should fail with an explicit support-boundary diagnostic."
+      $context = Get-GpManifestContext -Path $manifestPath -Backend "appimage"
+      $result = Invoke-GpThemeProvisioning -Context $context -Backend "appimage" -DryRun
+      Assert-GpEqual -Actual @($result.Themes.Name) -Expected @("Adwaita") -Message "A required Linux theme input should be planned for the AppImage."
+      Assert-GpMatch -Actual (Get-Content -Raw -Path $result.LogPath) -Pattern 'BUILD\s+make clean; make; make install GNUSTEP_INSTALLATION_DOMAIN=USER GNUSTEP_HOME="\$env:GNUSTEP_HOME"' -Message "The build should install into the provisioning home, named for the pipeline's pwsh shell."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
+  It "builds an AppImage theme input with gnustep-make and stages it in the bundled system domain" {
+    if ($IsWindows -or -not (Get-Command gnustep-config -ErrorAction SilentlyContinue) -or -not (Get-Command make -ErrorAction SilentlyContinue)) {
+      Set-ItResult -Skipped -Because "it needs a Linux GNUstep toolchain (gnustep-config and make)"
+      return
+    }
+    & gnustep-config --gui-libs *> $null
+    if ($LASTEXITCODE -ne 0) {
+      Set-ItResult -Skipped -Because "it needs gnustep-gui to build a theme"
+      return
+    }
+
+    $manifestPath = $null
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-appimage-build-" + [guid]::NewGuid().ToString("N"))
+    $userTheme = Join-Path ([Environment]::GetFolderPath("UserProfile")) "GNUstep/Library/Themes/GpFixtureTheme.theme"
+    $userThemeBefore = Test-Path $userTheme
+
+    try {
+      # Built in a copy, so the repository's fixture stays clean.
+      $workspace = Join-Path $tempRoot "GpFixtureTheme"
+      Copy-Item -Recurse -Path (Join-Path $script:repoRoot "tests/fixtures/themes/GpFixtureTheme") -Destination $workspace
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath (Join-Path $script:repoRoot "examples/sample-linux/package.manifest.json") -Customize {
+        param($manifest)
+        $manifest.Remove("packagedDefaults")
+        $manifest["payload"]["stageRoot"] = (Join-Path $tempRoot "stage")
+        foreach ($key in @("root", "packageRoot", "logRoot", "tempRoot", "validationRoot")) {
+          $manifest["outputs"][$key] = (Join-Path $tempRoot ("dist-" + $key))
+        }
+        $manifest["backends"]["appimage"]["gnustepConfig"] = @{ systemRoot = "runtime/System" }
+        $manifest["themeInputs"] = @(
+          @{
+            name = "GpFixtureTheme"
+            workspacePath = $workspace
+            platforms = @("linux")
+            required = $true
+          }
+        )
       }
 
-      Assert-GpTrue -Condition $threw -Message "Required AppImage theme input provisioning should fail until Phase 16M implements Linux support."
+      $context = Get-GpManifestContext -Path $manifestPath -Backend "appimage"
+      $result = Invoke-GpThemeProvisioning -Context $context -Backend "appimage"
+      $staged = Join-Path $tempRoot "stage/runtime/System/Library/Themes/GpFixtureTheme.theme"
+
+      Assert-GpEqual -Actual $result.Themes[0].StagedPath -Expected $staged -Message "The theme should be staged in the system domain of the AppImage's GNUstep.conf."
+      Assert-GpTrue -Condition (Test-Path (Join-Path $staged "GpFixtureTheme")) -Message "The staged theme should contain the built bundle binary."
+      Assert-GpTrue -Condition (Test-Path (Join-Path $staged "Resources/Info-gnustep.plist")) -Message "The staged theme should contain its Info-gnustep.plist."
+      Assert-GpTrue -Condition (Test-Path $result.ReportPath) -Message "Provisioning should write the theme payload report."
+      Assert-GpEqual -Actual (Test-Path $userTheme) -Expected $userThemeBefore -Message "Provisioning must not install the theme into the build user's ~/GNUstep."
     } finally {
+      if (-not $userThemeBefore -and (Test-Path $userTheme)) {
+        Remove-Item -Recurse -Force $userTheme
+      }
       if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
         Remove-Item -Force $manifestPath
       }
