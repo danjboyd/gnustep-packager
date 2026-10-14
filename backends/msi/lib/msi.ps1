@@ -1434,8 +1434,7 @@ function Get-GpMsiAppDomainDefaults {
   }
 
   if ($null -ne $packagedDefaults.AppDomain) {
-    $appDomainEntries = if ($null -ne $packagedDefaults.AppDomain) { @($packagedDefaults.AppDomain.Entries) } else { @() }
-  foreach ($entry in $appDomainEntries) {
+    foreach ($entry in @($packagedDefaults.AppDomain.Entries)) {
       $entries.Add([pscustomobject]@{
         Key = [string]$entry.Key
         Type = [string]$entry.Type
