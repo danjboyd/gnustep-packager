@@ -115,6 +115,27 @@ Describe "AppImage backend" {
       Assert-GpTrue -Condition (Test-Path $script:packageResult.DiagnosticsPath) -Message "AppImage diagnostics sidecar should be written."
     }
 
+    It "writes a provenance record that is safe to publish" {
+      $provenancePath = $script:packageResult.ProvenancePath
+      Assert-GpTrue -Condition (Test-Path $provenancePath) -Message "A provenance sidecar should be written beside the AppImage."
+      Assert-GpMatch -Actual $provenancePath -Pattern "SampleGNUstepLinuxApp-0\.1\.0-x86_64\.provenance\.json$" -Message "The provenance sidecar should be named after the artifact."
+
+      $text = Get-Content -Raw -Path $provenancePath
+      $provenance = Get-GpJsonFile -Path $provenancePath
+      Assert-GpEqual -Actual $provenance["artifact"]["name"] -Expected "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage" -Message "The provenance should name the artifact, not its path."
+      Assert-GpEqual -Actual $provenance["artifact"]["sha256"] -Expected (Get-GpFileSha256 -Path $script:packageResult.ArtifactPath) -Message "The provenance should carry the artifact's SHA-256."
+      Assert-GpEqual -Actual $provenance["package"]["version"] -Expected "0.1.0" -Message "The provenance should carry the package version."
+      $entry = @($provenance["files"] | Where-Object { $_["role"] -eq "entry" })
+      Assert-GpEqual -Actual $entry.Count -Expected 1 -Message "The provenance should record the launch entry."
+      Assert-GpEqual -Actual $entry[0]["path"] -Expected "usr/app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp" -Message "File paths should be relative to the AppDir."
+      foreach ($privatePath in @($script:repoRoot, $script:packageResult.AppDirRoot, [System.IO.Path]::GetTempPath().TrimEnd("/"))) {
+        Assert-GpTrue -Condition (-not $text.Contains($privatePath)) -Message "The provenance should not contain the build machine path $privatePath."
+      }
+      if (Get-Command git -ErrorAction SilentlyContinue) {
+        Assert-GpTrue -Condition ($provenance["packager"]["commit"] -match "^[0-9a-f]{40}$") -Message "The provenance should record the packager commit."
+      }
+    }
+
     It "builds an AppDir with launcher, desktop file, icon, and MIME metadata" {
       Assert-GpTrue -Condition (Test-Path $script:packageResult.AppRunPath) -Message "AppRun should be generated."
       Assert-GpTrue -Condition (Test-Path $script:packageResult.DesktopEntryPath) -Message "Desktop entry should be generated."

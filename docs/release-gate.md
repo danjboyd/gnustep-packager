@@ -95,6 +95,7 @@ Windows MSI hosted baseline:
 - MSI artifact
 - portable ZIP artifact
 - `<artifact-base>.metadata.json`
+- `<artifact-base>.provenance.json`
 - `<artifact-base>.diagnostics.txt`
 - `metadata/THIRD-PARTY-NOTICES.txt` inside the transformed install tree
 
@@ -114,6 +115,8 @@ Run:
 Confirm these outputs exist:
 - AppImage artifact
 - `<artifact-base>.metadata.json`
+- `<artifact-base>.provenance.json`, listing the bundled GNUstep libraries with
+  their ELF build IDs
 - `<artifact-base>.diagnostics.txt`
 - `usr/metadata/THIRD-PARTY-NOTICES.txt` inside the extracted AppDir
 

@@ -2190,6 +2190,228 @@ function Get-GpPackageDisplayName {
   return [string]$package["name"]
 }
 
+# The GNU build ID of an ELF file, as lowercase hex, or $null when the file
+# is not ELF or has none. Read from the PT_NOTE segments, so it needs no
+# readelf on the host.
+function Get-GpElfBuildId {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $stream = $null
+  try {
+    $stream = [System.IO.File]::OpenRead($Path)
+    $reader = [System.IO.BinaryReader]::new($stream)
+    $ident = $reader.ReadBytes(16)
+    if ($ident.Length -lt 16 -or $ident[0] -ne 0x7F -or $ident[1] -ne 0x45 -or $ident[2] -ne 0x4C -or $ident[3] -ne 0x46) {
+      return $null
+    }
+    $is64 = $ident[4] -eq 2
+    $bigEndian = $ident[5] -eq 2
+
+    $readAt = {
+      param([long]$Offset, [int]$Size)
+      $stream.Position = $Offset
+      $bytes = $reader.ReadBytes($Size)
+      if ($bytes.Length -ne $Size) {
+        throw "truncated"
+      }
+      if ($bigEndian) {
+        [array]::Reverse($bytes)
+      }
+      switch ($Size) {
+        2 { return [long][System.BitConverter]::ToUInt16($bytes, 0) }
+        4 { return [long][System.BitConverter]::ToUInt32($bytes, 0) }
+        8 { return [long][System.BitConverter]::ToUInt64($bytes, 0) }
+      }
+    }
+
+    $wordSize = if ($is64) { 8 } else { 4 }
+    $programHeaderOffset = & $readAt $(if ($is64) { 0x20 } else { 0x1C }) $wordSize
+    $programHeaderSize = & $readAt $(if ($is64) { 0x36 } else { 0x2A }) 2
+    $programHeaderCount = & $readAt $(if ($is64) { 0x38 } else { 0x2C }) 2
+
+    for ($index = 0; $index -lt $programHeaderCount; $index++) {
+      $header = $programHeaderOffset + ($index * $programHeaderSize)
+      if ((& $readAt $header 4) -ne 4) {
+        continue
+      }
+      $segmentOffset = & $readAt ($header + $(if ($is64) { 0x08 } else { 0x04 })) $wordSize
+      $segmentSize = & $readAt ($header + $(if ($is64) { 0x20 } else { 0x10 })) $wordSize
+      $segmentAlign = & $readAt ($header + $(if ($is64) { 0x30 } else { 0x1C })) $wordSize
+      $noteAlign = if ($segmentAlign -eq 8) { 8 } else { 4 }
+
+      $position = $segmentOffset
+      $end = $segmentOffset + $segmentSize
+      while ($position + 12 -le $end) {
+        $nameSize = & $readAt $position 4
+        $descriptorSize = & $readAt ($position + 4) 4
+        $noteType = & $readAt ($position + 8) 4
+        $nameStart = $position + 12
+        $descriptorStart = $nameStart + [long]([math]::Ceiling($nameSize / $noteAlign) * $noteAlign)
+        if ($noteType -eq 3 -and $nameSize -eq 4) {
+          $stream.Position = $nameStart
+          $name = $reader.ReadBytes(4)
+          if ($name[0] -eq 0x47 -and $name[1] -eq 0x4E -and $name[2] -eq 0x55 -and $name[3] -eq 0) {
+            $stream.Position = $descriptorStart
+            return (-join ($reader.ReadBytes([int]$descriptorSize) | ForEach-Object { $_.ToString("x2") }))
+          }
+        }
+        $position = $descriptorStart + [long]([math]::Ceiling($descriptorSize / $noteAlign) * $noteAlign)
+      }
+    }
+  } catch {
+    return $null
+  } finally {
+    if ($null -ne $stream) {
+      $stream.Dispose()
+    }
+  }
+
+  return $null
+}
+
+function Get-GpProvenanceSettings {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context
+  )
+
+  $provenance = if ($Context.Manifest.Contains("provenance") -and ($Context.Manifest["provenance"] -is [System.Collections.IDictionary])) {
+    $Context.Manifest["provenance"]
+  } else {
+    @{}
+  }
+
+  return [pscustomobject]@{
+    Enabled = -not ($provenance.Contains("enabled") -and -not [bool]$provenance["enabled"])
+    Libraries = [string[]]@(@($provenance["libraries"]) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+  }
+}
+
+# The git commit a directory is checked out at, and whether its tracked
+# files have changes; $null outside a git checkout or without git.
+function Get-GpSourceRevision {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    return $null
+  }
+
+  $commit = & git -C $Path rev-parse HEAD 2>$null
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$commit)) {
+    return $null
+  }
+  $changes = & git -C $Path status --porcelain --untracked-files=no 2>$null
+
+  return [ordered]@{
+    commit = ([string]$commit).Trim()
+    dirty = (@($changes) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0
+  }
+}
+
+# The files a release records: the launch entry and every library whose file
+# name matches provenance.libraries, with paths relative to the payload root
+# (the AppDir, the MSI install tree) and, for ELF files, their build ID.
+# Symbolic links are left out; the files they point to are listed.
+function Get-GpPayloadProvenanceFiles {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PayloadRoot,
+    [string[]]$LibraryPatterns = @(),
+    [string]$EntryPath
+  )
+
+  $root = (Resolve-Path -LiteralPath $PayloadRoot).Path
+  $files = [System.Collections.Generic.List[psobject]]::new()
+  $describe = {
+    param([System.IO.FileInfo]$File, [string]$Role)
+    $relativePath = [System.IO.Path]::GetRelativePath($root, $File.FullName) -replace "\\", "/"
+    [pscustomobject][ordered]@{
+      path = $relativePath
+      role = $Role
+      sizeBytes = $File.Length
+      sha256 = Get-GpFileSha256 -Path $File.FullName
+      elfBuildId = Get-GpElfBuildId -Path $File.FullName
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($EntryPath) -and (Test-Path -LiteralPath $EntryPath -PathType Leaf)) {
+    $files.Add((& $describe (Get-Item -LiteralPath $EntryPath) "entry")) | Out-Null
+  }
+
+  if (@($LibraryPatterns).Count -gt 0) {
+    $libraries = Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue |
+      Where-Object { -not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) } |
+      Where-Object {
+        $name = $_.Name
+        @($LibraryPatterns | Where-Object { $name -like $_ }).Count -gt 0
+      }
+    # Ordinal, so the order is the same on every host and culture.
+    $libraries = [System.IO.FileInfo[]]@($libraries)
+    [array]::Sort([string[]]@($libraries | ForEach-Object { $_.FullName }), $libraries, [System.StringComparer]::Ordinal)
+    foreach ($library in $libraries) {
+      if ($files.Count -gt 0 -and $files[0].role -eq "entry" -and $library.FullName -eq (Get-Item -LiteralPath $EntryPath).FullName) {
+        continue
+      }
+      $files.Add((& $describe $library "library")) | Out-Null
+    }
+  }
+
+  return @($files.ToArray())
+}
+
+# A record of what a release was built from that is safe to publish: no
+# absolute paths from the build machine. It sits beside the artifact as
+# <artifact-base>.provenance.json. Returns its path, or $null when
+# provenance.enabled is false.
+function Write-GpProvenanceDocument {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [string]$Backend,
+    [Parameter(Mandatory = $true)]
+    [string]$ArtifactPath,
+    [Parameter(Mandatory = $true)]
+    [string]$PayloadRoot,
+    [string]$EntryPath
+  )
+
+  $settings = Get-GpProvenanceSettings -Context $Context
+  if (-not $settings.Enabled) {
+    return $null
+  }
+
+  $package = $Context.Manifest["package"]
+  $artifact = Get-Item -LiteralPath $ArtifactPath
+  $document = [ordered]@{
+    formatVersion = 1
+    backend = $Backend
+    package = [ordered]@{
+      id = [string]$package["id"]
+      name = [string]$package["name"]
+      version = [string]$package["version"]
+    }
+    artifact = [ordered]@{
+      name = $artifact.Name
+      sizeBytes = $artifact.Length
+      sha256 = Get-GpFileSha256 -Path $artifact.FullName
+    }
+    source = Get-GpSourceRevision -Path $Context.ManifestRoot
+    packager = Get-GpSourceRevision -Path $Context.ToolRoot
+    files = @(Get-GpPayloadProvenanceFiles -PayloadRoot $PayloadRoot -LibraryPatterns $settings.Libraries -EntryPath $EntryPath)
+  }
+
+  $path = Get-GpArtifactSidecarPath -ArtifactPath $ArtifactPath -Suffix "provenance.json"
+  $document | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding utf8
+  return $path
+}
+
 function Get-GpArtifactSidecarPath {
   param(
     [Parameter(Mandatory = $true)]

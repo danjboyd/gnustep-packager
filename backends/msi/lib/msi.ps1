@@ -2067,6 +2067,10 @@ function Invoke-GpMsiPackage {
     }
   }
   $metadataPath = Write-GpMsiArtifactMetadata -Context $Context -Config $config -WorkPaths $workPaths -WixTools $wixTools -InstallTree $installTree -Artifacts $artifacts -NoticeReport ([pscustomobject]@{ ReportPath = $installTree.NoticeReportPath; Entries = @($installTree.RuntimeNotices) }) -UpdateFeedPath $updateFeedPath -LogPath $LogPath
+  $provenancePath = Write-GpProvenanceDocument -Context $Context -Backend "msi" -ArtifactPath $artifacts.ArtifactPath -PayloadRoot $installTree.InstallRoot -EntryPath (Join-Path $installTree.InstallRoot (Get-GpLaunchContract -Context $Context).EntryRelativePath)
+  if (-not [string]::IsNullOrWhiteSpace($provenancePath)) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Wrote provenance sidecar: {0}" -f $provenancePath)
+  }
   $diagnosticsPath = Write-GpMsiDiagnosticsSummary -Context $Context -Config $config -InstallTree $installTree -MetadataPath $metadataPath -LogPath $LogPath
 
   return [pscustomobject]@{
@@ -2076,6 +2080,7 @@ function Invoke-GpMsiPackage {
     ArtifactPath = $artifacts.ArtifactPath
     PortableArtifactPath = $artifacts.PortableArtifactPath
     MetadataPath = $metadataPath
+    ProvenancePath = $provenancePath
     UpdateFeedPath = $updateFeedPath
     DiagnosticsPath = $diagnosticsPath
     InstallRoot = $installTree.InstallRoot

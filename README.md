@@ -107,6 +107,9 @@ hardening pass:
 
 - manifest-level compliance notice entries plus generated runtime notice reports
 - package-side artifact provenance and diagnostics sidecars
+- a publishable `<artifact-base>.provenance.json` per AppImage and MSI: the
+  artifact hash, source and packager commits, and the bundled GNUstep
+  libraries with their ELF build IDs, without build-machine paths
 - built-in manifest profiles for common GNUstep GUI app shapes
 - backend-specific runtime and transform docs for AppImage
 - a real AppImage backend that emits AppDir-based `.AppImage` artifacts

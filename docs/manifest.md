@@ -559,6 +559,42 @@ default):
 `notarization.keychainProfileEnvVar` names an environment variable; the
 manifest never holds notary credentials.
 
+## `provenance`
+What each release was built from, in a sidecar that is safe to publish:
+`<artifact-base>.provenance.json`, beside the AppImage or MSI. It has no
+absolute paths from the build machine, unlike `<artifact-base>.metadata.json`.
+
+Fields:
+- `enabled`
+  `true` by default.
+- `libraries`
+  File-name patterns (`*` and `?`, matched without regard to case) for the
+  libraries to record. The default covers the GNUstep runtime:
+  `libgnustep-*` (base, gui, back and its bundle), `libobjc*`, `libdispatch*`
+  and `dispatch.dll`. Setting it replaces the default list.
+
+The sidecar records:
+- the package id, name and version, and the backend
+- the artifact's file name, size and SHA-256
+- `source` and `packager`: the git commit of the manifest's checkout and of the
+  packager, with `dirty` when tracked files had changes (null outside git)
+- `files`: the launch entry (`role: entry`) and each matching library
+  (`role: library`), with its path relative to the AppDir or MSI install tree,
+  size, SHA-256 and, for an ELF file, its GNU build ID (`elfBuildId`). Symbolic
+  links are left out; the files they point to are listed.
+
+The build IDs match `readelf -n` and the debug-symbol servers that index by
+build ID, so a crash report or a user's copy can be traced to the libs-base,
+libs-gui and libs-back builds a release shipped.
+
+```json
+{
+  "provenance": {
+    "libraries": ["libgnustep-*", "libobjc*", "libdispatch*", "libcmark*"]
+  }
+}
+```
+
 ## `platformOverrides`
 Optional per-platform overlays keyed by `windows`, `linux` or `macos`. The
 entry for the target platform merges over the manifest (objects merge, arrays

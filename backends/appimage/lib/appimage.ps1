@@ -2113,6 +2113,10 @@ function Invoke-GpAppImagePackage {
     }
   }
   $metadataPath = Write-GpAppImageArtifactMetadata -Context $Context -Config $config -WorkPaths $workPaths -AppDir $appDir -Artifacts $artifacts -ToolPath $toolPath -UpdateFeedPath $updateFeedPath -LogPath $LogPath
+  $provenancePath = Write-GpProvenanceDocument -Context $Context -Backend "appimage" -ArtifactPath $artifacts.ArtifactPath -PayloadRoot $appDir.AppDirRoot -EntryPath (Join-Path (Join-Path $appDir.AppDirRoot "usr") $launch.EntryRelativePath)
+  if (-not [string]::IsNullOrWhiteSpace($provenancePath)) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("Wrote provenance sidecar: {0}" -f $provenancePath)
+  }
   $diagnosticsPath = Write-GpAppImageDiagnosticsSummary -Context $Context -Config $config -AppDir $appDir -MetadataPath $metadataPath -LogPath $LogPath
 
   return [pscustomobject]@{
@@ -2121,6 +2125,7 @@ function Invoke-GpAppImagePackage {
     ArtifactPath = $artifacts.ArtifactPath
     ZsyncArtifactPath = $artifacts.ZsyncArtifactPath
     MetadataPath = $metadataPath
+    ProvenancePath = $provenancePath
     UpdateFeedPath = $updateFeedPath
     DiagnosticsPath = $diagnosticsPath
     AppDirRoot = $appDir.AppDirRoot

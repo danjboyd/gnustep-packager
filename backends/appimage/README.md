@@ -51,6 +51,10 @@ The package step emits:
 - `<name>-<version>-x86_64.AppImage.zsync` when the active `appimagetool` build
   emits a zsync sidecar for update-enabled packaging
 - `<artifact-base>.metadata.json`
+- `<artifact-base>.provenance.json`: what the release was built from (package,
+  artifact hash, source and packager commits, GNUstep libraries with their ELF
+  build IDs), with no build-machine paths, so it can be published with the
+  release; see `provenance` in `docs/manifest.md`
 - `<artifact-base>.update-feed.json` when updates are enabled
 - `<artifact-base>.diagnostics.txt`
 

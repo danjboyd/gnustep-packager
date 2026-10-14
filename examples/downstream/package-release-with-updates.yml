@@ -63,8 +63,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets site/updates/windows site/updates/linux
-          cp dist/windows/* release-assets/
-          cp dist/linux/* release-assets/
+          # The packages and their .provenance.json; .metadata.json and
+          # .diagnostics.txt hold build-machine paths and stay in the
+          # workflow artifacts.
+          for file in dist/windows/* dist/linux/*; do
+            case "$file" in
+              *.metadata.json|*.diagnostics.txt) ;;
+              *) cp "$file" release-assets/ ;;
+            esac
+          done
           cp dist/windows/*.update-feed.json site/updates/windows/stable.json
           cp dist/linux/*.update-feed.json site/updates/linux/stable.json
 
