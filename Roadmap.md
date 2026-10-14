@@ -1566,6 +1566,65 @@ as ignored settings instead.
   - `dmg` support in the reusable `package-gnustep-app.yml` workflow
   - optional volume icon and update-feed sidecars for DMG artifacts
 
+## Phase 18: Release Payload Integrity
+Goal: catch a payload that only works on the build machine, or that pulled
+in far more than intended, before it ships, and record what each release
+was built from.
+Status: 18A in progress; 18B and 18C next; 18D waits on gnustep-cli-new.
+
+Prompted by LinDirStat v0.1.0: its AppImage aborted on first launch because
+`make_services` wasn't bundled, yet `validate -RunSmoke` passed, since the
+smoke launch inherited a `PATH` with the build host's GNUstep tools and the
+app sat behind a modal alert. Building against distro GNUstep packages also
+grew the AppImage from 29 MB to 74 MB without any check noticing.
+
+Execution order: 18A, 18B, 18C, then 18D.
+
+- `Phase 18A`: Clean-environment smoke launch
+  Deliverables:
+  - AppImage smoke launch under `env -i` with a minimal `PATH`, a fresh
+    `HOME`, XDG and temporary directories, no session bus, and only the
+    display passed through
+  - failure on output showing a missing runtime component or an exception,
+    even when the app keeps running
+  - failure on a GNUstep alert panel on screen after startup (the
+    uncaught-exception "Critical Error" panel logs nothing), with an opt-out
+  - the same output and alert checks in `scripts/ci/appimage-clean-smoke.sh`
+  Exit criteria:
+  - a payload that needs a GNUstep tool from the build host fails
+    `validate -RunSmoke`
+
+- `Phase 18B`: Payload library deny-list and size budget
+  Deliverables:
+  - backend-neutral manifest settings that forbid library name patterns in
+    the runtime closure and set size budgets for the payload and artifact
+  - `validate` failures that name the offending libraries or the overage
+  Exit criteria:
+  - pulling FFmpeg or ImageMagick into a payload fails validation with a
+    clear message
+
+- `Phase 18C`: Publishable provenance metadata
+  Deliverables:
+  - ELF build IDs of the bundled GNUstep libraries in the release metadata
+  - release metadata without absolute build-machine paths, safe to publish
+  Exit criteria:
+  - anyone can tell which libs-base, libs-gui and libs-back builds a release
+    shipped
+
+- `Phase 18D`: Toolchain pinning
+  Deliverables:
+  - a manifest field naming the toolchain a release must be built with (for
+    example a gnustep-cli-new lock and its hash), installed by CI into a
+    private prefix
+  - `validate` checks that the staged GNUstep libraries match that
+    toolchain's recorded provenance
+  Exit criteria:
+  - a payload built with a different GNUstep than the pinned one fails
+    validation
+  Dependency:
+  - gnustep-cli-new support for custom prefixes, lock patches and
+    configure arguments, and a provenance file
+
 ## Suggested Early Execution Order
 Prioritize these subphases first:
 

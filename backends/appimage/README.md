@@ -63,7 +63,12 @@ Backend validation checks:
 - required AppDir structure
 - desktop entry rendering
 - optional `desktop-file-validate` output when available
-- smoke launch through the packaged AppImage
+- smoke launch through the packaged AppImage, in a clean environment
+  (`env -i`, minimal `PATH`, fresh `HOME` and XDG directories, only the
+  display passed through). It fails on output that shows a missing runtime
+  component or an exception, and on a GNUstep alert panel (such as the
+  uncaught-exception "Critical Error" panel) still on screen after startup.
+  See `docs/manifest.md`.
 
 Supported smoke modes:
 

@@ -34,7 +34,18 @@ if [ -n "$marker_path" ]; then
     printf 'argc=%s\n' "$#"
     printf 'argv0=%s\n' "$0"
     printf 'argv1=%s\n' "${1:-}"
+    printf 'path=%s\n' "${PATH:-}"
+    printf 'home=%s\n' "${HOME:-}"
+    printf 'gnustep_home=%s\n' "${GNUSTEP_HOME:-}"
+    printf 'wayland=%s\n' "${WAYLAND_DISPLAY:-}"
+    printf 'dbus=%s\n' "${DBUS_SESSION_BUS_ADDRESS:-}"
   } >"$marker_path"
+fi
+
+# Lets a test make the fixture report a startup failure and keep going, as
+# GNUstep does when it logs an exception.
+if [ -n "${GP_FIXTURE_STDERR_LINE:-}" ]; then
+  printf '%s\n' "$GP_FIXTURE_STDERR_LINE" >&2
 fi
 
 if [ -n "${GP_FIXTURE_EXPECT_ARG0:-}" ] && [ "${1:-}" != "$GP_FIXTURE_EXPECT_ARG0" ]; then

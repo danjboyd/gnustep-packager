@@ -396,6 +396,13 @@ Describe "AppImage backend" {
         Assert-GpEqual -Actual $result.SmokeMode -Expected "marker-file" -Message "Marker-file smoke validation should report its configured mode."
         Assert-GpTrue -Condition (Test-Path $result.SmokeMarkerPath) -Message "Marker-file smoke validation should create the requested marker."
         Assert-GpMatch -Actual $markerText -Pattern "fixture=sample-linux" -Message "Marker-file smoke validation should preserve the fixture marker behavior."
+        Assert-GpMatch -Actual $markerText -Pattern "(?m)^path=(\S*/usr/runtime/bin:)?/usr/bin:/bin$" -Message "The smoke launch should get a minimal PATH (after AppRun's own runtime/bin), not the caller's."
+        Assert-GpMatch -Actual $markerText -Pattern "(?m)^home=.*smoke-env/home$" -Message "The smoke launch should get a fresh HOME under the validation output."
+        Assert-GpMatch -Actual $markerText -Pattern "(?m)^dbus=unix:path=.*no-session-bus$" -Message "The smoke launch should not reach the caller's session bus."
+        Assert-GpMatch -Actual $markerText -Pattern "(?m)^gnustep_home=.*smoke-env/home$" -Message "The smoke launch should give GNUstep a fresh home too: gnustep-base ignores HOME."
+        if (-not [string]::IsNullOrWhiteSpace($env:DISPLAY)) {
+          Assert-GpMatch -Actual $markerText -Pattern "(?m)^wayland=$" -Message "With an X display, the smoke launch should not get the caller's WAYLAND_DISPLAY."
+        }
       } finally {
         if (Test-Path $manifestPath) {
           Remove-Item -Force $manifestPath
@@ -452,6 +459,94 @@ Describe "AppImage backend" {
         if (Test-Path $manifestPath) {
           Remove-Item -Force $manifestPath
         }
+      }
+    }
+  }
+
+  Context "Smoke failure detection" {
+    It "fails the smoke launch when the app logs a missing GNUstep tool and keeps running" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["smoke"] = @{
+          mode = "launch-only"
+          environment = @{
+            GP_FIXTURE_STDERR_LINE = "Unable to find the make_services tool."
+          }
+        }
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $validationPath = Join-Path $script:packageConfig.OutputPaths.ValidationRoot "pester-appimage-validate-tool-missing.log"
+        $message = $null
+        try {
+          Invoke-GpAppImageValidation -Context $context -RunSmoke -LogPath $validationPath | Out-Null
+        } catch {
+          $message = $_.Exception.Message
+        }
+
+        Assert-GpTrue -Condition ($null -ne $message) -Message "Smoke validation should fail when the app logs a missing GNUstep tool."
+        Assert-GpMatch -Actual $message -Pattern "could not find a runtime component: Unable to find the make_services tool" -Message "The failure should name the reason and the logged line."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
+    }
+
+    It "recognizes GNUstep exception and loader failures in smoke output" {
+      foreach ($line in @(
+        "*** NSTimer ignoring exception 'NSInternalInconsistencyException' (reason 'x') raised during posting of timer",
+        "Problem posting <GSNotification: 0x1> Name: NSApplicationDidFinishLaunchingNotification: <NSException: 0x2> NAME:NSInternalInconsistencyException",
+        "Terminating app due to uncaught exception NSRangeException",
+        "./app: error while loading shared libraries: libgnustep-gui.so.0.32: cannot open shared object file",
+        "Unable to find backend back-0_31"
+      )) {
+        Assert-GpTrue -Condition ($null -ne (Get-GpAppImageSmokeFailure -Output ("ok`n" + $line + "`nmore"))) -Message "Smoke output should count as a failure: $line"
+      }
+      Assert-GpTrue -Condition ($null -eq (Get-GpAppImageSmokeFailure -Output "Sample GNUstep Linux fixture running`nFailed to get _NET_WORKAREA")) -Message "Ordinary GNUstep noise should not fail the smoke launch."
+    }
+
+    It "stops the smoke process tree and detached processes that carry the smoke's GNUstep home" {
+      $gnustepHome = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-smoke-stop-" + [guid]::NewGuid().ToString("N"))
+      # A parent with a child, and a detached process (as gdnc and gpbs are)
+      # outside the tree that only shares the smoke environment.
+      $tree = Start-Process -FilePath "sh" -ArgumentList @("-c", '"sleep 300 & sleep 300"') -PassThru
+      $detached = Start-Process -FilePath "setsid" -ArgumentList @("env", "GNUSTEP_HOME=$gnustepHome", "sleep", "300") -PassThru
+      $other = Start-Process -FilePath "env" -ArgumentList @("GNUSTEP_HOME=$gnustepHome-other", "sleep", "300") -PassThru
+      try {
+        Start-Sleep -Milliseconds 500
+        $treeIds = @(Get-GpAppImageSmokeProcessIds -RootProcessId $tree.Id)
+        Assert-GpTrue -Condition ($treeIds.Count -ge 3) -Message "The tree should include the shell and both sleeps. Found: $($treeIds -join ',')"
+
+        $survivors = @(Stop-GpAppImageSmokeProcess -Process $tree -GnustepHome $gnustepHome)
+        Assert-GpEqual -Actual $survivors.Count -Expected 0 -Message "Nothing from the smoke launch should survive."
+        foreach ($id in $treeIds) {
+          Assert-GpTrue -Condition (-not (Test-Path "/proc/$id")) -Message "Process $id from the smoke tree should be gone."
+        }
+        Assert-GpTrue -Condition (-not (Test-Path "/proc/$($detached.Id)")) -Message "A detached process with the smoke's GNUstep home should be gone."
+        Assert-GpTrue -Condition (Test-Path "/proc/$($other.Id)") -Message "A process with a different GNUstep home should be left alone."
+      } finally {
+        foreach ($process in @($tree, $detached, $other)) {
+          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        }
+        & env pkill -f "^sleep 300$" 2>$null
+      }
+    }
+
+    It "reports no alert panels as an empty list, not as a skipped check" {
+      if ([string]::IsNullOrWhiteSpace($env:DISPLAY) -or -not (Get-Command xwininfo -ErrorAction SilentlyContinue)) {
+        Set-ItResult -Skipped -Because "it needs an X display and xwininfo"
+        return
+      }
+
+      $process = Start-Process -FilePath "sleep" -ArgumentList @("5") -PassThru
+      try {
+        $alerts = Get-GpAppImageSmokeAlertWindows -Process $process -Environment @{ DISPLAY = $env:DISPLAY }
+        Assert-GpTrue -Condition ($null -ne $alerts) -Message "A check that ran should return a list, even an empty one."
+        Assert-GpEqual -Actual @($alerts).Count -Expected 0 -Message "A process with no windows has no alert panels."
+      } finally {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
       }
     }
   }

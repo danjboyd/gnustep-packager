@@ -1153,6 +1153,9 @@
                 "startupSeconds": {
                   "type": "integer",
                   "minimum": 1
+                },
+                "allowStartupAlert": {
+                  "type": "boolean"
                 }
               },
               "allOf": [

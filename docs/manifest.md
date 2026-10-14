@@ -367,6 +367,7 @@ Important fields:
 - `smoke.environment`
 - `smoke.documentStageRelativePath`
 - `smoke.startupSeconds`
+- `smoke.allowStartupAlert`
 
 When `backends.appimage.enabled` is `true`, `iconRelativePath` must point to a
 staged `.png` asset.
@@ -384,6 +385,20 @@ Supported AppImage smoke modes:
 - `marker-file`
   Launch the packaged app with a marker-file compatibility argument and the
   same path exported as `GP_APPIMAGE_SMOKE_MARKER_PATH`.
+
+Every AppImage smoke launch starts from a clean environment (`env -i`):
+`PATH=/usr/bin:/bin`, a fresh `HOME`, XDG and temporary directories under
+the validation output, no session bus, and only `DISPLAY`, `XAUTHORITY` and
+`WAYLAND_DISPLAY` passed through. `smoke.environment` is added on top. So
+the app can't use a GNUstep tool, services cache or defaults from the build
+machine. The smoke launch fails when the app's output shows a missing runtime
+component or an exception (for example `Unable to find the make_services
+tool`, an uncaught exception, `error while loading shared libraries`), even
+if the app keeps running. When it is still running after `startupSeconds`
+and an X display and `xwininfo` are available, it also fails if the app has
+a GNUstep alert panel on screen: an uncaught exception shows a modal
+"Critical Error" panel and logs nothing. Set `smoke.allowStartupAlert` to
+`true` for an app that shows an alert at launch on purpose.
 
 AppImage GNUstep configuration (`gnustepConfig`):
 

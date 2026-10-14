@@ -11,9 +11,12 @@
 #   GP_CLEAN_SMOKE_ENV         extra NAME=value environment for the app (word-split)
 #   GP_CLEAN_SMOKE_PACKAGES    distribution packages to add first (word-split), for libraries the
 #                              AppImage leaves to the host on purpose, as a desktop install has
+#   GP_CLEAN_SMOKE_ALLOW_ALERT 1 when the app shows an alert at launch on purpose
 #
 # As with the launch-only smoke mode, the app passes when it is still running after the startup
-# window or has exited with status 0.
+# window or has exited with status 0. It fails when its output shows a missing runtime component
+# or an exception, or when a GNUstep alert panel is on screen at the end of the window: an
+# uncaught exception shows a modal "Critical Error" panel and logs nothing.
 #
 # The runner's own GNUstep (if any) hides a package that loads the build host's backend, tools or
 # themes instead of its own; this check doesn't. It needs Docker. The AppImage is extracted in the
@@ -28,6 +31,7 @@ SECONDS_UP="${GP_CLEAN_SMOKE_SECONDS:-10}"
 APP_ARGS="${GP_CLEAN_SMOKE_ARGS:-}"
 APP_ENV="${GP_CLEAN_SMOKE_ENV:-}"
 EXTRA_PACKAGES="${GP_CLEAN_SMOKE_PACKAGES:-}"
+ALLOW_ALERT="${GP_CLEAN_SMOKE_ALLOW_ALERT:-0}"
 
 [[ -f "${APPIMAGE}" ]] || { echo "appimage-clean-smoke: no AppImage at ${APPIMAGE}" >&2; exit 2; }
 command -v docker >/dev/null || { echo "appimage-clean-smoke: docker is needed" >&2; exit 2; }
@@ -42,16 +46,17 @@ echo "appimage-clean-smoke: ${APPIMAGE_NAME} on ${IMAGE} (XDG_CURRENT_DESKTOP=${
   -v "${APPIMAGE_DIR}:/package:ro" \
   -e APPIMAGE_NAME="${APPIMAGE_NAME}" -e DESKTOP="${DESKTOP}" -e SECONDS_UP="${SECONDS_UP}" \
   -e APP_ARGS="${APP_ARGS}" -e APP_ENV="${APP_ENV}" -e EXTRA_PACKAGES="${EXTRA_PACKAGES}" \
+  -e ALLOW_ALERT="${ALLOW_ALERT}" \
   "${IMAGE}" bash -s <<'EOF_CONTAINER'
 set -euo pipefail
 if command -v apt-get >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq >/dev/null
   # shellcheck disable=SC2086
-  apt-get install -y -qq --no-install-recommends xvfb xauth ${EXTRA_PACKAGES} >/dev/null
+  apt-get install -y -qq --no-install-recommends xvfb xauth x11-utils ${EXTRA_PACKAGES} >/dev/null
 elif command -v dnf >/dev/null; then
   # shellcheck disable=SC2086
-  dnf install -y -q xorg-x11-server-Xvfb shadow-utils util-linux ${EXTRA_PACKAGES} >/dev/null
+  dnf install -y -q xorg-x11-server-Xvfb xwininfo shadow-utils util-linux ${EXTRA_PACKAGES} >/dev/null
 else
   echo "appimage-clean-smoke: the image has neither apt-get nor dnf" >&2
   exit 2
@@ -85,7 +90,17 @@ su smoke -s /bin/bash -c '
       status=1
     fi
   fi
-  if grep -Eq "Unable to find (the )?(backend|gdnc|gpbs)|NSInternalInconsistencyException|version .GLIBC_[0-9.]+. not found|error while loading shared libraries" app.log; then
+  # Every GNUstep alert panel is titled " " (one space). Only the app runs on this display.
+  if [ "${ALLOW_ALERT}" != "1" ] && kill -0 "${pid}" 2>/dev/null; then
+    for window in $(DISPLAY=:42 xwininfo -root -tree | sed -n "s/^ *\(0x[0-9a-f]*\) \" \": .*/\1/p"); do
+      if DISPLAY=:42 xwininfo -id "${window}" | grep -q "Map State: IsViewable"; then
+        echo "appimage-clean-smoke: the app is showing a GNUstep alert panel (an uncaught exception shows a modal Critical Error panel); set GP_CLEAN_SMOKE_ALLOW_ALERT=1 if it is intended" >&2
+        status=1
+        break
+      fi
+    done
+  fi
+  if grep -Eq "Unable to find (the )?(backend|gdnc|gpbs|[^ ]+ tool)|[Uu]ncaught exception|ignoring exception|NSInternalInconsistencyException|version .GLIBC_[0-9.]+. not found|error while loading shared libraries" app.log; then
     echo "appimage-clean-smoke: the app reported a missing runtime component" >&2
     status=1
   fi
