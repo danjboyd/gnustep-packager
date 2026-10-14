@@ -300,11 +300,13 @@ Describe "AppImage backend" {
         Assert-GpTrue -Condition ($dirIndex -gt $includeIndex) -Message "fonts.conf should add the bundled fonts after the host's configuration. Actual: $configText"
         $appRunText = Get-Content -Raw -Path $result.AppRunPath
         Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export FONTCONFIG_FILE="$RUNTIME_ROOT/etc/fonts/fonts.conf"')) -Message "AppRun should point fontconfig at the generated file."
+        Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export FONTCONFIG_PATH="/etc/fonts"')) -Message "With generated fonts.conf, AppRun should resolve the host's relative conf.d include against /etc/fonts."
 
         if ($hostFont.Count -gt 0 -and (Get-Command fc-list -ErrorAction SilentlyContinue)) {
           $cacheHome = Join-Path $fontSourceRoot "cache"
           $listing = Invoke-GpAppImageCapturedTool -FilePath "fc-list" -ArgumentList @(":", "file") -Environment @{
             FONTCONFIG_FILE = $fontConfigPath
+            FONTCONFIG_PATH = "/etc/fonts"
             XDG_CACHE_HOME = $cacheHome
           }
           Assert-GpMatch -Actual $listing.Text -Pattern ([regex]::Escape($bundledFont)) -Message "fontconfig should find the bundled font through the generated fonts.conf."
@@ -604,6 +606,9 @@ Describe "AppImage backend" {
         Assert-GpTrue -Condition ($null -ne (Get-GpAppImageSmokeFailure -Output ("ok`n" + $line + "`nmore"))) -Message "Smoke output should count as a failure: $line"
       }
       Assert-GpTrue -Condition ($null -eq (Get-GpAppImageSmokeFailure -Output "Sample GNUstep Linux fixture running`nFailed to get _NET_WORKAREA")) -Message "Ordinary GNUstep noise should not fail the smoke launch."
+      # Without a usable font GNUstep logs both lines; the reason should name the font.
+      $fontFailure = Get-GpAppImageSmokeFailure -Output ("ok`nGSHorizontalTypesetter - Glyph generation with no font.`nProblem posting <GSNotification: 0x1> Name: NSMenuDidChangeItemNotification <NSException: 0x2> NAME:NSGenericException REASON:Glyph generation with no font.")
+      Assert-GpMatch -Actual ([string]$fontFailure.Reason) -Pattern "no font" -Message "A missing font should be reported as such, not as a generic exception."
     }
 
     It "stops the smoke process tree and detached processes that carry the smoke's GNUstep home" {

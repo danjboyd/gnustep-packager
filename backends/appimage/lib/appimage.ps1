@@ -511,6 +511,7 @@ function Get-GpAppImageSmokePlan {
 # Output that means the app is missing part of its runtime or hit an
 # exception, even when it keeps running. GNUstep logs these and carries on.
 $script:GpAppImageSmokeFailurePatterns = @(
+  [pscustomobject]@{ Pattern = 'Glyph generation with no font'; Reason = "the app found no font it can use (see backends.appimage.fonts.bundle)" },
   [pscustomobject]@{ Pattern = 'Unable to find (the )?(backend|gdnc|gpbs|\S+ tool)'; Reason = "the app could not find a runtime component" },
   [pscustomobject]@{ Pattern = '[Uu]ncaught exception'; Reason = "the app raised an uncaught exception" },
   [pscustomobject]@{ Pattern = 'ignoring exception'; Reason = "the app raised an exception during startup" },
@@ -1479,7 +1480,15 @@ function Write-GpAppImageAppRun {
   $lines.Add("fi") | Out-Null
   $lines.Add('if [ -f "$RUNTIME_ROOT/etc/fonts/fonts.conf" ] && [ -z "${FONTCONFIG_FILE:-}" ]; then') | Out-Null
   $lines.Add('  export FONTCONFIG_FILE="$RUNTIME_ROOT/etc/fonts/fonts.conf"') | Out-Null
-  $lines.Add('  export FONTCONFIG_PATH="$RUNTIME_ROOT/etc/fonts"') | Out-Null
+  if (@($Config.BundledFonts).Count -gt 0) {
+    # The generated fonts.conf includes the host's /etc/fonts/fonts.conf, whose relative
+    # <include>conf.d</include> fontconfig resolves against FONTCONFIG_PATH and then its
+    # compiled-in directory. Name the host's directory, so the host's aliases and rendering
+    # settings load whatever prefix the bundled libfontconfig was built with.
+    $lines.Add('  export FONTCONFIG_PATH="/etc/fonts"') | Out-Null
+  } else {
+    $lines.Add('  export FONTCONFIG_PATH="$RUNTIME_ROOT/etc/fonts"') | Out-Null
+  }
   $lines.Add("fi") | Out-Null
 
   if ($Config.GnustepConfig.Enabled) {

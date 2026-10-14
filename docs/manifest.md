@@ -460,10 +460,10 @@ Each entry is a font family the AppImage carries for hosts that lack it:
 
 The fonts go under `<runtimeRoot>/share/fonts/<name>/`, and the backend writes
 `<runtimeRoot>/etc/fonts/fonts.conf`, which `AppRun` points `FONTCONFIG_FILE`
-at. That file includes the host's `/etc/fonts/fonts.conf` first and then adds
-the bundled directory, so the host's fonts, aliases and preferences still
-decide what a family name matches: the bundled fonts are only there when the
-host has no font of that name. GNUstep needs this: `gnustep-back` falls back to
+at, with `FONTCONFIG_PATH=/etc/fonts`. That file includes the host's
+`/etc/fonts/fonts.conf` first and then adds the bundled directory: the host's
+configuration (its `conf.d` aliases, preferences and rendering settings) still
+applies, and the bundled fonts are added to the set of fonts it chooses from. GNUstep needs this: `gnustep-back` falls back to
 DejaVu Sans when a requested font is missing, and some distributions (Fedora,
 for one) don't install DejaVu, so without it a GNUstep app draws no text and
 shows no window. Packaging fails if the staged runtime already has an
