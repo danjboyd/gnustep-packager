@@ -92,9 +92,21 @@ su smoke -s /bin/bash -c '
   ./app.AppImage --appimage-extract >/dev/null || { echo "appimage-clean-smoke: extraction failed" >&2; exit 1; }
   Xvfb :42 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
   sleep 2
+  # Stops the GNUstep daemons a launch leaves behind (gdnc and gpbs detach). The images may have no
+  # pkill, so this reads /proc.
+  stop_gnustep_daemons() {
+    for comm in /proc/[0-9]*/comm; do
+      case "$(cat "${comm}" 2>/dev/null)" in
+        gdnc|gpbs|gdomap) kill -KILL "$(basename "$(dirname "${comm}")")" 2>/dev/null ;;
+      esac
+    done
+  }
   overall=0
   for desktop in ${DESKTOPS}; do
     echo "--- XDG_CURRENT_DESKTOP=${desktop} ---"
+    # Each launch is a first launch: no daemons or defaults from the previous one.
+    stop_gnustep_daemons
+    rm -rf ~/GNUstep ~/.config ~/.cache ~/.local
     # shellcheck disable=SC2086
     env DISPLAY=:42 XDG_CURRENT_DESKTOP="${desktop}" APPIMAGE="${HOME}/app.AppImage" ${APP_ENV} \
       ./squashfs-root/AppRun ${APP_ARGS} >app.log 2>&1 </dev/null &
@@ -118,12 +130,13 @@ su smoke -s /bin/bash -c '
         fi
       done
     fi
-    if grep -Eq "Unable to find (the )?(backend|gdnc|gpbs|[^ ]+ tool)|[Uu]ncaught exception|ignoring exception|NSInternalInconsistencyException|version .GLIBC_[0-9.]+. not found|error while loading shared libraries" app.log; then
-      echo "appimage-clean-smoke: the app reported a missing runtime component on ${desktop}" >&2
+    if grep -Eq "Unable to find (the )?(backend|gdnc|gpbs|[^ ]+ tool)|[Uu]ncaught exception|ignoring exception|Problem posting .*NSException|NSInternalInconsistencyException|version .GLIBC_[0-9.]+. not found|error while loading shared libraries" app.log \
+      && ! grep -q "Glyph generation with no font" app.log; then
+      echo "appimage-clean-smoke: the app reported a missing runtime component or an exception on ${desktop}" >&2
       status=1
     fi
     # Without a font it can use, GNUstep draws no text and maps no window, but keeps running.
-    if grep -Eq "Glyph generation with no font|Problem posting .*NSException" app.log; then
+    if grep -q "Glyph generation with no font" app.log; then
       echo "appimage-clean-smoke: the app found no font it can use on ${desktop} (gnustep-back falls back to DejaVu Sans; see backends.appimage.fonts.bundle)" >&2
       status=1
     fi
@@ -131,6 +144,7 @@ su smoke -s /bin/bash -c '
     head -n 40 app.log
     kill -KILL "${pid}" 2>/dev/null
     wait "${pid}" 2>/dev/null
+    stop_gnustep_daemons
     [ "${status}" -eq 0 ] || overall=1
   done
   exit "${overall}"
