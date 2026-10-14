@@ -1502,7 +1502,7 @@ Current status notes:
 ## Phase 17: macOS DMG Backend
 Goal: package native macOS app bundles built from GNUstep codebases into DMGs
 from the same stage-first pipeline, without weakening the backend-neutral core.
-Status: phase 17A through 17F implemented; 17G is a follow-up.
+Status: phase 17A through 17F implemented; 17G partly (reusable workflow).
 
 This phase deliberately widens the support boundary in `AGENTS.md`: the
 packaged artifact is a native macOS `.app` (Apple AppKit) rather than a
@@ -1565,7 +1565,9 @@ as ignored settings instead.
 - `Phase 17G`: Follow-ups
   Deliverables:
   - first notarization run against Apple's service once a Developer ID exists
-  - `dmg` support in the reusable `package-gnustep-app.yml` workflow
+  - `dmg` support in the reusable `package-gnustep-app.yml` workflow (done:
+    `backend: dmg`, `runs-on-dmg`, Developer ID and notary secrets; run by
+    `validate-repo`'s `macos-reusable-workflow` job)
   - optional volume icon and update-feed sidecars for DMG artifacts
 
 ## Phase 18: Release Payload Integrity

@@ -19,6 +19,7 @@ Default runner JSON arrays:
 
 - `runs-on-msi`: `["windows-latest"]`
 - `runs-on-appimage`: `["ubuntu-latest"]`
+- `runs-on-dmg`: `["macos-latest"]`
 
 Callers may override either input with a different JSON array, for example:
 
@@ -109,6 +110,7 @@ Primary inputs:
 - `package-version`
 - `runs-on-msi`
 - `runs-on-appimage`
+- `runs-on-dmg`
 - `container-appimage`
 - `skip-default-host-setup`
 - `msys2-packages`
@@ -139,11 +141,24 @@ records `windows-msys2-clang64`, `MSYSTEM=CLANG64`, path conversion output,
 command lookup, and the exact failed bootstrap command logs.
 
 ## Secrets
-Optional signing secrets:
+Optional MSI signing secrets:
 
 - `sign_pfx_base64`
 - `sign_pfx_password`
 - `sign_cert_sha1`
+
+Optional DMG signing and notarization secrets, used with `backend: dmg` and
+`sign-artifacts: true`:
+
+- `macos_certificate_p12`: a Developer ID Application certificate, base64 `.p12`
+- `macos_certificate_password`
+- `notary_apple_id`, `notary_team_id`, `notary_app_password`: when all three
+  are set, a `notarytool` keychain profile is stored and its name exported in
+  the variable `backends.dmg.notarization.keychainProfileEnvVar` names
+
+The manifest's `backends.dmg.signing.identity` and `notarization` settings
+still decide how the DMG is signed and whether it is notarized; see
+[dmg-backend.md](dmg-backend.md).
 
 ## Example
 
@@ -171,6 +186,22 @@ jobs:
       run-validation: true
       run-smoke: true
       artifact-name: my-app-linux
+
+  package-macos:
+    uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
+    with:
+      manifest-path: packaging/package.manifest.json
+      backend: dmg
+      run-validation: true
+      run-smoke: true
+      sign-artifacts: true
+      artifact-name: my-app-macos
+    secrets:
+      macos_certificate_p12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      macos_certificate_password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      notary_apple_id: ${{ secrets.NOTARY_APPLE_ID }}
+      notary_team_id: ${{ secrets.NOTARY_TEAM_ID }}
+      notary_app_password: ${{ secrets.NOTARY_APP_PASSWORD }}
 ```
 
 Advanced self-hosted AppImage example:

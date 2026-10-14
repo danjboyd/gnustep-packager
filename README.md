@@ -203,6 +203,8 @@ This repo now also includes the phase 17 macOS DMG work:
   `-Platform`, the requested backend, or the host
 - a macOS reference fixture (`examples/sample-macos`), macOS Pester tests, and a
   `macos-validation` CI job
+- `backend: dmg` in the reusable `package-gnustep-app.yml` workflow, on
+  `runs-on-dmg`, with optional Developer ID signing and notarization secrets
 
 Current sample verification covers:
 - `build`

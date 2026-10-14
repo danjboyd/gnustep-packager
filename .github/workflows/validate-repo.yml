@@ -192,3 +192,14 @@ jobs:
             examples/sample-macos/dist/logs
           retention-days: 7
           if-no-files-found: warn
+
+  # The reusable workflow's dmg path, end to end, on the macOS fixture.
+  macos-reusable-workflow:
+    uses: ./.github/workflows/package-gnustep-app.yml
+    with:
+      manifest-path: examples/sample-macos/package.manifest.json
+      backend: dmg
+      run-validation: true
+      run-smoke: true
+      artifact-name: sample-macos-reusable
+      artifact-retention-days: 7
