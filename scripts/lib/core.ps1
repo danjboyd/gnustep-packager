@@ -2458,6 +2458,9 @@ function Test-GpToolchainPin {
   }
 
   try {
+    if ([string]::IsNullOrWhiteSpace([string]$settings.ProvenancePath)) {
+      throw "No toolchain provenance file is set. Set toolchain.provenanceFile or GP_TOOLCHAIN_PROVENANCE to <prefix>/gnustep-toolchain-provenance.json."
+    }
     $toolchain = Read-GpToolchainProvenance -Path ([string]$settings.ProvenancePath)
   } catch {
     $issues.Add(("TOOLCHAIN {0}" -f $_.Exception.Message)) | Out-Null

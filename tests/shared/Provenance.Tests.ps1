@@ -240,6 +240,10 @@ Describe "Release provenance" {
       $issues = [string]::Join("`n", @((Test-GpToolchainPin -Context $context -PayloadRoot $stage).Issues))
       Assert-GpTrue -Condition ($issues -match "toolchain provenance file was not found") -Message "A missing provenance file should fail. Issues: $issues"
 
+      $context.Manifest["toolchain"].Remove("provenanceFile")
+      $issues = [string]::Join("`n", @((Test-GpToolchainPin -Context $context -PayloadRoot $stage).Issues))
+      Assert-GpTrue -Condition ($issues -match "No toolchain provenance file is set") -Message "A toolchain section without a provenance file should say so. Issues: $issues"
+
       $context.Manifest.Remove("toolchain")
       Assert-GpEqual -Actual @((Test-GpToolchainPin -Context $context -PayloadRoot $stage).Issues).Count -Expected 0 -Message "Without a toolchain section nothing is checked."
     } finally {
