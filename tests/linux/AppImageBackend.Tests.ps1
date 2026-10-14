@@ -148,6 +148,10 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $configText -Pattern '(?m)^GNUSTEP_SYSTEM_TOOLS=\.\./\.\./System/Tools$' -Message "GNUSTEP_SYSTEM_TOOLS should point at the bundled tools (gdnc, gpbs)."
       Assert-GpMatch -Actual $configText -Pattern '(?m)^GNUSTEP_LOCAL_LIBRARY=\.\./\.\./System/Library$' -Message "The LOCAL domain should not fall back to the host's /usr/GNUstep/Local."
       Assert-GpTrue -Condition ($configText -notmatch '/usr/GNUstep') -Message "GNUstep.conf should name no host path."
+      foreach ($path in @($script:packageResult.GnustepConfigPath, $script:packageResult.GnustepThemedConfigPath)) {
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $path) -Pattern '(?m)^GNUSTEP_USER_DIR_LIBRARY=GNUstep/Library/AppImage/com\.example\.SampleGNUstepLinuxApp$' -Message "$path should give the AppImage its own user Library, so host-built themes in ~/GNUstep/Library aren't loaded."
+      }
+      Assert-GpMatch -Actual $configText -Pattern '(?m)^GNUSTEP_USER_DEFAULTS_DIR=GNUstep/Defaults$' -Message "The user's defaults should stay where they are."
       $themedDir = Split-Path -Parent $script:packageResult.GnustepThemedConfigPath
       $themedDefaults = Get-Content -Raw -Path (Join-Path $themedDir "GlobalDefaults.plist")
       Assert-GpMatch -Actual $themedDefaults -Pattern '"GSTheme" = "Adwaita";' -Message "The themed config should default GSTheme through GlobalDefaults.plist."
@@ -219,6 +223,39 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $desktopText -Pattern "Exec=AppRun %F" -Message "Desktop entry should route launches through AppRun."
       Assert-GpMatch -Actual $desktopText -Pattern "MimeType=application/x-samplegnusteplinuxapp-samplelinux;" -Message "Desktop entry should include the generated MIME type."
       Assert-GpMatch -Actual $mimeText -Pattern "glob pattern='\*\.samplelinux'" -Message "Generated MIME package should describe the staged extension association."
+    }
+
+    It "keeps the host's user Library when gnustepConfig.userLibrary is host, and rejects other values" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["gnustepConfig"]["userLibrary"] = "host"
+      }
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $logPath = Join-Path $script:packageConfig.OutputPaths.LogRoot "pester-appimage-package-host-user-library.log"
+        $result = Invoke-GpAppImagePackage -Context $context -LogPath $logPath
+        foreach ($path in @($result.GnustepConfigPath, $result.GnustepThemedConfigPath)) {
+          Assert-GpTrue -Condition ((Get-Content -Raw -Path $path) -notmatch 'GNUSTEP_USER_DIR_LIBRARY') -Message "$path should leave the user Library alone with userLibrary = host."
+        }
+      } finally {
+        Remove-Item -Force $manifestPath -ErrorAction SilentlyContinue
+      }
+
+      $badManifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["gnustepConfig"]["userLibrary"] = "shared"
+      }
+      try {
+        $failed = $false
+        try {
+          $null = Get-GpAppImageConfig -Context (Get-GpManifestContext -Path $badManifestPath)
+        } catch {
+          $failed = $_.Exception.Message -match "userLibrary must be 'app' or 'host'"
+        }
+        Assert-GpTrue -Condition $failed -Message "An unknown userLibrary value should be rejected."
+      } finally {
+        Remove-Item -Force $badManifestPath -ErrorAction SilentlyContinue
+      }
     }
 
     It "packages an app that declares no file associations" {
