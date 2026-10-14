@@ -1688,7 +1688,7 @@ function Test-GpManifest {
       }
       $stagedThemePresent = $false
       if (-not [string]::IsNullOrWhiteSpace($stageRoot)) {
-        foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $resolvedDefaultTheme)) {
+        foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $resolvedDefaultTheme -Manifest $Manifest)) {
           if (Test-Path (Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $candidate)) {
             $stagedThemePresent = $true
             break
@@ -3285,17 +3285,50 @@ function Get-GpUpdaterHelperCandidates {
   )
 }
 
+# The AppImage's backends.appimage.gnustepConfig.systemRoot, with '/'
+# separators and no trailing one, or $null.
+function Get-GpAppImageSystemRoot {
+  param(
+    [System.Collections.IDictionary]$Manifest
+  )
+
+  if ($null -eq $Manifest) {
+    return $null
+  }
+  $backends = $Manifest["backends"]
+  if (($backends -is [System.Collections.IDictionary]) -and ($backends["appimage"] -is [System.Collections.IDictionary]) -and
+      ($backends["appimage"]["gnustepConfig"] -is [System.Collections.IDictionary]) -and
+      -not [string]::IsNullOrWhiteSpace([string]$backends["appimage"]["gnustepConfig"]["systemRoot"])) {
+    return ((([string]$backends["appimage"]["gnustepConfig"]["systemRoot"]) -replace "\\", "/").TrimEnd("/"))
+  }
+  return $null
+}
+
 function Get-GpBundledThemeCandidatePaths {
   param(
     [Parameter(Mandatory = $true)]
-    [string]$ThemeName
+    [string]$ThemeName,
+    # With an AppImage systemRoot, its Library/Themes is a candidate too:
+    # theme inputs are provisioned there.
+    [System.Collections.IDictionary]$Manifest
   )
 
-  return [string[]]@(
+  $candidates = [System.Collections.Generic.List[string]]::new()
+  $systemRoot = Get-GpAppImageSystemRoot -Manifest $Manifest
+  if (-not [string]::IsNullOrWhiteSpace($systemRoot)) {
+    $candidates.Add(("{0}/Library/Themes/{1}.theme" -f $systemRoot, $ThemeName)) | Out-Null
+  }
+  foreach ($candidate in @(
     (Join-Path "runtime/System/Library/Themes" ("{0}.theme" -f $ThemeName)),
     (Join-Path "runtime/lib/GNUstep/Themes" ("{0}.theme" -f $ThemeName)),
     (Join-Path "runtime/share/GNUstep/Themes" ("{0}.theme" -f $ThemeName))
-  )
+  )) {
+    if (-not $candidates.Contains(($candidate -replace "\\", "/"))) {
+      $candidates.Add($candidate) | Out-Null
+    }
+  }
+
+  return [string[]]@($candidates.ToArray())
 }
 
 function Get-GpThemeExecutableCandidates {
@@ -3510,10 +3543,11 @@ function Find-GpBundledThemePath {
     [Parameter(Mandatory = $true)]
     [string]$PayloadRoot,
     [Parameter(Mandatory = $true)]
-    [string]$ThemeName
+    [string]$ThemeName,
+    [System.Collections.IDictionary]$Manifest
   )
 
-  foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $ThemeName)) {
+  foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $ThemeName -Manifest $Manifest)) {
     $candidatePath = Resolve-GpPathRelativeToBase -BasePath $PayloadRoot -Path $candidate
     if (Test-Path $candidatePath -PathType Container) {
       return $candidatePath
@@ -3724,7 +3758,7 @@ function Invoke-GpPackageContractAssertions {
         $bundledThemeLabel = ("bundled-theme:{0}" -f $entry.Name)
         $candidatePaths = [System.Collections.Generic.List[string]]::new()
         $matchedPaths = [System.Collections.Generic.List[string]]::new()
-        foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $entry.Name)) {
+        foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $entry.Name -Manifest $manifest)) {
           $candidatePath = Resolve-GpPathRelativeToBase -BasePath $payloadRoot -Path $candidate
           $candidatePaths.Add($candidatePath) | Out-Null
           if (Test-Path $candidatePath) {
@@ -3754,7 +3788,7 @@ function Invoke-GpPackageContractAssertions {
 
       "theme-resource" {
         $themeName = if (-not [string]::IsNullOrWhiteSpace([string]$entry.Theme)) { [string]$entry.Theme } else { [string]$entry.Name }
-        $themePath = Find-GpBundledThemePath -PayloadRoot $payloadRoot -ThemeName $themeName
+        $themePath = Find-GpBundledThemePath -PayloadRoot $payloadRoot -ThemeName $themeName -Manifest $manifest
         if ([string]::IsNullOrWhiteSpace($themePath)) {
           $message = ("MISSING theme-resource:{0}:{1} [{2}] -> no bundled theme found" -f $themeName, $entry.Path, $entry.Source)
           $lines.Add($message) | Out-Null
@@ -4332,11 +4366,9 @@ function Get-GpThemeStageRelativeRoot {
   )
 
   if ($Backend -eq "appimage") {
-    $backends = $Context.Manifest["backends"]
-    if (($backends -is [System.Collections.IDictionary]) -and ($backends["appimage"] -is [System.Collections.IDictionary]) -and
-        ($backends["appimage"]["gnustepConfig"] -is [System.Collections.IDictionary]) -and
-        -not [string]::IsNullOrWhiteSpace([string]$backends["appimage"]["gnustepConfig"]["systemRoot"])) {
-      return ((([string]$backends["appimage"]["gnustepConfig"]["systemRoot"]) -replace "\\", "/").TrimEnd("/") + "/Library/Themes")
+    $systemRoot = Get-GpAppImageSystemRoot -Manifest $Context.Manifest
+    if (-not [string]::IsNullOrWhiteSpace($systemRoot)) {
+      return ($systemRoot + "/Library/Themes")
     }
   }
 

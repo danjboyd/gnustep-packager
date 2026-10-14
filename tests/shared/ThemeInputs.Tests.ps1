@@ -651,6 +651,27 @@ Describe "Theme input contract" {
     }
   }
 
+  It "finds a theme staged in the AppImage's systemRoot domain, wherever that root is" {
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-systemroot-" + [guid]::NewGuid().ToString("N"))
+    try {
+      $manifest = @{ backends = @{ appimage = @{ gnustepConfig = @{ systemRoot = "runtime" } } } }
+      $candidates = @(Get-GpBundledThemeCandidatePaths -ThemeName "Adwaita" -Manifest $manifest)
+      Assert-GpEqual -Actual $candidates[0] -Expected "runtime/Library/Themes/Adwaita.theme" -Message "The systemRoot's theme folder should be checked first."
+      Assert-GpEqual -Actual $candidates.Count -Expected 4 -Message "The standard candidates should follow."
+      Assert-GpEqual -Actual (Get-GpThemeStageRelativeRoot -Context ([pscustomobject]@{ Manifest = $manifest }) -Backend "appimage") -Expected "runtime/Library/Themes" -Message "Provisioning should stage where validation looks."
+
+      $themePath = Join-Path $root "runtime/Library/Themes/Adwaita.theme"
+      New-Item -ItemType Directory -Force -Path $themePath | Out-Null
+      Assert-GpEqual -Actual (Find-GpBundledThemePath -PayloadRoot $root -ThemeName "Adwaita" -Manifest $manifest) -Expected $themePath -Message "A theme in runtime/Library/Themes should be found with systemRoot runtime."
+      Assert-GpEqual -Actual (Find-GpBundledThemePath -PayloadRoot $root -ThemeName "Adwaita") -Expected $null -Message "Without the manifest, only the standard places are searched."
+
+      $standard = @(Get-GpBundledThemeCandidatePaths -ThemeName "Adwaita" -Manifest @{ backends = @{ appimage = @{ gnustepConfig = @{ systemRoot = "runtime/System" } } } })
+      Assert-GpEqual -Actual $standard.Count -Expected 3 -Message "A systemRoot of runtime/System adds no duplicate candidate."
+    } finally {
+      Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+    }
+  }
+
   It "builds an AppImage theme input with gnustep-make and stages it in the bundled system domain" {
     if ($IsWindows -or -not (Get-Command gnustep-config -ErrorAction SilentlyContinue) -or -not (Get-Command make -ErrorAction SilentlyContinue)) {
       Set-ItResult -Skipped -Because "it needs a Linux GNUstep toolchain (gnustep-config and make)"
