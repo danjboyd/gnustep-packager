@@ -123,6 +123,15 @@ The standard UI layer behaves as follows:
 - once preparation finishes, the UI shows `Restart and Install`
 - AppImage installs fall back to a manual-download path when the current file
   cannot be replaced safely
+- the update is installed after the app quits, and when that fails (msiexec
+  refuses, as it does under `DisableMsi`, or the AppImage can't be replaced)
+  the app is not started again; at the next launch, `-start` shows
+  `Update Not Installed` with the reason in plain words (msiexec's exit code
+  explained), the installer's log, and a button to download the installer or
+  AppImage by hand, then clears the helper's state
+
+Vendored copies that build `GPUpdaterCore` without its `Makefile` need to add
+`Source/GPUpdaterApplyOutcome.m`.
 
 ## Customization Hooks
 `GPStandardUpdaterControllerDelegate` can override:

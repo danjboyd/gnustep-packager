@@ -1,4 +1,5 @@
 #import "GPStandardUpdaterController.h"
+#import "GPUpdaterApplyOutcome.h"
 
 static NSString * const GPUpdaterHelperPlanFormatVersion = @"1";
 static NSString * const GPUpdaterHelperModePrepare = @"prepare";
@@ -32,6 +33,8 @@ static NSString * const GPUpdaterHelperStatusFailed = @"failed";
 - (void)_runErrorAlert:(NSError *)error;
 - (void)_runRestartToFinishAlert:(id)unused;
 - (void)_runManualUpdateAlert:(NSDictionary *)info;
+- (void)_presentPreviousInstallOutcome;
+- (void)_runInstallFailedAlert:(GPUpdaterApplyOutcome *)outcome;
 - (void)_openReleaseNotesURL:(NSURL *)releaseNotesURL;
 - (void)_beginPrepareForResult:(GPUpdateCheckResult *)result;
 - (BOOL)_launchHelperMode:(NSString *)mode;
@@ -124,6 +127,7 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
 }
 
 - (void)start {
+  [self _presentPreviousInstallOutcome];
   [[self updater] start];
 }
 
@@ -597,10 +601,70 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
   [alert addButtonWithTitle:@"Restart and Install"];
   [alert addButtonWithTitle:@"Later"];
   if ([alert runModal] == NSAlertFirstButtonReturn) {
+    // Recorded so the next launch can say what became of the install,
+    // which happens after the app has quit.
+    GPUpdateAsset *asset = [_pendingInstallResult asset];
+    [GPUpdaterApplyOutcome recordRequestInDirectory:[self _helperStateRoot]
+                                            version:[_pendingInstallResult latestVersion]
+                                            backend:[asset backend]
+                                        downloadURL:[asset URL]];
     // If the helper could not start, stay open so its error alert shows.
     if ([self _launchHelperMode:GPUpdaterHelperModeApply]) {
       [[NSApplication sharedApplication] terminate:nil];
+    } else {
+      [GPUpdaterApplyOutcome removeRequestInDirectory:[self _helperStateRoot]];
     }
+  }
+}
+
+// An update is installed after the app quits, and when installing fails
+// (msiexec refuses, the AppImage can't be replaced) the app is not started
+// again, so it is reported here, at the next launch.
+- (void)_presentPreviousInstallOutcome {
+  NSString *stateRoot = [self _helperStateRoot];
+  GPUpdaterApplyOutcome *outcome = [GPUpdaterApplyOutcome outcomeInDirectory:stateRoot];
+  if (outcome == nil) {
+    return;
+  }
+
+  if (![outcome failed]) {
+    [GPUpdaterApplyOutcome clearDirectory:stateRoot];
+    return;
+  }
+
+  [self _presentAlertDeferred:@selector(_runInstallFailedAlert:) withObject:outcome];
+}
+
+- (void)_runInstallFailedAlert:(GPUpdaterApplyOutcome *)outcome {
+  NSString *displayName = [[[self updater] configuration] displayName];
+  NSString *version = [outcome version];
+  BOOL msi = [[outcome backend] isEqualToString:@"msi"];
+  NSString *installer = msi ? @"installer" : @"AppImage";
+
+  NSMutableString *message = [NSMutableString string];
+  if ([version length] > 0) {
+    [message appendFormat:@"%@ %@ was not installed: %@.", displayName, version, [outcome failureReason]];
+  } else {
+    [message appendFormat:@"The update was not installed: %@.", [outcome failureReason]];
+  }
+  if ([outcome downloadURL] != nil) {
+    [message appendFormat:@"\n\nYou can download the %@ and install it yourself.", installer];
+  }
+  if ([[outcome logPath] length] > 0) {
+    [message appendFormat:@"\n\nDetails: %@", [outcome logPath]];
+  }
+
+  NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+  [alert setMessageText:@"Update Not Installed"];
+  [alert setInformativeText:message];
+  if ([outcome downloadURL] != nil) {
+    [alert addButtonWithTitle:(msi ? @"Download Installer" : @"Download AppImage")];
+  }
+  [alert addButtonWithTitle:@"OK"];
+  NSInteger response = [alert runModal];
+  [GPUpdaterApplyOutcome clearDirectory:[self _helperStateRoot]];
+  if ([outcome downloadURL] != nil && response == NSAlertFirstButtonReturn) {
+    [[NSWorkspace sharedWorkspace] openURL:[outcome downloadURL]];
   }
 }
 

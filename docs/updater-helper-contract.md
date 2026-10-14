@@ -86,6 +86,43 @@ Reference fixture:
 
 - `updater/contracts/helper-state.example.json`
 
+A failed install keeps the installer's exit code as a number, so the app can
+say what it means:
+
+```json
+{
+  "formatVersion": 1,
+  "status": "failed",
+  "message": "MSI installation failed.",
+  "error": {
+    "message": "msiexec exit code 1625; see msiexec.log beside the state file",
+    "exitCode": 1625
+  }
+}
+```
+
+## Install Request
+The update is installed after the app quits, and a failed install does not
+start the app again. So before quitting to install, the app writes
+`apply-request.json` beside the state file:
+
+```json
+{
+  "formatVersion": 1,
+  "version": "1.2.3",
+  "backend": "msi",
+  "downloadUrl": "https://github.com/example-org/my-gnustep-app/releases/download/v1.2.3/MyGNUstepApp-1.2.3.msi"
+}
+```
+
+At its next launch the app reads the request with the state
+(`GPUpdaterApplyOutcome`): a `failed` state is reported to the user, with the
+installer's log (`msiexec.log` or `apply-appimage.log`) and the download URL,
+and then the request, state and plan are removed. An `applying` state is left
+alone, since the installer may still be running. Without a request, a
+`failed` state is from preparing, which the app showed at the time, and is not
+reported again.
+
 ## Supported Status Values
 - `preparing`
 - `downloading`
