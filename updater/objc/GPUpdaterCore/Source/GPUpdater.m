@@ -605,6 +605,7 @@ static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
 - (void)setAutomaticallyChecksForUpdates:(BOOL)enabled {
   [_defaults setBool:YES forKey:[self _key:@"automaticChecksConfigured"]];
   [_defaults setBool:enabled forKey:[self _key:@"automaticChecksEnabled"]];
+  [_defaults synchronize];
 }
 
 - (NSString *)skippedVersion {
@@ -617,6 +618,10 @@ static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
   } else {
     [_defaults removeObjectForKey:[self _key:@"skippedVersion"]];
   }
+  // Written now: GNUstep otherwise flushes defaults on a timer and at a
+  // normal -terminate:, so a skip made just before the app was closed some
+  // other way (killed, logged off) was lost.
+  [_defaults synchronize];
 }
 
 - (void)dealloc {
