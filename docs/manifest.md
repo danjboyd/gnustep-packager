@@ -368,6 +368,7 @@ Important fields:
 - `gnustepConfig.defaultTheme.name`
 - `gnustepConfig.defaultTheme.desktops`
 - `gnustepConfig.defaultTheme.defaults`
+- `fonts.bundle`
 - `validation.runtimeClosure`
 - `validation.allowedSystemLibraries`
 - `validation.allowedExternalRunpaths`
@@ -442,6 +443,31 @@ AppImage GNUstep configuration (`gnustepConfig`):
   setting) they don't apply. For example, `GSX11HandlesWindowDecorations: false`
   lets a theme that draws its own header bar do so where it is the default.
   They override `globalDefaults` with the same key.
+
+AppImage bundled fonts (`fonts.bundle`):
+
+Each entry is a font family the AppImage carries for hosts that lack it:
+
+- `name`
+  The family's name, used for its directory and its notice entry.
+- `files`
+  Font files to bundle, relative to the manifest or absolute.
+- `licenseFile`
+  The font's license, required. It goes to
+  `<metadataRoot>/licenses/fonts/<name>.txt` and the notice report lists it.
+- `license`, `homepage`
+  Optional, for the notice report.
+
+The fonts go under `<runtimeRoot>/share/fonts/<name>/`, and the backend writes
+`<runtimeRoot>/etc/fonts/fonts.conf`, which `AppRun` points `FONTCONFIG_FILE`
+at, with `FONTCONFIG_PATH=/etc/fonts`. That file includes the host's
+`/etc/fonts/fonts.conf` first and then adds the bundled directory: the host's
+configuration (its `conf.d` aliases, preferences and rendering settings) still
+applies, and the bundled fonts are added to the set of fonts it chooses from. GNUstep needs this: `gnustep-back` falls back to
+DejaVu Sans when a requested font is missing, and some distributions (Fedora,
+for one) don't install DejaVu, so without it a GNUstep app draws no text and
+shows no window. Packaging fails if the staged runtime already has an
+`etc/fonts/fonts.conf`.
 
 AppImage update settings:
 

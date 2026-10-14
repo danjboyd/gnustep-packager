@@ -246,6 +246,107 @@ Describe "AppImage backend" {
       }
     }
 
+    It "bundles fonts with their license and adds them after the host's fontconfig setup" {
+      $fontSourceRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-fonts-" + [guid]::NewGuid().ToString("N"))
+      New-Item -ItemType Directory -Force -Path $fontSourceRoot | Out-Null
+      # A real font when the host has one, so fontconfig can be asked about it; any file otherwise.
+      $hostFont = @(Get-ChildItem -Path "/usr/share/fonts" -Recurse -Filter "*.ttf" -ErrorAction SilentlyContinue | Select-Object -First 1)
+      $fontPath = Join-Path $fontSourceRoot "GpFixtureSans.ttf"
+      if ($hostFont.Count -gt 0) {
+        Copy-Item -LiteralPath $hostFont[0].FullName -Destination $fontPath
+      } else {
+        Set-Content -Path $fontPath -Value "not a font" -Encoding ascii
+      }
+      $licensePath = Join-Path $fontSourceRoot "LICENSE"
+      Set-Content -Path $licensePath -Value "Fixture font license" -Encoding ascii
+
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["fonts"] = @{
+          bundle = @(
+            @{
+              name = "Fixture Sans"
+              files = @($fontPath)
+              licenseFile = $licensePath
+              license = "Bitstream-Vera"
+              homepage = "https://example.invalid/fixture-sans"
+            }
+          )
+        }
+      }
+
+      # The fixture stages a fonts.conf of its own, which bundling fonts refuses to replace.
+      $stagedFontConfig = Join-Path $script:packageConfig.StageRoot "runtime/etc/fonts/fonts.conf"
+      $stagedFontConfigAside = "$stagedFontConfig.pester-aside"
+      Move-Item -LiteralPath $stagedFontConfig -Destination $stagedFontConfigAside
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $logPath = Join-Path $script:packageConfig.OutputPaths.LogRoot "pester-appimage-package-fonts.log"
+        $result = Invoke-GpAppImagePackage -Context $context -LogPath $logPath
+        $runtimeRoot = Join-Path $result.AppDirRoot "usr/runtime"
+        $bundledFont = Join-Path $runtimeRoot "share/fonts/fixture-sans/GpFixtureSans.ttf"
+        $fontConfigPath = Join-Path $runtimeRoot "etc/fonts/fonts.conf"
+
+        Assert-GpTrue -Condition (Test-Path $bundledFont) -Message "The font should be copied under the runtime's share/fonts."
+        Assert-GpEqual -Actual (Get-Content -Raw -Path (Join-Path $result.AppDirRoot "usr/metadata/licenses/fonts/fixture-sans.txt")).Trim() -Expected "Fixture font license" -Message "The font's license should ship with it."
+        $noticeText = Get-Content -Raw -Path $result.NoticeReportPath
+        Assert-GpMatch -Actual $noticeText -Pattern '(?m)^\[Fixture Sans \(font\)\]' -Message "The notice report should list the bundled font."
+        Assert-GpMatch -Actual $noticeText -Pattern '(?m)^Bundled notice path: metadata/licenses/fonts/fixture-sans\.txt' -Message "The notice report should point at the font's license."
+
+        $configText = Get-Content -Raw -Path $fontConfigPath
+        $includeIndex = $configText.IndexOf('<include ignore_missing="yes">/etc/fonts/fonts.conf</include>')
+        $dirIndex = $configText.IndexOf('<dir prefix="relative">../../share/fonts</dir>')
+        Assert-GpTrue -Condition ($includeIndex -ge 0) -Message "fonts.conf should include the host's configuration. Actual: $configText"
+        Assert-GpTrue -Condition ($dirIndex -gt $includeIndex) -Message "fonts.conf should add the bundled fonts after the host's configuration. Actual: $configText"
+        $appRunText = Get-Content -Raw -Path $result.AppRunPath
+        Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export FONTCONFIG_FILE="$RUNTIME_ROOT/etc/fonts/fonts.conf"')) -Message "AppRun should point fontconfig at the generated file."
+        Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export FONTCONFIG_PATH="/etc/fonts"')) -Message "With generated fonts.conf, AppRun should resolve the host's relative conf.d include against /etc/fonts."
+
+        if ($hostFont.Count -gt 0 -and (Get-Command fc-list -ErrorAction SilentlyContinue)) {
+          $cacheHome = Join-Path $fontSourceRoot "cache"
+          $listing = Invoke-GpAppImageCapturedTool -FilePath "fc-list" -ArgumentList @(":", "file") -Environment @{
+            FONTCONFIG_FILE = $fontConfigPath
+            FONTCONFIG_PATH = "/etc/fonts"
+            XDG_CACHE_HOME = $cacheHome
+          }
+          Assert-GpMatch -Actual $listing.Text -Pattern ([regex]::Escape($bundledFont)) -Message "fontconfig should find the bundled font through the generated fonts.conf."
+          Assert-GpMatch -Actual $listing.Text -Pattern ([regex]::Escape($hostFont[0].FullName)) -Message "fontconfig should still see the host's fonts."
+        }
+      } finally {
+        Move-Item -LiteralPath $stagedFontConfigAside -Destination $stagedFontConfig -Force
+        foreach ($path in @($manifestPath, $fontSourceRoot)) {
+          if (Test-Path $path) {
+            Remove-Item -Recurse -Force $path
+          }
+        }
+      }
+    }
+
+    It "refuses to replace a fonts.conf the stage already has" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["fonts"] = @{
+          bundle = @(@{ name = "Fixture Sans"; files = @("/nonexistent/GpFixtureSans.ttf"); licenseFile = "/nonexistent/LICENSE" })
+        }
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $logPath = Join-Path $script:packageConfig.OutputPaths.LogRoot "pester-appimage-package-fonts-conflict.log"
+        $message = $null
+        try {
+          Invoke-GpAppImagePackage -Context $context -LogPath $logPath | Out-Null
+        } catch {
+          $message = $_.Exception.Message
+        }
+        Assert-GpMatch -Actual ([string]$message) -Pattern "already has one" -Message "Bundling fonts should not silently replace the app's own fonts.conf."
+      } finally {
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
+    }
+
     It "can emit updater metadata and a feed sidecar when updates are enabled" {
       $manifestPath = New-GpSiblingManifest {
         param($manifest)
@@ -505,6 +606,9 @@ Describe "AppImage backend" {
         Assert-GpTrue -Condition ($null -ne (Get-GpAppImageSmokeFailure -Output ("ok`n" + $line + "`nmore"))) -Message "Smoke output should count as a failure: $line"
       }
       Assert-GpTrue -Condition ($null -eq (Get-GpAppImageSmokeFailure -Output "Sample GNUstep Linux fixture running`nFailed to get _NET_WORKAREA")) -Message "Ordinary GNUstep noise should not fail the smoke launch."
+      # Without a usable font GNUstep logs both lines; the reason should name the font.
+      $fontFailure = Get-GpAppImageSmokeFailure -Output ("ok`nGSHorizontalTypesetter - Glyph generation with no font.`nProblem posting <GSNotification: 0x1> Name: NSMenuDidChangeItemNotification <NSException: 0x2> NAME:NSGenericException REASON:Glyph generation with no font.")
+      Assert-GpMatch -Actual ([string]$fontFailure.Reason) -Pattern "no font" -Message "A missing font should be reported as such, not as a generic exception."
     }
 
     It "stops the smoke process tree and detached processes that carry the smoke's GNUstep home" {
