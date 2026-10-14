@@ -1,5 +1,6 @@
 #import "GPStandardUpdaterController.h"
 #import "GPUpdaterApplyOutcome.h"
+#import "GPUpdaterUIShell.h"
 
 static NSString * const GPUpdaterHelperPlanFormatVersion = @"1";
 static NSString * const GPUpdaterHelperModePrepare = @"prepare";
@@ -70,6 +71,37 @@ static BOOL GPUpdaterUIWriteJSONObject(NSDictionary *dictionary, NSString *path)
   }
 
   return [data writeToFile:path atomically:YES];
+}
+
+// Opens a URL with the system's handler. On win32, GNUstep's NSWorkspace
+// can't open http(s) URLs, so ShellExecuteW does it.
+static BOOL GPUpdaterUIOpenURL(NSURL *url) {
+  if (url == nil) {
+    return NO;
+  }
+#if defined(_WIN32)
+  NSString *target = [url isFileURL] ? [[url path] stringByReplacingOccurrencesOfString:@"/" withString:@"\\"] : [url absoluteString];
+  NSUInteger length = [target length];
+  unichar *buffer = calloc(length + 1, sizeof(unichar));
+  if (buffer == NULL) {
+    return NO;
+  }
+  [target getCharacters:buffer];
+  int opened = GPUpdaterUIShellOpen((const wchar_t *)buffer);
+  free(buffer);
+  return opened != 0;
+#else
+  return [[NSWorkspace sharedWorkspace] openURL:url];
+#endif
+}
+
+// A path as the user's platform writes it: backslashes on Windows.
+static NSString *GPUpdaterUIDisplayPath(NSString *path) {
+#if defined(_WIN32)
+  return [path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"];
+#else
+  return path;
+#endif
 }
 
 static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
@@ -435,7 +467,7 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
     return;
   }
 
-  [[NSWorkspace sharedWorkspace] openURL:releaseNotesURL];
+  GPUpdaterUIOpenURL(releaseNotesURL);
 }
 
 - (void)_beginPrepareForResult:(GPUpdateCheckResult *)result {
@@ -650,7 +682,7 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
     [message appendFormat:@"\n\nYou can download the %@ and install it yourself.", installer];
   }
   if ([[outcome logPath] length] > 0) {
-    [message appendFormat:@"\n\nDetails: %@", [outcome logPath]];
+    [message appendFormat:@"\n\nDetails: %@", GPUpdaterUIDisplayPath([outcome logPath])];
   }
 
   NSAlert *alert = [[[NSAlert alloc] init] autorelease];
@@ -663,7 +695,7 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
   NSInteger response = [alert runModal];
   [GPUpdaterApplyOutcome clearDirectory:[self _helperStateRoot]];
   if ([outcome downloadURL] != nil && response == NSAlertFirstButtonReturn) {
-    [[NSWorkspace sharedWorkspace] openURL:[outcome downloadURL]];
+    GPUpdaterUIOpenURL([outcome downloadURL]);
   }
 }
 

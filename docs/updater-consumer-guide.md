@@ -131,7 +131,10 @@ The standard UI layer behaves as follows:
   AppImage by hand, then clears the helper's state
 
 Vendored copies that build `GPUpdaterCore` without its `Makefile` need to add
-`Source/GPUpdaterApplyOutcome.m`.
+`Source/GPUpdaterApplyOutcome.m`, and those that build `GPUpdaterUI` without
+its `Makefile` need `Source/GPUpdaterUIShell.c`. On Windows the UI opens URLs
+(release notes, the installer download) with `ShellExecuteW`, since GNUstep's
+`NSWorkspace` has no http(s) handler there; link the app with `-lshell32`.
 
 ## Customization Hooks
 `GPStandardUpdaterControllerDelegate` can override:
