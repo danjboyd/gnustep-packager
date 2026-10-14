@@ -923,7 +923,8 @@ function Get-GpAppImageAppDomainDefaults {
     }) | Out-Null
   }
 
-  foreach ($entry in @($packagedDefaults.AppDomain.Entries)) {
+  $appDomainEntries = if ($null -ne $packagedDefaults.AppDomain) { @($packagedDefaults.AppDomain.Entries) } else { @() }
+  foreach ($entry in $appDomainEntries) {
     $entries.Add([pscustomobject]@{
       Key = [string]$entry.Key
       Type = [string]$entry.Type

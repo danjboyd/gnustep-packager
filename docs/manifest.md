@@ -165,10 +165,17 @@ Important fields:
   When `true`, provisioning failures stop packaging. Optional themes warn and
   continue.
 - `default`
-  Marks the preferred packaged default theme. If exactly one default theme
-  input is declared and `packagedDefaults.defaultTheme` is absent, the packager
-  derives `packagedDefaults.defaultTheme` from it. If both are present, they
-  must match.
+  Marks the preferred packaged default theme for the input's platforms. If
+  `packagedDefaults.defaultTheme` is absent and exactly one default theme input
+  is for the target platform, the packager derives
+  `packagedDefaults.defaultTheme` from it, so a Windows theme and a Linux theme
+  can each be the default on their own platform. If both are present for the
+  same platform, they must match.
+
+  A `packagedDefaults.defaultTheme` that names a theme input applies only on
+  that input's platforms: an MSI-only `WinUITheme` is not seeded as the
+  AppImage's default. The target platform is `-Platform`, else the requested
+  backend's platform, else the host's.
 - `workspacePath`
   Optional local checkout override for developer workflows.
 - `build`
