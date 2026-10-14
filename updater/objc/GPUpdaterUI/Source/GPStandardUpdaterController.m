@@ -8,7 +8,6 @@ static NSString * const GPUpdaterHelperStatusPreparing = @"preparing";
 static NSString * const GPUpdaterHelperStatusDownloading = @"downloading";
 static NSString * const GPUpdaterHelperStatusReadyToApply = @"readyToApply";
 static NSString * const GPUpdaterHelperStatusManualActionRequired = @"manualActionRequired";
-static NSString * const GPUpdaterHelperStatusFailed = @"failed";
 
 @interface GPStandardUpdaterController () {
   BOOL _manualCheckInProgress;

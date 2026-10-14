@@ -26,10 +26,6 @@ static NSDictionary *GPHelperDictionaryValue(id value) {
   return [value isKindOfClass:[NSDictionary class]] ? value : nil;
 }
 
-static NSNumber *GPHelperNumberValue(id value) {
-  return [value isKindOfClass:[NSNumber class]] ? value : nil;
-}
-
 static NSError *GPHelperSimpleError(NSInteger code, NSString *message);
 
 static NSDictionary *GPHelperLoadJSONFile(NSString *path, NSError **error) {
