@@ -400,7 +400,7 @@ function Resolve-GpManifestData {
   $effective = Apply-GpPlatformOverrides -Manifest $Manifest -Platform $Platform
   $defaults = Get-GpDefaultManifest -Profiles (Get-GpRequestedProfiles -Manifest $effective)
   $resolved = Merge-GpHashtable -Base $defaults -Overlay $effective
-  $resolved = Apply-GpDeclarativeThemeDefaults -Manifest $resolved
+  $resolved = Apply-GpDeclarativeThemeDefaults -Manifest $resolved -Platform $Platform
   return (Apply-GpDeclarativePackagedDefaults -Manifest $resolved)
 }
 
@@ -693,6 +693,32 @@ function Test-GpThemeInputApplies {
   return $false
 }
 
+# The platforms (windows, linux, macos) a theme input is for: its platforms
+# entries, with backend names (msi, appimage, dmg) read as their platform.
+function Get-GpThemeInputTargetPlatforms {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$ThemeInput
+  )
+
+  $platforms = [System.Collections.Generic.List[string]]::new()
+  foreach ($item in @($ThemeInput.Platforms)) {
+    if ([string]::IsNullOrWhiteSpace([string]$item)) {
+      continue
+    }
+    $value = ([string]$item).Trim().ToLowerInvariant()
+    $backendPlatform = Get-GpBackendRequiredPlatform -Backend $value
+    if (-not [string]::IsNullOrWhiteSpace($backendPlatform)) {
+      $value = $backendPlatform
+    }
+    if (-not $platforms.Contains($value)) {
+      $platforms.Add($value) | Out-Null
+    }
+  }
+
+  return [string[]]@($platforms.ToArray())
+}
+
 function Get-GpThemeInputs {
   param(
     [Parameter(Mandatory = $true)]
@@ -765,10 +791,16 @@ function Get-GpThemeInputByName {
   return $null
 }
 
+# packagedDefaults.defaultTheme for the target platform. A default theme
+# that names a theme input is only for that input's platforms: on any other
+# platform it is dropped (an MSI-only WinUITheme is not the AppImage's
+# default). Without one, the single theme input marked default for the
+# platform supplies it. Without a platform, every theme input counts.
 function Apply-GpDeclarativeThemeDefaults {
   param(
     [Parameter(Mandatory = $true)]
-    [System.Collections.IDictionary]$Manifest
+    [System.Collections.IDictionary]$Manifest,
+    [string]$Platform
   )
 
   $resolved = Copy-GpValue -Value $Manifest
@@ -778,13 +810,23 @@ function Apply-GpDeclarativeThemeDefaults {
     @{}
   }
 
+  $themes = @(Get-GpThemeInputs -Manifest $resolved)
+  $targetsPlatform = {
+    param($theme)
+    [string]::IsNullOrWhiteSpace($Platform) -or ($Platform.ToLowerInvariant() -in @(Get-GpThemeInputTargetPlatforms -ThemeInput $theme))
+  }
+
   if ($packagedDefaults.Contains("defaultTheme") -and -not [string]::IsNullOrWhiteSpace([string]$packagedDefaults["defaultTheme"])) {
-    return $resolved
+    $named = @($themes | Where-Object { [string]$_.Name -eq [string]$packagedDefaults["defaultTheme"] })
+    if ($named.Count -eq 0 -or @($named | Where-Object { & $targetsPlatform $_ }).Count -gt 0) {
+      return $resolved
+    }
+    $packagedDefaults.Remove("defaultTheme")
   }
 
   $defaults = [System.Collections.Generic.List[string]]::new()
-  foreach ($theme in @(Get-GpThemeInputs -Manifest $resolved)) {
-    if ($theme.Default -and -not [string]::IsNullOrWhiteSpace([string]$theme.Name) -and -not $defaults.Contains([string]$theme.Name)) {
+  foreach ($theme in $themes) {
+    if ($theme.Default -and (& $targetsPlatform $theme) -and -not [string]::IsNullOrWhiteSpace([string]$theme.Name) -and -not $defaults.Contains([string]$theme.Name)) {
       $defaults.Add([string]$theme.Name) | Out-Null
     }
   }
@@ -1618,9 +1660,20 @@ function Test-GpManifest {
     $resolvedDefaultTheme = [string]$Manifest["packagedDefaults"]["defaultTheme"]
   }
   if (-not [string]::IsNullOrWhiteSpace($resolvedDefaultTheme) -and $Manifest.Contains("themeInputs")) {
-    $themeDefaults = @(Get-GpThemeInputs -Manifest $Manifest | Where-Object { $_.Default })
-    foreach ($themeDefault in @($themeDefaults)) {
-      if ([string]$themeDefault.Name -ne $resolvedDefaultTheme) {
+    # A theme input marked default conflicts only when it is for a platform
+    # the default theme is for (every platform, when that isn't a theme input).
+    $allThemeInputs = @(Get-GpThemeInputs -Manifest $Manifest)
+    $resolvedThemePlatforms = @(
+      $allThemeInputs | Where-Object { [string]$_.Name -eq $resolvedDefaultTheme } |
+        ForEach-Object { Get-GpThemeInputTargetPlatforms -ThemeInput $_ }
+    )
+    foreach ($themeDefault in @($allThemeInputs | Where-Object { $_.Default })) {
+      if ([string]$themeDefault.Name -eq $resolvedDefaultTheme) {
+        continue
+      }
+      $overlaps = $resolvedThemePlatforms.Count -eq 0 -or
+        @(Get-GpThemeInputTargetPlatforms -ThemeInput $themeDefault | Where-Object { $_ -in $resolvedThemePlatforms }).Count -gt 0
+      if ($overlaps) {
         Add-Issue "packagedDefaults.defaultTheme must match the default theme input when both are present."
       }
     }

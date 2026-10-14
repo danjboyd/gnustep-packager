@@ -69,6 +69,20 @@ Describe "Theme input contract" {
     $script:downstreamGuiTemplatePath = Join-Path $script:repoRoot "examples\\downstream\\manifest-gnustep-gui.template.json"
 
     . (Join-Path $script:repoRoot "scripts\\lib\\core.ps1")
+    . (Join-Path $script:repoRoot "backends\\msi\\lib\\msi.ps1")
+    . (Join-Path $script:repoRoot "backends\\appimage\\lib\\appimage.ps1")
+
+    function New-GpThemeInput {
+      param([string]$Name, [string[]]$Platforms, [switch]$Default)
+
+      return @{
+        name = $Name
+        repo = "https://example.invalid/$Name.git"
+        platforms = @($Platforms)
+        required = $true
+        default = [bool]$Default
+      }
+    }
   }
 
   It "normalizes declared theme inputs and derives packagedDefaults.defaultTheme" {
@@ -90,12 +104,83 @@ Describe "Theme input contract" {
         )
       }
 
-      $context = Get-GpManifestContext -Path $manifestPath
+      $context = Get-GpManifestContext -Path $manifestPath -Backend "msi"
       $themes = @(Get-GpThemeInputs -Manifest $context.Manifest -Backend "msi" -ActiveOnly)
 
       Assert-GpEqual -Actual $context.Manifest["packagedDefaults"]["defaultTheme"] -Expected "WinUITheme" -Message "A single default theme input should derive packagedDefaults.defaultTheme."
       Assert-GpEqual -Actual @($themes.Name) -Expected @("WinUITheme") -Message "Windows theme inputs should apply to the MSI backend."
       Assert-GpTrue -Condition $themes[0].Required -Message "The required flag should be preserved."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+    }
+  }
+
+  It "keeps a default theme to the platforms of the theme input it names" {
+    $manifestPath = $null
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest["packagedDefaults"] = @{ defaultTheme = "WinUITheme" }
+        $manifest["themeInputs"] = @(New-GpThemeInput -Name "WinUITheme" -Platforms @("msi"))
+      }
+
+      $msiContext = Get-GpManifestContext -Path $manifestPath -Backend "msi"
+      Assert-GpEqual -Actual $msiContext.Manifest["packagedDefaults"]["defaultTheme"] -Expected "WinUITheme" -Message "An MSI-only default theme should apply to the MSI."
+
+      $appImageContext = Get-GpManifestContext -Path $manifestPath -Backend "appimage"
+      Assert-GpTrue -Condition (-not $appImageContext.Manifest["packagedDefaults"].Contains("defaultTheme")) -Message "An MSI-only default theme should not become the AppImage's default."
+      Assert-GpEqual -Actual (Get-GpAppImageAppDomainDefaults -Context $appImageContext) -Expected $null -Message "Without a default theme or app domain, the AppImage seeds no defaults."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+    }
+  }
+
+  It "derives each platform's default theme from the theme input marked default for it" {
+    $manifestPath = $null
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest.Remove("packagedDefaults")
+        $manifest["launch"]["env"].Remove("GSTheme")
+        $manifest["themeInputs"] = @(
+          (New-GpThemeInput -Name "WinUITheme" -Platforms @("windows") -Default),
+          (New-GpThemeInput -Name "Adwaita" -Platforms @("appimage") -Default)
+        )
+      }
+
+      foreach ($case in @(@{ Backend = "msi"; Theme = "WinUITheme" }, @{ Backend = "appimage"; Theme = "Adwaita" })) {
+        $context = Get-GpManifestContext -Path $manifestPath -Backend $case.Backend
+        Assert-GpEqual -Actual $context.Manifest["packagedDefaults"]["defaultTheme"] -Expected $case.Theme -Message "The $($case.Backend) default theme should be its platform's default theme input."
+        $issues = @(Test-GpManifest -Manifest $context.Manifest)
+        Assert-GpTrue -Condition (-not ([string]::Join("`n", $issues) -match "defaultTheme must match")) -Message "Default theme inputs for different platforms don't conflict. Issues: $([string]::Join('; ', $issues))"
+      }
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+    }
+  }
+
+  It "seeds a default theme without app-domain defaults" {
+    $manifestPath = $null
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest["packagedDefaults"] = @{ defaultTheme = "Adwaita" }
+        $manifest["themeInputs"] = @(New-GpThemeInput -Name "Adwaita" -Platforms @("linux", "windows"))
+      }
+
+      $appImageDefaults = Get-GpAppImageAppDomainDefaults -Context (Get-GpManifestContext -Path $manifestPath -Backend "appimage")
+      Assert-GpEqual -Actual @($appImageDefaults.Entries | ForEach-Object { "$($_.Key)=$($_.Value)" }) -Expected @("GSTheme=Adwaita") -Message "The AppImage should seed only GSTheme."
+      $msiDefaults = Get-GpMsiAppDomainDefaults -Context (Get-GpManifestContext -Path $manifestPath -Backend "msi")
+      Assert-GpEqual -Actual @($msiDefaults.Entries | ForEach-Object { "$($_.Key)=$($_.Value)" }) -Expected @("GSTheme=Adwaita") -Message "The MSI should seed only GSTheme."
     } finally {
       if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
         Remove-Item -Force $manifestPath
@@ -631,7 +716,7 @@ Describe "Theme input contract" {
   }
 
   It "ships the downstream GNUstep GUI template with a required default WinUITheme input" {
-    $context = Get-GpManifestContext -Path $script:downstreamGuiTemplatePath
+    $context = Get-GpManifestContext -Path $script:downstreamGuiTemplatePath -Backend "msi"
     $issues = @()
     $issues += @(Test-GpManifestSchema -Path $context.ManifestPath)
     $issues += @(Test-GpManifest -Manifest $context.Manifest)
