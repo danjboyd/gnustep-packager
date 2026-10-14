@@ -3975,6 +3975,8 @@ function Invoke-GpShellCommand {
     [string]$WorkingDirectory,
     [Parameter(Mandatory = $true)]
     [string]$LogPath,
+    # Variables for the command's environment; an empty value removes one.
+    [System.Collections.IDictionary]$Environment = @{},
     [switch]$DryRun
   )
 
@@ -4015,6 +4017,14 @@ function Invoke-GpShellCommand {
       $startInfo.RedirectStandardError = $true
       foreach ($argument in $argumentList) {
         $startInfo.ArgumentList.Add([string]$argument) | Out-Null
+      }
+      foreach ($name in $Environment.Keys) {
+        $value = [string]$Environment[$name]
+        if ([string]::IsNullOrEmpty($value)) {
+          $startInfo.Environment.Remove($name) | Out-Null
+        } else {
+          $startInfo.Environment[$name] = $value
+        }
       }
 
       $process = [System.Diagnostics.Process]::new()
@@ -4560,6 +4570,30 @@ function Invoke-GpThemeProvisioning {
   }
 }
 
+# The package version, for the build and stage commands to put into the app
+# (its Info-gnustep.plist, an About panel): GP_PACKAGE_VERSION is always the
+# effective version, and GP_PACKAGE_VERSION_OVERRIDE the override in effect
+# (-PackageVersion, or the caller's GP_PACKAGE_VERSION_OVERRIDE), or unset
+# without one. A stale GP_PACKAGE_VERSION in the caller's environment never
+# reaches the commands.
+function Get-GpPipelineCommandEnvironment {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context
+  )
+
+  $version = ""
+  $package = $Context.Manifest["package"]
+  if (($package -is [System.Collections.IDictionary]) -and $package.Contains("version")) {
+    $version = [string]$package["version"]
+  }
+
+  return [ordered]@{
+    GP_PACKAGE_VERSION = $version
+    GP_PACKAGE_VERSION_OVERRIDE = [string]$Context.PackageVersionOverride
+  }
+}
+
 function Invoke-GpPipelineCommand {
   param(
     [Parameter(Mandatory = $true)]
@@ -4577,7 +4611,8 @@ function Invoke-GpPipelineCommand {
   $workingDirectory = Resolve-GpManifestPath -Context $Context -RelativePath $pipeline["workingDirectory"]
   $logPath = New-GpCommandLogPath -Context $Context -CommandName $StepName
   $invocation = Get-GpShellInvocation -ShellConfig $shellConfig -Command ([string]$step["command"])
-  $result = Invoke-GpShellCommand -Invocation $invocation -WorkingDirectory $workingDirectory -LogPath $logPath -DryRun:$DryRun
+  $environment = Get-GpPipelineCommandEnvironment -Context $Context
+  $result = Invoke-GpShellCommand -Invocation $invocation -WorkingDirectory $workingDirectory -LogPath $logPath -Environment $environment -DryRun:$DryRun
 
   return [pscustomobject]@{
     StepName = $StepName
