@@ -87,9 +87,10 @@ on:
         default: false
       appimage-clean-smoke-image:
         description: >-
-          AppImage only: also launch the AppImage in this container image (apt- or dnf-based, for
-          example ubuntu:24.04), which has no GNUstep, so a package that only works where the
-          build host's GNUstep is installed fails here. Needs Docker on the runner (not with
+          AppImage only: also launch the AppImage in these container images (apt- or dnf-based,
+          separated by spaces, for example "ubuntu:24.04 fedora:42"), which have no GNUstep, so a
+          package that only works where the build host's GNUstep is installed fails here. Each
+          gets its distribution's default UI fonts. Needs Docker on the runner (not with
           container-appimage). Empty skips it.
         required: false
         type: string
@@ -664,8 +665,11 @@ jobs:
             echo "No AppImage in ${PACKAGE_ROOT}" >&2
             exit 1
           fi
+          read -r -a images <<<"${CLEAN_SMOKE_IMAGE}"
           for appimage in "${appimages[@]}"; do
-            ./.gnustep-packager-toolkit/scripts/ci/appimage-clean-smoke.sh "${appimage}" "${CLEAN_SMOKE_IMAGE}"
+            for image in "${images[@]}"; do
+              ./.gnustep-packager-toolkit/scripts/ci/appimage-clean-smoke.sh "${appimage}" "${image}"
+            done
           done
 
       - name: Upload Package Artifacts

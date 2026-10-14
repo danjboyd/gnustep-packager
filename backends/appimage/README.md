@@ -98,7 +98,10 @@ bundled fonts, so on hosts that have their own fonts nothing changes. See
 `docs/manifest.md`.
 
 Check the result on a host without GNUstep: the reusable workflow's
-`appimage-clean-smoke-image` input launches the AppImage in such a container.
+`appimage-clean-smoke-image` input launches the AppImage in such containers
+(for example `ubuntu:24.04 fedora:42`), each with its distribution's default UI
+fonts, under a GNOME and a non-GNOME `XDG_CURRENT_DESKTOP`. Fedora matters
+here: it has no DejaVu, which `gnustep-back` falls back to.
 
 ## Known Limitations
 - current artifact generation targets x86_64 only
