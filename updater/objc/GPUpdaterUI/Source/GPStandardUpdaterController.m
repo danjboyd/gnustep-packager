@@ -641,7 +641,11 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
   NSView *contentView = [_progressPanel contentView];
 
   _progressLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(20, 68, 380, 22)];
+  // A plain label: selectable, it becomes the panel's first responder and
+  // draws its text as selected (WinUITheme).
   [_progressLabel setEditable:NO];
+  [_progressLabel setSelectable:NO];
+  [_progressLabel setRefusesFirstResponder:YES];
   [_progressLabel setBordered:NO];
   [_progressLabel setDrawsBackground:NO];
   [_progressLabel setStringValue:message];

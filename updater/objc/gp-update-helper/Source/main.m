@@ -94,8 +94,10 @@ static BOOL GPHelperUpdateState(NSString *statePath,
 
   [state setObject:[NSNumber numberWithInt:1] forKey:@"formatVersion"];
   [state setObject:status forKey:@"status"];
+  // timeZoneWithAbbreviation:@"UTC" is nil on Windows, which formats in
+  // the local zone under the Z.
   [state setObject:[[NSDate date] descriptionWithCalendarFormat:@"%Y-%m-%dT%H:%M:%SZ"
-                                                      timeZone:[NSTimeZone timeZoneWithAbbreviation:@"UTC"]
+                                                      timeZone:[NSTimeZone timeZoneForSecondsFromGMT:0]
                                                         locale:nil] forKey:@"updatedAt"];
 
   if ([message length] > 0) {
