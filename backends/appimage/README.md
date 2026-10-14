@@ -85,7 +85,10 @@ to the staged GNUstep tree (for example `runtime/System`): the backend writes a
 relocatable `GNUstep.conf` into the AppDir and `AppRun` points
 `GNUSTEP_CONFIG_FILE` at it. `globalDefaults` and `defaultTheme` (optionally
 limited to some desktops, such as `GNOME`) go into a `GlobalDefaults.plist`
-beside it, below the user's own defaults. See `docs/manifest.md`.
+beside it, below the user's own defaults. The config also gives the AppImage a
+user Library of its own (`~/GNUstep/Library/AppImage/<package id>`), so themes
+and bundles that a user built against the host's GNUstep aren't loaded
+(`gnustepConfig.userLibrary`). See `docs/manifest.md`.
 
 ## Fonts
 `gnustep-back` falls back to DejaVu Sans when a requested font isn't installed,

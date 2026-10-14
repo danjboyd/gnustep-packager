@@ -364,6 +364,7 @@ Important fields:
 - `downloadUrl`
 - `skipAppStreamValidation`
 - `gnustepConfig.systemRoot`
+- `gnustepConfig.userLibrary`
 - `gnustepConfig.globalDefaults`
 - `gnustepConfig.defaultTheme.name`
 - `gnustepConfig.defaultTheme.desktops`
@@ -425,6 +426,17 @@ AppImage GNUstep configuration (`gnustepConfig`):
   GNUstep installed there. Packaging logs a warning when the staged runtime
   has a `System/Library` tree and `systemRoot` is unset. A `GNUSTEP_CONFIG_FILE`
   in `launch.env` still takes precedence.
+- `userLibrary`
+  `app` (the default) or `host`. With `app`, the generated `GNUstep.conf` sets
+  `GNUSTEP_USER_DIR_LIBRARY` to `GNUstep/Library/AppImage/<package.id>` under
+  the user's home, so the AppImage doesn't search `~/GNUstep/Library`. Themes
+  and bundles there are built against the host's GNUstep and fail to load in
+  the bundled runtime. For example, a user's own `Adwaita.theme` stops the
+  bundled one being used, and the app falls back to the default theme. The
+  user's defaults are kept in `GNUSTEP_USER_DEFAULTS_DIR` and aren't affected.
+  The user-domain Application Support, Caches and Services directories move
+  with the Library, so set `host` for an app that keeps files in the host's
+  `~/GNUstep/Library`.
 - `globalDefaults`
   Defaults written to `GlobalDefaults.plist` next to the generated
   `GNUstep.conf`, for example `GSFirstCommandKey: "Control_L"` (Ctrl as the

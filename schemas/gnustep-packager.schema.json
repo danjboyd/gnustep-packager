@@ -1100,6 +1100,13 @@
                 "systemRoot": {
                   "type": "string"
                 },
+                "userLibrary": {
+                  "type": "string",
+                  "enum": [
+                    "app",
+                    "host"
+                  ]
+                },
                 "globalDefaults": {
                   "type": "object",
                   "propertyNames": {
