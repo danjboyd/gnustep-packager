@@ -47,7 +47,10 @@ Describe "Release provenance" {
         [Parameter(Mandatory = $true)]
         [string]$Path,
         [int]$Bits = 64,
-        [switch]$BigEndian
+        [switch]$BigEndian,
+        # The PT_NOTE segment's alignment; with 8, the descriptor follows the
+        # 12-byte header and "GNU\0" at offset 16, with no padding.
+        [int]$NoteAlign = 4
       )
 
       $bytes = [System.Collections.Generic.List[byte]]::new()
@@ -88,10 +91,10 @@ Describe "Release provenance" {
       if ($Bits -eq 64) {
         & $put 4 4; & $put 4 4
         & $put $noteOffset 8; & $put 0 8; & $put 0 8
-        & $put $noteSize 8; & $put $noteSize 8; & $put 4 8
+        & $put $noteSize 8; & $put $noteSize 8; & $put $NoteAlign 8
       } else {
         & $put 4 4; & $put $noteOffset 4; & $put 0 4; & $put 0 4
-        & $put $noteSize 4; & $put $noteSize 4; & $put 4 4; & $put 4 4
+        & $put $noteSize 4; & $put $noteSize 4; & $put 4 4; & $put $NoteAlign 4
       }
 
       & $put 4 4
@@ -109,10 +112,12 @@ Describe "Release provenance" {
     try {
       New-GpTestElf -Path (Join-Path $root "elf64.so")
       New-GpTestElf -Path (Join-Path $root "elf32be.so") -Bits 32 -BigEndian
+      New-GpTestElf -Path (Join-Path $root "elf64-align8.so") -NoteAlign 8
       Set-Content -Path (Join-Path $root "not-elf.dll") -Value "MZ not an ELF file"
 
       Assert-GpEqual -Actual (Get-GpElfBuildId -Path (Join-Path $root "elf64.so")) -Expected $script:buildId -Message "The 64-bit little-endian build ID should be read."
       Assert-GpEqual -Actual (Get-GpElfBuildId -Path (Join-Path $root "elf32be.so")) -Expected $script:buildId -Message "The 32-bit big-endian build ID should be read."
+      Assert-GpEqual -Actual (Get-GpElfBuildId -Path (Join-Path $root "elf64-align8.so")) -Expected $script:buildId -Message "A build ID in an 8-byte-aligned note segment should be read."
       Assert-GpEqual -Actual (Get-GpElfBuildId -Path (Join-Path $root "not-elf.dll")) -Expected $null -Message "A file that isn't ELF has no build ID."
     } finally {
       Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue

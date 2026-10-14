@@ -2249,7 +2249,9 @@ function Get-GpElfBuildId {
         $descriptorSize = & $readAt ($position + 4) 4
         $noteType = & $readAt ($position + 8) 4
         $nameStart = $position + 12
-        $descriptorStart = $nameStart + [long]([math]::Ceiling($nameSize / $noteAlign) * $noteAlign)
+        # The descriptor starts at the note's start plus the 12-byte header and
+        # the name, rounded up to the segment's note alignment, as readelf reads it.
+        $descriptorStart = $position + [long]([math]::Ceiling((12 + $nameSize) / $noteAlign) * $noteAlign)
         if ($noteType -eq 3 -and $nameSize -eq 4) {
           $stream.Position = $nameStart
           $name = $reader.ReadBytes(4)
