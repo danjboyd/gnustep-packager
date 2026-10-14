@@ -143,6 +143,48 @@ Example:
 }
 ```
 
+## Payload Limits
+Both `validation.packageContract` and `validation.installedResult` take two
+limits, checked wherever that section is checked: `packageContract` on the
+staged payload (shared validation) and during packaging, `installedResult`
+on the installed or extracted result in backend validation.
+
+- `forbiddenFiles`
+  Wildcard patterns, matched without regard to case. A pattern without `/`
+  matches file names anywhere in the payload (`libavcodec*`); one with `/`
+  matches paths relative to the payload root (`runtime/lib/*.a`). Each match
+  is a failure that names the files, so a library the app should never pull
+  in (FFmpeg, x264, ImageMagick through a distro `libgnustep-gui`) stops the
+  release instead of silently growing it. Windows and Linux name libraries
+  differently (`avcodec-61.dll`, `libavcodec.so.61`); use `platformOverrides`
+  or list both.
+- `maxPayloadBytes`
+  A budget for the total size of the payload's files (symbolic links are not
+  counted). Going over fails validation and lists the largest files.
+
+`backends.<backend>.validation.maxArtifactBytes` is a budget for the
+backend's artifact itself (the `.AppImage`, `.msi` or `.dmg`), checked at
+the start of that backend's validation.
+
+```json
+{
+  "validation": {
+    "packageContract": {
+      "forbiddenFiles": ["libavcodec*", "libx26*", "libMagick*"],
+      "maxPayloadBytes": 150000000
+    },
+    "installedResult": {
+      "forbiddenFiles": ["libavcodec*", "libx26*", "libMagick*"]
+    }
+  },
+  "backends": {
+    "appimage": {
+      "validation": { "maxArtifactBytes": 40000000 }
+    }
+  }
+}
+```
+
 ## Logs
 Shared validation logs belong under:
 - `outputs.validationRoot`

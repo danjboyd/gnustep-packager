@@ -228,8 +228,16 @@ Important fields:
 - `logs.retainOnSuccess`
 - `packageContract.requiredContent`
 - `packageContract.requiredPaths`
+- `packageContract.forbiddenFiles`
+- `packageContract.maxPayloadBytes`
 - `installedResult.requiredContent`
 - `installedResult.requiredPaths`
+- `installedResult.forbiddenFiles`
+- `installedResult.maxPayloadBytes`
+
+Each backend also takes `backends.<backend>.validation.maxArtifactBytes`, a
+size budget for its artifact. See
+[validation-contract.md](validation-contract.md#payload-limits).
 
 Shared validation still centers on staged-layout checks, but the manifest can
 now also declare semantic package contracts and installed-result assertions.
@@ -327,6 +335,7 @@ Important fields:
 - `runtimeSearchRoots`
 - `unresolvedDependencyPolicy`
 - `ignoredRuntimeDependencies`
+- `validation.maxArtifactBytes`
 - `wix.version`
 - `wix.downloadUrl`
 - `wix.toolRoot`
@@ -362,6 +371,7 @@ Important fields:
 - `validation.runtimeClosure`
 - `validation.allowedSystemLibraries`
 - `validation.allowedExternalRunpaths`
+- `validation.maxArtifactBytes`
 - `smoke.mode`
 - `smoke.arguments`
 - `smoke.environment`
@@ -484,6 +494,7 @@ default):
 - `notarization.required`
 - `validation.requireSignature`
 - `validation.requireGatekeeperAcceptance`
+- `validation.maxArtifactBytes`
 - `smoke.enabled`
 - `smoke.startupSeconds`
 - `smoke.arguments`

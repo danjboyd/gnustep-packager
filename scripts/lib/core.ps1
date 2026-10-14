@@ -3490,6 +3490,154 @@ function Get-GpDefaultThemeContractValue {
   return $null
 }
 
+# Payload limits a validation section declares: file-name patterns that must
+# not appear (a library the payload should never pull in, such as FFmpeg)
+# and a size budget for the whole tree.
+function Get-GpPayloadPolicy {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [ValidateSet("packageContract", "installedResult")]
+    [string]$SectionName
+  )
+
+  $section = Get-GpValidationSection -Manifest $Context.Manifest -SectionName $SectionName
+  $forbidden = [string[]]@($section["forbiddenFiles"] | Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace([string]$_) })
+  $maxBytes = $null
+  if ($section.Contains("maxPayloadBytes") -and $null -ne $section["maxPayloadBytes"]) {
+    $maxBytes = [long]$section["maxPayloadBytes"]
+  }
+
+  return [pscustomobject]@{
+    ForbiddenFiles = $forbidden
+    MaxPayloadBytes = $maxBytes
+  }
+}
+
+function Format-GpByteCount {
+  param(
+    [Parameter(Mandatory = $true)]
+    [long]$Bytes
+  )
+
+  return [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:N1} MB ({1} bytes)", ($Bytes / 1MB), $Bytes)
+}
+
+# Checks a payload tree against a payload policy. A pattern without '/'
+# matches file names; one with '/' matches paths relative to the root. Both
+# are wildcard patterns, matched without regard to case. Symbolic links are
+# matched by name but not counted toward the size.
+function Test-GpPayloadPolicy {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RootPath,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Policy
+  )
+
+  $lines = [System.Collections.Generic.List[string]]::new()
+  $issues = [System.Collections.Generic.List[string]]::new()
+  if (@($Policy.ForbiddenFiles).Count -eq 0 -and $null -eq $Policy.MaxPayloadBytes) {
+    return [pscustomobject]@{ Lines = [string[]]@(); Issues = [string[]]@() }
+  }
+
+  if (-not (Test-Path -LiteralPath $RootPath)) {
+    $message = ("MISSING payload root for payload checks: {0}" -f $RootPath)
+    return [pscustomobject]@{ Lines = [string[]]@($message); Issues = [string[]]@($message) }
+  }
+
+  $rootFull = [System.IO.Path]::GetFullPath($RootPath).TrimEnd([char[]]@('/', '\'))
+  $files = @(Get-ChildItem -LiteralPath $rootFull -Recurse -File -Force -ErrorAction SilentlyContinue)
+  $totalBytes = [long]0
+  $entries = [System.Collections.Generic.List[psobject]]::new()
+  foreach ($file in $files) {
+    $relative = $file.FullName.Substring($rootFull.Length).TrimStart([char[]]@('/', '\')).Replace('\', '/')
+    $entries.Add([pscustomobject]@{ Name = $file.Name; Relative = $relative }) | Out-Null
+    if ([string]::IsNullOrEmpty([string]$file.LinkType)) {
+      $totalBytes += [long]$file.Length
+    }
+  }
+
+  foreach ($pattern in @($Policy.ForbiddenFiles)) {
+    $matchPath = $pattern.Contains('/')
+    $hits = @($entries | Where-Object { $(if ($matchPath) { $_.Relative } else { $_.Name }) -like $pattern } | ForEach-Object { $_.Relative } | Sort-Object)
+    if ($hits.Count -eq 0) {
+      $lines.Add(("OK      forbidden:{0} -> none" -f $pattern)) | Out-Null
+      continue
+    }
+
+    $shown = @($hits | Select-Object -First 10)
+    $more = if ($hits.Count -gt $shown.Count) { (", and {0} more" -f ($hits.Count - $shown.Count)) } else { "" }
+    $message = ("FORBIDDEN {0} -> {1}{2}" -f $pattern, [string]::Join(", ", $shown), $more)
+    $lines.Add($message) | Out-Null
+    $issues.Add($message) | Out-Null
+  }
+
+  if ($null -ne $Policy.MaxPayloadBytes) {
+    if ($totalBytes -gt [long]$Policy.MaxPayloadBytes) {
+      $largest = @($files | Where-Object { [string]::IsNullOrEmpty([string]$_.LinkType) } | Sort-Object Length -Descending | Select-Object -First 5 | ForEach-Object {
+        ("{0} ({1:N1} MB)" -f $_.FullName.Substring($rootFull.Length).TrimStart([char[]]@('/', '\')).Replace('\', '/'), ($_.Length / 1MB))
+      })
+      $message = ("OVERSIZE payload is {0}, over the {1} budget; largest files: {2}" -f (Format-GpByteCount -Bytes $totalBytes), (Format-GpByteCount -Bytes ([long]$Policy.MaxPayloadBytes)), [string]::Join(", ", $largest))
+      $lines.Add($message) | Out-Null
+      $issues.Add($message) | Out-Null
+    } else {
+      $lines.Add(("OK      payload size {0} within the {1} budget" -f (Format-GpByteCount -Bytes $totalBytes), (Format-GpByteCount -Bytes ([long]$Policy.MaxPayloadBytes)))) | Out-Null
+    }
+  }
+
+  return [pscustomobject]@{
+    Lines = [string[]]@($lines.ToArray())
+    Issues = [string[]]@($issues.ToArray())
+  }
+}
+
+# A backend's size budget for its artifact (backends.<name>.validation.
+# maxArtifactBytes), or $null when it sets none.
+function Get-GpArtifactSizeBudget {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest,
+    [Parameter(Mandatory = $true)]
+    [string]$Backend
+  )
+
+  if ($Manifest.Contains("backends") -and ($Manifest["backends"] -is [System.Collections.IDictionary]) -and
+      $Manifest["backends"].Contains($Backend) -and ($Manifest["backends"][$Backend] -is [System.Collections.IDictionary])) {
+    $backendSection = $Manifest["backends"][$Backend]
+    if ($backendSection.Contains("validation") -and ($backendSection["validation"] -is [System.Collections.IDictionary]) -and
+        $backendSection["validation"].Contains("maxArtifactBytes") -and $null -ne $backendSection["validation"]["maxArtifactBytes"]) {
+      return [long]$backendSection["validation"]["maxArtifactBytes"]
+    }
+  }
+
+  return $null
+}
+
+# Throws when the artifact is over its backend's size budget.
+function Assert-GpArtifactSizeBudget {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest,
+    [Parameter(Mandatory = $true)]
+    [string]$Backend,
+    [Parameter(Mandatory = $true)]
+    [string]$ArtifactPath
+  )
+
+  $budget = Get-GpArtifactSizeBudget -Manifest $Manifest -Backend $Backend
+  if ($null -eq $budget) {
+    return $null
+  }
+
+  $size = [long](Get-Item -LiteralPath $ArtifactPath).Length
+  if ($size -gt $budget) {
+    throw ("{0} artifact is {1}, over the backends.{2}.validation.maxArtifactBytes budget of {3}: {4}" -f $Backend, (Format-GpByteCount -Bytes $size), $Backend, (Format-GpByteCount -Bytes $budget), $ArtifactPath)
+  }
+
+  return ("OK      artifact size {0} within the {1} budget" -f (Format-GpByteCount -Bytes $size), (Format-GpByteCount -Bytes $budget))
+}
+
 function Invoke-GpPackageContractAssertions {
   param(
     [Parameter(Mandatory = $true)]
@@ -3700,6 +3848,15 @@ function Invoke-GpPackageContractAssertions {
       $lines.Add($message) | Out-Null
       $issues.Add($message) | Out-Null
     }
+  }
+
+  $payloadPolicy = Get-GpPayloadPolicy -Context $Context -SectionName $sectionName
+  $policyResult = Test-GpPayloadPolicy -RootPath $payloadRoot -Policy $payloadPolicy
+  foreach ($line in @($policyResult.Lines)) {
+    $lines.Add($line) | Out-Null
+  }
+  foreach ($issue in @($policyResult.Issues)) {
+    $issues.Add($issue) | Out-Null
   }
 
   if (-not [string]::IsNullOrWhiteSpace($LogPath)) {

@@ -442,6 +442,128 @@ Describe "Shared validation contract" {
     }
   }
 
+  It "reports forbidden payload files by name or relative path and checks the size budget" {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-payload-policy-" + [guid]::NewGuid().ToString("N"))
+    try {
+      New-Item -ItemType Directory -Force -Path (Join-Path $tempRoot "runtime/lib") | Out-Null
+      New-Item -ItemType Directory -Force -Path (Join-Path $tempRoot "app") | Out-Null
+      Set-Content -Path (Join-Path $tempRoot "runtime/lib/libgnustep-base.so.1.31") -Value ("x" * 1000) -NoNewline
+      Set-Content -Path (Join-Path $tempRoot "runtime/lib/libavcodec.so.61") -Value ("x" * 3000) -NoNewline
+      Set-Content -Path (Join-Path $tempRoot "runtime/lib/LIBX265.so.209") -Value ("x" * 100) -NoNewline
+      Set-Content -Path (Join-Path $tempRoot "app/notes.a") -Value "x" -NoNewline
+
+      $policy = [pscustomobject]@{
+        ForbiddenFiles = [string[]]@("libavcodec*", "libx26*", "runtime/lib/*.a", "libMagick*")
+        MaxPayloadBytes = [long]4000
+      }
+      $result = Test-GpPayloadPolicy -RootPath $tempRoot -Policy $policy
+      $text = [string]::Join("`n", @($result.Lines))
+
+      Assert-GpEqual -Actual @($result.Issues).Count -Expected 3 -Message "Two forbidden patterns and the size budget should be reported."
+      Assert-GpMatch -Actual $text -Pattern "FORBIDDEN libavcodec\* -> runtime/lib/libavcodec\.so\.61" -Message "A name pattern should match the file name and report its relative path."
+      Assert-GpMatch -Actual $text -Pattern "FORBIDDEN libx26\* -> runtime/lib/LIBX265\.so\.209" -Message "Name patterns should match without regard to case."
+      Assert-GpMatch -Actual $text -Pattern "OK      forbidden:runtime/lib/\*\.a -> none" -Message "A path pattern should only match under its directory."
+      Assert-GpMatch -Actual $text -Pattern "OVERSIZE payload is .* over the .*4000 bytes.* budget; largest files: runtime/lib/libavcodec\.so\.61" -Message "An oversize payload should name the budget and its largest files."
+
+      $within = Test-GpPayloadPolicy -RootPath $tempRoot -Policy ([pscustomobject]@{ ForbiddenFiles = [string[]]@(); MaxPayloadBytes = [long]100000 })
+      Assert-GpEqual -Actual @($within.Issues).Count -Expected 0 -Message "A payload within its budget should pass."
+
+      if (-not $IsWindows) {
+        New-Item -ItemType SymbolicLink -Path (Join-Path $tempRoot "runtime/lib/libgnustep-base.so") -Target "libgnustep-base.so.1.31" | Out-Null
+        $exact = Test-GpPayloadPolicy -RootPath $tempRoot -Policy ([pscustomobject]@{ ForbiddenFiles = [string[]]@(); MaxPayloadBytes = [long]4101 })
+        Assert-GpEqual -Actual @($exact.Issues).Count -Expected 0 -Message "Symbolic links should not count toward the payload size."
+      }
+
+      $none = Test-GpPayloadPolicy -RootPath $tempRoot -Policy ([pscustomobject]@{ ForbiddenFiles = [string[]]@(); MaxPayloadBytes = $null })
+      Assert-GpEqual -Actual @($none.Lines).Count -Expected 0 -Message "No policy should mean no payload checks."
+    } finally {
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
+  It "fails shared validation on a forbidden library in the staged payload" {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-payload-policy-stage-" + [guid]::NewGuid().ToString("N"))
+    $stageRoot = Join-Path $tempRoot "stage"
+    $manifestPath = $null
+    $threw = $false
+
+    foreach ($relative in @(
+      "app/SampleGNUstepApp.app/SampleGNUstepApp.exe",
+      "app/SampleGNUstepApp.app/Resources/Info-gnustep.plist",
+      "runtime/bin/defaults.exe",
+      "runtime/bin/avcodec-61.dll",
+      "metadata/icons/sample-icon.txt"
+    )) {
+      $path = Join-Path $stageRoot $relative
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+      Set-Content -Path $path -Value "fixture"
+    }
+
+    try {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+        param($manifest)
+        $manifest["payload"]["stageRoot"] = $stageRoot
+        $manifest["outputs"]["root"] = (Join-Path $tempRoot "dist")
+        $manifest["outputs"]["packageRoot"] = (Join-Path $tempRoot "dist\\packages")
+        $manifest["outputs"]["logRoot"] = (Join-Path $tempRoot "dist\\logs")
+        $manifest["outputs"]["tempRoot"] = (Join-Path $tempRoot "dist\\tmp")
+        $manifest["outputs"]["validationRoot"] = (Join-Path $tempRoot "dist\\validation")
+        $manifest["validation"]["packageContract"] = @{
+          forbiddenFiles = @("avcodec-*.dll", "libavcodec*")
+        }
+      }
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      try {
+        Invoke-GpSharedValidation -Context $context | Out-Null
+      } catch {
+        $threw = $true
+        Assert-GpMatch -Actual $_.Exception.Message -Pattern "Shared validation failed" -Message "A forbidden staged library should fail shared validation."
+        $logText = Get-Content -Raw -Path ([regex]::Match($_.Exception.Message, "See log: (.+)$").Groups[1].Value)
+        Assert-GpMatch -Actual $logText -Pattern "FORBIDDEN avcodec-\*\.dll -> runtime/bin/avcodec-61\.dll" -Message "The validation log should name the forbidden file."
+      }
+
+      Assert-GpTrue -Condition $threw -Message "Shared validation should fail when the stage holds a forbidden library."
+    } finally {
+      if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
+        Remove-Item -Force $manifestPath
+      }
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
+  It "reads a backend's artifact size budget and fails an artifact over it" {
+    $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-artifact-budget-" + [guid]::NewGuid().ToString("N") + ".bin")
+    try {
+      Set-Content -Path $tempFile -Value ("x" * 2048) -NoNewline
+      $manifest = @{ backends = @{ msi = @{ validation = @{ maxArtifactBytes = 1024 } }; appimage = @{ enabled = $true } } }
+
+      Assert-GpEqual -Actual (Get-GpArtifactSizeBudget -Manifest $manifest -Backend "msi") -Expected 1024 -Message "The MSI budget should come from backends.msi.validation."
+      Assert-GpTrue -Condition ($null -eq (Get-GpArtifactSizeBudget -Manifest $manifest -Backend "appimage")) -Message "A backend without a budget should have none."
+      Assert-GpTrue -Condition ($null -eq (Assert-GpArtifactSizeBudget -Manifest $manifest -Backend "appimage" -ArtifactPath $tempFile)) -Message "No budget should mean no check."
+
+      $message = $null
+      try {
+        Assert-GpArtifactSizeBudget -Manifest $manifest -Backend "msi" -ArtifactPath $tempFile | Out-Null
+      } catch {
+        $message = $_.Exception.Message
+      }
+      Assert-GpTrue -Condition ($null -ne $message) -Message "An artifact over its budget should fail."
+      Assert-GpMatch -Actual $message -Pattern "msi artifact is .*2048 bytes.*maxArtifactBytes budget of .*1024 bytes" -Message "The failure should give the size and the budget."
+
+      $manifest["backends"]["msi"]["validation"]["maxArtifactBytes"] = 4096
+      Assert-GpMatch -Actual (Assert-GpArtifactSizeBudget -Manifest $manifest -Backend "msi" -ArtifactPath $tempFile) -Pattern "^OK      artifact size" -Message "An artifact within its budget should pass."
+    } finally {
+      if (Test-Path $tempFile) {
+        Remove-Item -Force $tempFile
+      }
+    }
+  }
+
   It "validates bundled-theme semantically against stage content" {
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-validation-theme-stage-" + [guid]::NewGuid().ToString("N"))
     $stageRoot = Join-Path $tempRoot "stage"
