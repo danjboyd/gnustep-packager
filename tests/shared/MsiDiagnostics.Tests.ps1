@@ -95,6 +95,17 @@ Describe "MSI diagnostics helpers" {
     }
   }
 
+  It "classifies Windows system DLLs that MSYS2 CLANG64 libraries import" {
+    # libcurl, which gnustep-base links, imports wldap32 (LDAP) and normaliz
+    # (IDN); these ship with every Windows and are never bundled.
+    foreach ($name in @("WLDAP32.dll", "Normaliz.dll", "dbghelp.dll", "psapi.dll", "mswsock.dll", "wintrust.dll", "KERNEL32.dll", "api-ms-win-crt-runtime-l1-1-0.dll")) {
+      Assert-GpEqual -Actual (Test-GpMsiSystemDllName -Name $name) -Expected $true -Message "$name should be a system DLL."
+    }
+    foreach ($name in @("libcurl-4.dll", "libgnustep-base-1_31.dll", "libldap.dll")) {
+      Assert-GpEqual -Actual (Test-GpMsiSystemDllName -Name $name) -Expected $false -Message "$name should be bundled, not treated as a system DLL."
+    }
+  }
+
   It "treats standard Windows runtime imports as system dependencies during installed runtime audit" {
     $systemDlls = @(
       "dwrite.dll",
