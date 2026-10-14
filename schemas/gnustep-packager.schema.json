@@ -466,6 +466,20 @@
         }
       }
     },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provenanceFile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lockFile": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "provenance": {
       "type": "object",
       "additionalProperties": false,

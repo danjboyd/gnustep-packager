@@ -2367,6 +2367,173 @@ function Get-GpPayloadProvenanceFiles {
   return @($files.ToArray())
 }
 
+# The GNUstep toolchain a release must be built with (Roadmap 18D): the
+# provenance file a gnustep-cli-new custom toolchain build writes into its
+# prefix (gnustep-toolchain-provenance.json), and optionally the lock it was
+# built from. GP_TOOLCHAIN_PROVENANCE overrides toolchain.provenanceFile, so
+# CI can point at its cached prefix. $null without a toolchain section.
+function Get-GpToolchainSettings {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context
+  )
+
+  if (-not $Context.Manifest.Contains("toolchain") -or -not ($Context.Manifest["toolchain"] -is [System.Collections.IDictionary])) {
+    return $null
+  }
+
+  $toolchain = $Context.Manifest["toolchain"]
+  $provenance = if (-not [string]::IsNullOrWhiteSpace($env:GP_TOOLCHAIN_PROVENANCE)) {
+    $env:GP_TOOLCHAIN_PROVENANCE
+  } elseif (-not [string]::IsNullOrWhiteSpace([string]$toolchain["provenanceFile"])) {
+    Resolve-GpManifestPath -Context $Context -RelativePath ([string]$toolchain["provenanceFile"])
+  } else {
+    $null
+  }
+
+  return [pscustomobject]@{
+    ProvenancePath = $provenance
+    LockPath = $(if (-not [string]::IsNullOrWhiteSpace([string]$toolchain["lockFile"])) { Resolve-GpManifestPath -Context $Context -RelativePath ([string]$toolchain["lockFile"]) } else { $null })
+  }
+}
+
+# The toolchain's provenance file, checked for the fields the packager reads:
+# kind, schema_version 1, lock.sha256, components and elf_files (or the
+# older elf_build_ids). Returns the build IDs as a set alongside it.
+function Read-GpToolchainProvenance {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    throw "The toolchain provenance file was not found: $Path. Set toolchain.provenanceFile or GP_TOOLCHAIN_PROVENANCE to <prefix>/gnustep-toolchain-provenance.json."
+  }
+  $document = Get-GpJsonFile -Path $Path
+  if ([string]$document["kind"] -ne "custom-gnustep-toolchain-provenance" -or [int]$document["schema_version"] -ne 1) {
+    throw "$Path is not a gnustep-cli-new toolchain provenance file (kind custom-gnustep-toolchain-provenance, schema_version 1)."
+  }
+
+  $buildIds = [System.Collections.Generic.Dictionary[string, bool]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  if ($document["elf_files"] -is [System.Collections.IDictionary]) {
+    foreach ($entry in @($document["elf_files"].Values)) {
+      if (($entry -is [System.Collections.IDictionary]) -and -not [string]::IsNullOrWhiteSpace([string]$entry["build_id"])) {
+        $buildIds[[string]$entry["build_id"]] = $true
+      }
+    }
+  }
+  if ($document["elf_build_ids"] -is [System.Collections.IDictionary]) {
+    foreach ($buildId in @($document["elf_build_ids"].Values)) {
+      if (-not [string]::IsNullOrWhiteSpace([string]$buildId)) {
+        $buildIds[[string]$buildId] = $true
+      }
+    }
+  }
+
+  return [pscustomobject]@{
+    Document = $document
+    Name = [string]$document["name"]
+    LockSha256 = $(if ($document["lock"] -is [System.Collections.IDictionary]) { [string]$document["lock"]["sha256"] } else { $null })
+    BuildIds = $buildIds
+  }
+}
+
+# Checks a staged payload against the pinned toolchain: the lock it was
+# built from is the repo's lock, and every GNUstep library
+# (provenance.libraries) with an ELF build ID has one the toolchain built.
+# Matching by build ID, not hash, survives stripping and patchelf.
+function Test-GpToolchainPin {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [string]$PayloadRoot
+  )
+
+  $lines = [System.Collections.Generic.List[string]]::new()
+  $issues = [System.Collections.Generic.List[string]]::new()
+  $settings = Get-GpToolchainSettings -Context $Context
+  if ($null -eq $settings) {
+    return [pscustomobject]@{ Lines = @(); Issues = @() }
+  }
+
+  try {
+    $toolchain = Read-GpToolchainProvenance -Path ([string]$settings.ProvenancePath)
+  } catch {
+    $issues.Add(("TOOLCHAIN {0}" -f $_.Exception.Message)) | Out-Null
+    return [pscustomobject]@{ Lines = @($issues.ToArray()); Issues = @($issues.ToArray()) }
+  }
+  $lines.Add(("TOOLCHAIN {0} ({1} build IDs)" -f $toolchain.Name, $toolchain.BuildIds.Count)) | Out-Null
+
+  if (-not [string]::IsNullOrWhiteSpace([string]$settings.LockPath)) {
+    $lockSha256 = Get-GpFileSha256 -Path $settings.LockPath
+    if ($null -eq $lockSha256) {
+      $issues.Add(("TOOLCHAIN lock file not found: {0}" -f $settings.LockPath)) | Out-Null
+    } elseif ($lockSha256 -ne ([string]$toolchain.LockSha256).ToLowerInvariant()) {
+      $issues.Add(("TOOLCHAIN the toolchain was built from a different lock: {0} has sha256 {1}, the toolchain's lock {2}. Rebuild the toolchain." -f $settings.LockPath, $lockSha256, $toolchain.LockSha256)) | Out-Null
+    } else {
+      $lines.Add(("LOCK    {0} sha256 {1}" -f $settings.LockPath, $lockSha256)) | Out-Null
+    }
+  }
+
+  $patterns = (Get-GpProvenanceSettings -Context $Context).Libraries
+  $compared = 0
+  foreach ($file in @(Get-GpPayloadProvenanceFiles -PayloadRoot $PayloadRoot -LibraryPatterns $patterns)) {
+    if ([string]::IsNullOrWhiteSpace([string]$file.elfBuildId)) {
+      continue
+    }
+    $compared += 1
+    if ($toolchain.BuildIds.ContainsKey([string]$file.elfBuildId)) {
+      $lines.Add(("OK      {0} build ID {1}" -f $file.path, $file.elfBuildId)) | Out-Null
+    } else {
+      $issues.Add(("TOOLCHAIN {0} has build ID {1}, which toolchain {2} did not build: the payload was built with a different GNUstep." -f $file.path, $file.elfBuildId, $toolchain.Name)) | Out-Null
+    }
+  }
+  if ($compared -eq 0) {
+    $lines.Add("INFO    no staged GNUstep library has an ELF build ID to compare") | Out-Null
+  }
+
+  return [pscustomobject]@{
+    Lines = @(@($lines.ToArray()) + @($issues.ToArray()))
+    Issues = @($issues.ToArray())
+  }
+}
+
+# The pinned toolchain, for the release's provenance: its name, lock hash
+# and the commits of its components, without the build machine's paths.
+function Get-GpToolchainProvenanceSummary {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context
+  )
+
+  $settings = Get-GpToolchainSettings -Context $Context
+  if ($null -eq $settings -or [string]::IsNullOrWhiteSpace([string]$settings.ProvenancePath) -or -not (Test-Path -LiteralPath $settings.ProvenancePath)) {
+    return $null
+  }
+
+  try {
+    $toolchain = Read-GpToolchainProvenance -Path $settings.ProvenancePath
+  } catch {
+    return $null
+  }
+
+  return [ordered]@{
+    name = $toolchain.Name
+    lockSha256 = $toolchain.LockSha256
+    components = @(
+      foreach ($component in @($toolchain.Document["components"])) {
+        if ($component -is [System.Collections.IDictionary]) {
+          [ordered]@{
+            name = [string]$component["name"]
+            resolvedCommit = [string]$component["resolved_commit"]
+          }
+        }
+      }
+    )
+  }
+}
+
 # A record of what a release was built from that is safe to publish: no
 # absolute paths from the build machine. It sits beside the artifact as
 # <artifact-base>.provenance.json. Returns its path, or $null when
@@ -2406,6 +2573,7 @@ function Write-GpProvenanceDocument {
     }
     source = Get-GpSourceRevision -Path $Context.ManifestRoot
     packager = Get-GpSourceRevision -Path $Context.ToolRoot
+    toolchain = Get-GpToolchainProvenanceSummary -Context $Context
     files = @(Get-GpPayloadProvenanceFiles -PayloadRoot $PayloadRoot -LibraryPatterns $settings.Libraries -EntryPath $EntryPath)
   }
 
@@ -4983,6 +5151,11 @@ function Invoke-GpSharedValidation {
   foreach ($issue in @($stageContract.Issues)) {
     $missing.Add($issue) | Out-Null
   }
+  $stageRoot = Resolve-GpManifestPath -Context $Context -RelativePath $Context.Manifest["payload"]["stageRoot"]
+  $toolchainPin = if (Test-Path -LiteralPath $stageRoot) { Test-GpToolchainPin -Context $Context -PayloadRoot $stageRoot } else { [pscustomobject]@{ Lines = @(); Issues = @() } }
+  foreach ($issue in @($toolchainPin.Issues)) {
+    $missing.Add($issue) | Out-Null
+  }
 
   if ($lines.Count -gt 0) {
     Set-Content -Path $logPath -Value $lines
@@ -4993,6 +5166,11 @@ function Invoke-GpSharedValidation {
     }
   } else {
     Set-Content -Path $logPath -Value @($stageContract.Lines)
+  }
+  if (@($toolchainPin.Lines).Count -gt 0) {
+    Add-Content -Path $logPath -Value ""
+    Add-Content -Path $logPath -Value "[toolchain]"
+    Add-Content -Path $logPath -Value @($toolchainPin.Lines)
   }
 
   if ($missing.Count -gt 0) {

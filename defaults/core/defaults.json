@@ -17,6 +17,7 @@
       "libgnustep-*",
       "libobjc*",
       "libdispatch*",
+      "libBlocksRuntime*",
       "dispatch.dll"
     ]
   },
