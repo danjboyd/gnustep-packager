@@ -51,6 +51,10 @@ Both local and CI flows can override the package version with:
 - `-PackageVersion <value>`
 - or `GP_PACKAGE_VERSION_OVERRIDE`
 
+The build and stage commands see the effective version as `GP_PACKAGE_VERSION`
+and the override as `GP_PACKAGE_VERSION_OVERRIDE`; see
+[manifest.md](manifest.md#pipeline).
+
 ## Why This Matters
 Without a single shared entry point, CI and local runs drift quickly:
 

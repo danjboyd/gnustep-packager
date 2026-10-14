@@ -59,6 +59,17 @@ Current `shell.kind` values used by the reference fixtures:
 - `pwsh`
 - `bash`
 
+The build and stage commands get the package version in their environment, so
+they can write it into the app (its `Info-gnustep.plist`, an About panel):
+
+- `GP_PACKAGE_VERSION`: the effective version, the override when there is one,
+  else `package.version`
+- `GP_PACKAGE_VERSION_OVERRIDE`: the override in effect (`-PackageVersion`, the
+  reusable workflow's `package-version`, or the caller's
+  `GP_PACKAGE_VERSION_OVERRIDE`), and unset without one
+
+`shell.environment` is applied inside the shell, after these.
+
 ## `payload`
 Describes the staged layout.
 
