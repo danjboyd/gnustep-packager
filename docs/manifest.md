@@ -619,7 +619,25 @@ Fields:
   at its cached prefix.
 - `lockFile`
   Optional: the lock the toolchain must have been built from, usually
-  `gnustep-toolchain.lock.json` in the app's repository.
+  `gnustep-toolchain.lock.json` in the app's repository. The lock's SHA-256 is
+  compared both as checked out and with CRLF line endings turned into LF, so a
+  Windows checkout with `core.autocrlf` still matches a toolchain built on
+  Linux. To keep the bytes identical everywhere anyway, mark the lock
+  `-text` in `.gitattributes`:
+  `gnustep-toolchain.lock.json -text`.
+- `foreignLibraries`
+  Optional: file-name patterns (or payload-relative path patterns) for staged
+  libraries that match `provenance.libraries` but are meant to come from
+  somewhere other than the toolchain, such as a distribution's
+  `libdispatch`/`libBlocksRuntime`, GCC's `libobjc`, or a `libs-back` carried
+  from another build. They are reported as `FOREIGN`, with their build ID and
+  the toolchain's build ID for a file of that name, instead of failing.
+
+Relative `provenanceFile` and `lockFile` paths resolve against the directory
+that holds the manifest, not the working directory. With the manifest at
+`packaging/package.manifest.json` and the lock at
+`scripts/gnustep-toolchain.lock.json`, write
+`"lockFile": "../scripts/gnustep-toolchain.lock.json"`.
 
 Shared validation (`validate`, and the pipeline before packaging) then fails
 when:
@@ -629,8 +647,9 @@ when:
 - `lockFile` is set and its SHA-256 differs from the lock the toolchain was
   built from: the lock (or one of its patches) changed without a rebuild
 - a staged file matching `provenance.libraries` has an ELF build ID that is not
-  among the toolchain's `elf_files`: the payload was built with a different
-  GNUstep. Build IDs are compared rather than hashes, since stripping and
+  among the toolchain's `elf_files` and isn't listed in `foreignLibraries`: the
+  payload was built with a different GNUstep. The message names the file, its
+  build ID and the build ID the toolchain built a file of that name with. Build IDs are compared rather than hashes, since stripping and
   `patchelf` change a file's hash but not its build ID.
 
 The release's `<artifact-base>.provenance.json` gains a `toolchain` entry with
@@ -642,7 +661,8 @@ compare; the lock check still applies.
 {
   "toolchain": {
     "provenanceFile": "/opt/ci-cache/gnustep/gnustep-toolchain-provenance.json",
-    "lockFile": "gnustep-toolchain.lock.json"
+    "lockFile": "../scripts/gnustep-toolchain.lock.json",
+    "foreignLibraries": ["libdispatch*", "libBlocksRuntime*"]
   }
 }
 ```

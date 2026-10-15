@@ -230,7 +230,27 @@ Describe "Release provenance" {
 
       & $writeProvenance ("f" * 40) (Get-GpFileSha256 -Path $lockPath)
       $issues = [string]::Join("`n", @((Test-GpToolchainPin -Context $context -PayloadRoot $stage).Issues))
-      Assert-GpTrue -Condition ($issues -match "runtime/System/Library/Libraries/libgnustep-base\.so\.1\.31\.1 has build ID $($script:buildId), which toolchain fixture-toolchain did not build") -Message "A library from another GNUstep should fail, naming it. Issues: $issues"
+      Assert-GpTrue -Condition ($issues -match "runtime/System/Library/Libraries/libgnustep-base\.so\.1\.31\.1 has build ID $($script:buildId), which toolchain fixture-toolchain did not build \(the toolchain's libgnustep-base\.so\.1\.31\.1 has build ID $('f' * 40)\)") -Message "A library from another GNUstep should fail, naming it and both build IDs. Issues: $issues"
+
+      $context.Manifest["toolchain"]["foreignLibraries"] = @("libgnustep-base.so*")
+      $result = Test-GpToolchainPin -Context $context -PayloadRoot $stage
+      Assert-GpEqual -Actual @($result.Issues).Count -Expected 0 -Message "A library listed in foreignLibraries should not fail. Issues: $([string]::Join('; ', @($result.Issues)))"
+      Assert-GpTrue -Condition (@($result.Lines | Where-Object { $_ -like "FOREIGN *libgnustep-base.so.1.31.1 build ID $($script:buildId)*allowed by toolchain.foreignLibraries" }).Count -eq 1) -Message "A foreign library should still be reported. Lines: $([string]::Join('; ', @($result.Lines)))"
+      $context.Manifest["toolchain"].Remove("foreignLibraries")
+
+      # The same lock checked out with CRLF line endings still matches a
+      # toolchain that hashed it with LF.
+      $lfSha256 = Get-GpFileSha256 -Path $lockPath
+      & $writeProvenance $script:buildId $lfSha256
+      [System.IO.File]::WriteAllText($lockPath, "{`r`n  `"name`": `"fixture`"`r`n}`r`n")
+      $crlfLock = (Get-GpToolchainLockSha256Candidates -Path $lockPath)
+      [System.IO.File]::WriteAllText($lockPath, "{`n  `"name`": `"fixture`"`n}`n")
+      Assert-GpEqual -Actual $crlfLock.Normalized -Expected (Get-GpFileSha256 -Path $lockPath) -Message "A CRLF lock normalizes to the LF lock's hash."
+      & $writeProvenance $script:buildId (Get-GpFileSha256 -Path $lockPath)
+      [System.IO.File]::WriteAllText($lockPath, "{`r`n  `"name`": `"fixture`"`r`n}`r`n")
+      $issues = [string]::Join("`n", @((Test-GpToolchainPin -Context $context -PayloadRoot $stage).Issues))
+      Assert-GpTrue -Condition (-not ($issues -match "different lock")) -Message "Only line endings differ, so the lock should match. Issues: $issues"
+      Set-Content -Path $lockPath -Value '{"schema_version":1,"kind":"custom-toolchain-lock","name":"fixture"}' -NoNewline
 
       & $writeProvenance $script:buildId ("a" * 64)
       $issues = [string]::Join("`n", @((Test-GpToolchainPin -Context $context -PayloadRoot $stage).Issues))

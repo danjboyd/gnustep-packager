@@ -2394,6 +2394,7 @@ function Get-GpToolchainSettings {
   return [pscustomobject]@{
     ProvenancePath = $provenance
     LockPath = $(if (-not [string]::IsNullOrWhiteSpace([string]$toolchain["lockFile"])) { Resolve-GpManifestPath -Context $Context -RelativePath ([string]$toolchain["lockFile"]) } else { $null })
+    ForeignLibraries = [string[]]@(@($toolchain["foreignLibraries"]) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
   }
 }
 
@@ -2415,10 +2416,15 @@ function Read-GpToolchainProvenance {
   }
 
   $buildIds = [System.Collections.Generic.Dictionary[string, bool]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  # File name -> the build ID the toolchain built it with, to name both IDs
+  # when a staged library doesn't match.
+  $buildIdsByName = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::Ordinal)
   if ($document["elf_files"] -is [System.Collections.IDictionary]) {
-    foreach ($entry in @($document["elf_files"].Values)) {
+    foreach ($key in @($document["elf_files"].Keys)) {
+      $entry = $document["elf_files"][$key]
       if (($entry -is [System.Collections.IDictionary]) -and -not [string]::IsNullOrWhiteSpace([string]$entry["build_id"])) {
         $buildIds[[string]$entry["build_id"]] = $true
+        $buildIdsByName[[System.IO.Path]::GetFileName([string]$key)] = [string]$entry["build_id"]
       }
     }
   }
@@ -2435,6 +2441,45 @@ function Read-GpToolchainProvenance {
     Name = [string]$document["name"]
     LockSha256 = $(if ($document["lock"] -is [System.Collections.IDictionary]) { [string]$document["lock"]["sha256"] } else { $null })
     BuildIds = $buildIds
+    BuildIdsByName = $buildIdsByName
+  }
+}
+
+# A lock's SHA-256 both as stored and with CRLF line endings turned into LF,
+# so a Windows checkout with core.autocrlf still matches a toolchain whose
+# lock was hashed on Linux (and the other way round). $null when missing.
+function Get-GpToolchainLockSha256Candidates {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return $null
+  }
+
+  $bytes = [System.IO.File]::ReadAllBytes($Path)
+  $normalized = [System.Collections.Generic.List[byte]]::new($bytes.Length)
+  for ($index = 0; $index -lt $bytes.Length; $index++) {
+    if ($bytes[$index] -eq 13 -and ($index + 1) -lt $bytes.Length -and $bytes[$index + 1] -eq 10) {
+      continue
+    }
+    $normalized.Add($bytes[$index])
+  }
+
+  $hash = {
+    param([byte[]]$Data)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      return ([System.BitConverter]::ToString($sha.ComputeHash($Data)) -replace "-", "").ToLowerInvariant()
+    } finally {
+      $sha.Dispose()
+    }
+  }
+
+  return [pscustomobject]@{
+    Raw = & $hash $bytes
+    Normalized = & $hash $normalized.ToArray()
   }
 }
 
@@ -2469,13 +2514,14 @@ function Test-GpToolchainPin {
   $lines.Add(("TOOLCHAIN {0} ({1} build IDs)" -f $toolchain.Name, $toolchain.BuildIds.Count)) | Out-Null
 
   if (-not [string]::IsNullOrWhiteSpace([string]$settings.LockPath)) {
-    $lockSha256 = Get-GpFileSha256 -Path $settings.LockPath
+    $lockSha256 = Get-GpToolchainLockSha256Candidates -Path $settings.LockPath
+    $expected = ([string]$toolchain.LockSha256).ToLowerInvariant()
     if ($null -eq $lockSha256) {
       $issues.Add(("TOOLCHAIN lock file not found: {0}" -f $settings.LockPath)) | Out-Null
-    } elseif ($lockSha256 -ne ([string]$toolchain.LockSha256).ToLowerInvariant()) {
-      $issues.Add(("TOOLCHAIN the toolchain was built from a different lock: {0} has sha256 {1}, the toolchain's lock {2}. Rebuild the toolchain." -f $settings.LockPath, $lockSha256, $toolchain.LockSha256)) | Out-Null
+    } elseif ($expected -ne $lockSha256.Raw -and $expected -ne $lockSha256.Normalized) {
+      $issues.Add(("TOOLCHAIN the toolchain was built from a different lock: {0} has sha256 {1} ({2} with LF line endings), the toolchain's lock {3}. Rebuild the toolchain." -f $settings.LockPath, $lockSha256.Raw, $lockSha256.Normalized, $toolchain.LockSha256)) | Out-Null
     } else {
-      $lines.Add(("LOCK    {0} sha256 {1}" -f $settings.LockPath, $lockSha256)) | Out-Null
+      $lines.Add(("LOCK    {0} sha256 {1}" -f $settings.LockPath, $expected)) | Out-Null
     }
   }
 
@@ -2486,10 +2532,15 @@ function Test-GpToolchainPin {
       continue
     }
     $compared += 1
+    $name = [System.IO.Path]::GetFileName([string]$file.path)
+    $toolchainBuildId = if ($toolchain.BuildIdsByName.ContainsKey($name)) { $toolchain.BuildIdsByName[$name] } else { $null }
+    $built = if ($null -ne $toolchainBuildId) { "the toolchain's $name has build ID $toolchainBuildId" } else { "the toolchain has no file named $name" }
     if ($toolchain.BuildIds.ContainsKey([string]$file.elfBuildId)) {
       $lines.Add(("OK      {0} build ID {1}" -f $file.path, $file.elfBuildId)) | Out-Null
+    } elseif (@($settings.ForeignLibraries | Where-Object { $name -like $_ -or ([string]$file.path) -like $_ }).Count -gt 0) {
+      $lines.Add(("FOREIGN {0} build ID {1} is not from toolchain {2} ({3}); allowed by toolchain.foreignLibraries" -f $file.path, $file.elfBuildId, $toolchain.Name, $built)) | Out-Null
     } else {
-      $issues.Add(("TOOLCHAIN {0} has build ID {1}, which toolchain {2} did not build: the payload was built with a different GNUstep." -f $file.path, $file.elfBuildId, $toolchain.Name)) | Out-Null
+      $issues.Add(("TOOLCHAIN {0} has build ID {1}, which toolchain {2} did not build ({3}): the payload was built with a different GNUstep. If this library is meant to come from elsewhere (the distribution, another build), list it in toolchain.foreignLibraries." -f $file.path, $file.elfBuildId, $toolchain.Name, $built)) | Out-Null
     }
   }
   if ($compared -eq 0) {
