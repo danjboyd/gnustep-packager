@@ -1570,7 +1570,8 @@ as ignored settings instead.
 Goal: catch a payload that only works on the build machine, or that pulled
 in far more than intended, before it ships, and record what each release
 was built from.
-Status: 18A in progress; 18B and 18C next; 18D waits on gnustep-cli-new.
+Status: 18A and 18B implemented; 18C implemented for the AppImage and MSI
+(DMG follows); 18D waits on gnustep-cli-new.
 
 Prompted by LinDirStat v0.1.0: its AppImage aborted on first launch because
 `make_services` wasn't bundled, yet `validate -RunSmoke` passed, since the
@@ -1607,6 +1608,9 @@ Execution order: 18A, 18B, 18C, then 18D.
   Deliverables:
   - ELF build IDs of the bundled GNUstep libraries in the release metadata
   - release metadata without absolute build-machine paths, safe to publish
+  Implemented as `<artifact-base>.provenance.json` (`provenance` in
+  `docs/manifest.md`) for the AppImage and MSI. Follow-ups: the DMG backend
+  (Mach-O `LC_UUID`), and PE CodeView IDs for the MSI's DLLs.
   Exit criteria:
   - anyone can tell which libs-base, libs-gui and libs-back builds a release
     shipped

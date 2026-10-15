@@ -32,6 +32,9 @@ The backend now implements:
 - WiX bootstrap, harvest, compile, and link steps
 - MSI plus portable ZIP artifact emission
 - package metadata and diagnostics sidecar outputs
+- a publishable `<artifact-base>.provenance.json` (package, artifact hash,
+  source and packager commits, GNUstep libraries with their hashes); see
+  `provenance` in `docs/manifest.md`
 - optional updater runtime config and update-feed sidecar outputs when updates
   are enabled
 - bundled third-party notice report generation from manifest compliance entries

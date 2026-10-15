@@ -11,6 +11,15 @@
     "resourceRoots": [],
     "runtimeSeedPaths": []
   },
+  "provenance": {
+    "enabled": true,
+    "libraries": [
+      "libgnustep-*",
+      "libobjc*",
+      "libdispatch*",
+      "dispatch.dll"
+    ]
+  },
   "launch": {
     "arguments": [],
     "pathPrepend": [],
