@@ -588,12 +588,17 @@ Fields:
 The sidecar records:
 - the package id, name and version, and the backend
 - the artifact's file name, size and SHA-256
+- `relatedArtifacts`: the other files the same build publishes, with their file
+  name, size and SHA-256. For an MSI this is the portable ZIP; for an AppImage
+  it is empty.
 - `source` and `packager`: the git commit of the manifest's checkout and of the
   packager, with `dirty` when tracked files had changes (null outside git)
 - `files`: the launch entry (`role: entry`) and each matching library
   (`role: library`), with its path relative to the AppDir or MSI install tree,
   size, SHA-256 and, for an ELF file, its GNU build ID (`elfBuildId`). Symbolic
-  links are left out; the files they point to are listed.
+  links are left out; the files they point to are listed. A file whose path
+  would not be relative to the payload stops packaging rather than publish a
+  build machine path.
 
 The build IDs match `readelf -n` and the debug-symbol servers that index by
 build ID, so a crash report or a user's copy can be traced to the libs-base,

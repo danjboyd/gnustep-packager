@@ -315,6 +315,51 @@ Describe "Release provenance" {
     }
   }
 
+  It "refuses a file outside the payload rather than publish its path" {
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-provenance-outside-" + [guid]::NewGuid().ToString("N"))
+    $payload = Join-Path $root "payload"
+    New-Item -ItemType Directory -Force -Path $payload | Out-Null
+    try {
+      $outside = Join-Path $root "MyApp"
+      New-GpTestElf -Path $outside
+      $failure = $null
+      try {
+        Get-GpPayloadProvenanceFiles -PayloadRoot $payload -EntryPath $outside | Out-Null
+      } catch {
+        $failure = $_.Exception.Message
+      }
+      Assert-GpTrue -Condition ($failure -like "*is not inside the payload root*") -Message "An entry outside the payload should stop provenance. Got: $failure"
+    } finally {
+      Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+    }
+  }
+
+  It "hashes the artifact and the other files the build publishes" {
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-provenance-doc-" + [guid]::NewGuid().ToString("N"))
+    $payload = Join-Path $root "payload"
+    New-Item -ItemType Directory -Force -Path $payload | Out-Null
+    try {
+      $artifactPath = Join-Path $root "MyApp-1.0.0-win64.msi"
+      $zipPath = Join-Path $root "MyApp-1.0.0-win64-portable.zip"
+      Set-Content -Path $artifactPath -Value "msi"
+      Set-Content -Path $zipPath -Value "zip"
+      $manifest = Get-GpDefaultManifest
+      $manifest["package"] = @{ id = "com.example.myapp"; name = "MyApp"; version = "1.0.0" }
+      $context = [pscustomobject]@{ Manifest = $manifest; ManifestRoot = $root; ToolRoot = $root }
+
+      $path = Write-GpProvenanceDocument -Context $context -Backend "msi" -ArtifactPath $artifactPath -PayloadRoot $payload -RelatedArtifactPaths @($zipPath, (Join-Path $root "missing.zip"))
+      $document = Get-Content -Raw -Path $path | ConvertFrom-Json
+      Assert-GpEqual -Actual @($document.relatedArtifacts).Count -Expected 1 -Message "Only related files that exist should be listed."
+      Assert-GpEqual -Actual $document.relatedArtifacts[0].name -Expected "MyApp-1.0.0-win64-portable.zip" -Message "The portable ZIP should be named."
+      Assert-GpEqual -Actual $document.relatedArtifacts[0].sha256 -Expected (Get-GpFileSha256 -Path $zipPath) -Message "The portable ZIP should be hashed."
+
+      $path = Write-GpProvenanceDocument -Context $context -Backend "appimage" -ArtifactPath $artifactPath -PayloadRoot $payload
+      Assert-GpEqual -Actual @((Get-Content -Raw -Path $path | ConvertFrom-Json).relatedArtifacts).Count -Expected 0 -Message "Without related files the list is empty."
+    } finally {
+      Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+    }
+  }
+
   It "lists the GNUstep runtime libraries by default and can be turned off" {
     $manifest = Get-GpDefaultManifest
     $settings = Get-GpProvenanceSettings -Context ([pscustomobject]@{ Manifest = $manifest })
