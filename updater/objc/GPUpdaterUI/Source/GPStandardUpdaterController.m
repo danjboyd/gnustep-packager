@@ -1,4 +1,6 @@
 #import "GPStandardUpdaterController.h"
+#import "GPUpdaterApplyOutcome.h"
+#import "GPUpdaterUIShell.h"
 
 static NSString * const GPUpdaterHelperPlanFormatVersion = @"1";
 static NSString * const GPUpdaterHelperModePrepare = @"prepare";
@@ -7,7 +9,6 @@ static NSString * const GPUpdaterHelperStatusPreparing = @"preparing";
 static NSString * const GPUpdaterHelperStatusDownloading = @"downloading";
 static NSString * const GPUpdaterHelperStatusReadyToApply = @"readyToApply";
 static NSString * const GPUpdaterHelperStatusManualActionRequired = @"manualActionRequired";
-static NSString * const GPUpdaterHelperStatusFailed = @"failed";
 
 @interface GPStandardUpdaterController () {
   BOOL _manualCheckInProgress;
@@ -32,6 +33,8 @@ static NSString * const GPUpdaterHelperStatusFailed = @"failed";
 - (void)_runErrorAlert:(NSError *)error;
 - (void)_runRestartToFinishAlert:(id)unused;
 - (void)_runManualUpdateAlert:(NSDictionary *)info;
+- (void)_presentPreviousInstallOutcome;
+- (void)_runInstallFailedAlert:(GPUpdaterApplyOutcome *)outcome;
 - (void)_openReleaseNotesURL:(NSURL *)releaseNotesURL;
 - (void)_beginPrepareForResult:(GPUpdateCheckResult *)result;
 - (BOOL)_launchHelperMode:(NSString *)mode;
@@ -68,6 +71,37 @@ static BOOL GPUpdaterUIWriteJSONObject(NSDictionary *dictionary, NSString *path)
   }
 
   return [data writeToFile:path atomically:YES];
+}
+
+// Opens a URL with the system's handler. On win32, GNUstep's NSWorkspace
+// can't open http(s) URLs, so ShellExecuteW does it.
+static BOOL GPUpdaterUIOpenURL(NSURL *url) {
+  if (url == nil) {
+    return NO;
+  }
+#if defined(_WIN32)
+  NSString *target = [url isFileURL] ? [[url path] stringByReplacingOccurrencesOfString:@"/" withString:@"\\"] : [url absoluteString];
+  NSUInteger length = [target length];
+  unichar *buffer = calloc(length + 1, sizeof(unichar));
+  if (buffer == NULL) {
+    return NO;
+  }
+  [target getCharacters:buffer];
+  int opened = GPUpdaterUIShellOpen((const wchar_t *)buffer);
+  free(buffer);
+  return opened != 0;
+#else
+  return [[NSWorkspace sharedWorkspace] openURL:url];
+#endif
+}
+
+// A path as the user's platform writes it: backslashes on Windows.
+static NSString *GPUpdaterUIDisplayPath(NSString *path) {
+#if defined(_WIN32)
+  return [path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"];
+#else
+  return path;
+#endif
 }
 
 static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
@@ -124,6 +158,7 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
 }
 
 - (void)start {
+  [self _presentPreviousInstallOutcome];
   [[self updater] start];
 }
 
@@ -432,7 +467,7 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
     return;
   }
 
-  [[NSWorkspace sharedWorkspace] openURL:releaseNotesURL];
+  GPUpdaterUIOpenURL(releaseNotesURL);
 }
 
 - (void)_beginPrepareForResult:(GPUpdateCheckResult *)result {
@@ -597,10 +632,70 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
   [alert addButtonWithTitle:@"Restart and Install"];
   [alert addButtonWithTitle:@"Later"];
   if ([alert runModal] == NSAlertFirstButtonReturn) {
+    // Recorded so the next launch can say what became of the install,
+    // which happens after the app has quit.
+    GPUpdateAsset *asset = [_pendingInstallResult asset];
+    [GPUpdaterApplyOutcome recordRequestInDirectory:[self _helperStateRoot]
+                                            version:[_pendingInstallResult latestVersion]
+                                            backend:[asset backend]
+                                        downloadURL:[asset URL]];
     // If the helper could not start, stay open so its error alert shows.
     if ([self _launchHelperMode:GPUpdaterHelperModeApply]) {
       [[NSApplication sharedApplication] terminate:nil];
+    } else {
+      [GPUpdaterApplyOutcome removeRequestInDirectory:[self _helperStateRoot]];
     }
+  }
+}
+
+// An update is installed after the app quits, and when installing fails
+// (msiexec refuses, the AppImage can't be replaced) the app is not started
+// again, so it is reported here, at the next launch.
+- (void)_presentPreviousInstallOutcome {
+  NSString *stateRoot = [self _helperStateRoot];
+  GPUpdaterApplyOutcome *outcome = [GPUpdaterApplyOutcome outcomeInDirectory:stateRoot];
+  if (outcome == nil) {
+    return;
+  }
+
+  if (![outcome failed]) {
+    [GPUpdaterApplyOutcome clearDirectory:stateRoot];
+    return;
+  }
+
+  [self _presentAlertDeferred:@selector(_runInstallFailedAlert:) withObject:outcome];
+}
+
+- (void)_runInstallFailedAlert:(GPUpdaterApplyOutcome *)outcome {
+  NSString *displayName = [[[self updater] configuration] displayName];
+  NSString *version = [outcome version];
+  BOOL msi = [[outcome backend] isEqualToString:@"msi"];
+  NSString *installer = msi ? @"installer" : @"AppImage";
+
+  NSMutableString *message = [NSMutableString string];
+  if ([version length] > 0) {
+    [message appendFormat:@"%@ %@ was not installed: %@.", displayName, version, [outcome failureReason]];
+  } else {
+    [message appendFormat:@"The update was not installed: %@.", [outcome failureReason]];
+  }
+  if ([outcome downloadURL] != nil) {
+    [message appendFormat:@"\n\nYou can download the %@ and install it yourself.", installer];
+  }
+  if ([[outcome logPath] length] > 0) {
+    [message appendFormat:@"\n\nDetails: %@", GPUpdaterUIDisplayPath([outcome logPath])];
+  }
+
+  NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+  [alert setMessageText:@"Update Not Installed"];
+  [alert setInformativeText:message];
+  if ([outcome downloadURL] != nil) {
+    [alert addButtonWithTitle:(msi ? @"Download Installer" : @"Download AppImage")];
+  }
+  [alert addButtonWithTitle:@"OK"];
+  NSInteger response = [alert runModal];
+  [GPUpdaterApplyOutcome clearDirectory:[self _helperStateRoot]];
+  if ([outcome downloadURL] != nil && response == NSAlertFirstButtonReturn) {
+    GPUpdaterUIOpenURL([outcome downloadURL]);
   }
 }
 

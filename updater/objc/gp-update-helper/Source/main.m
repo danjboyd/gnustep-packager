@@ -26,10 +26,6 @@ static NSDictionary *GPHelperDictionaryValue(id value) {
   return [value isKindOfClass:[NSDictionary class]] ? value : nil;
 }
 
-static NSNumber *GPHelperNumberValue(id value) {
-  return [value isKindOfClass:[NSNumber class]] ? value : nil;
-}
-
 static NSError *GPHelperSimpleError(NSInteger code, NSString *message);
 
 static NSDictionary *GPHelperLoadJSONFile(NSString *path, NSError **error) {
@@ -607,10 +603,10 @@ static NSString *GPHelperWriteMSIApplyScript(NSString *statePath,
     "if \"%CODE%\"==\"3010\" goto installedRestart\r\n"
     "if \"%CODE%\"==\"1641\" goto installedRestarting\r\n"
     "if \"%CODE%\"==\"1602\" goto cancelled\r\n"
-    "echo {\"formatVersion\": 1, \"status\": \"failed\", \"message\": \"MSI installation failed.\", \"error\": {\"message\": \"msiexec exit code %CODE%; see msiexec.log beside the state file\"}}>\"%STATE%.tmp\"\r\n"
+    "echo {\"formatVersion\": 1, \"status\": \"failed\", \"message\": \"MSI installation failed.\", \"error\": {\"message\": \"msiexec exit code %CODE%; see msiexec.log beside the state file\", \"exitCode\": %CODE%}}>\"%STATE%.tmp\"\r\n"
     "goto finish\r\n"
     ":cancelled\r\n"
-    "echo {\"formatVersion\": 1, \"status\": \"failed\", \"message\": \"The MSI installation was cancelled.\", \"error\": {\"message\": \"msiexec exit code 1602: cancelled by the user.\"}}>\"%STATE%.tmp\"\r\n"
+    "echo {\"formatVersion\": 1, \"status\": \"failed\", \"message\": \"The MSI installation was cancelled.\", \"error\": {\"message\": \"msiexec exit code 1602: cancelled by the user.\", \"exitCode\": 1602}}>\"%STATE%.tmp\"\r\n"
     "goto finish\r\n"
     ":installedRestarting\r\n"
     "echo {\"formatVersion\": 1, \"status\": \"completed\", \"message\": \"MSI installation completed; Windows is restarting to finish it.\"}>\"%STATE%.tmp\"\r\n"
@@ -708,6 +704,18 @@ static NSDictionary *GPHelperLoadApplyState(NSString *statePath, NSError **error
 
   return state;
 }
+
+#if !defined(_WIN32)
+// The state's error for a failed install: the installer's exit code is
+// kept as a number, so the app can say what it means.
+static NSDictionary *GPHelperInstallerError(NSString *message, int exitCode) {
+  return [NSDictionary dictionaryWithObjectsAndKeys:
+    message, @"message",
+    [NSNumber numberWithInt:exitCode], @"exitCode",
+    nil
+  ];
+}
+#endif
 
 static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun) {
   NSDictionary *asset = GPHelperDictionaryValue([plan objectForKey:@"asset"]);
@@ -916,12 +924,12 @@ static int GPHelperApply(NSDictionary *plan, NSString *statePath, NSInteger wait
     NSDictionary *result = GPHelperRunTask(msiexecPath, arguments);
     int exitCode = [[result objectForKey:@"exitCode"] intValue];
     if (exitCode == 1602) {
-      GPHelperUpdateState(statePath, GPHelperStatusFailed, @"The MSI installation was cancelled.", nil, apply, downloadedPath, [NSDictionary dictionaryWithObject:@"msiexec exit code 1602: cancelled by the user." forKey:@"message"]);
+      GPHelperUpdateState(statePath, GPHelperStatusFailed, @"The MSI installation was cancelled.", nil, apply, downloadedPath, GPHelperInstallerError(@"msiexec exit code 1602: cancelled by the user.", 1602));
       return 1;
     }
     if (exitCode != 0 && exitCode != 3010 && exitCode != 1641) {
       NSString *message = [NSString stringWithFormat:@"msiexec exit code %d; see %@", exitCode, logPath];
-      GPHelperUpdateState(statePath, GPHelperStatusFailed, @"MSI installation failed.", nil, apply, downloadedPath, [NSDictionary dictionaryWithObject:message forKey:@"message"]);
+      GPHelperUpdateState(statePath, GPHelperStatusFailed, @"MSI installation failed.", nil, apply, downloadedPath, GPHelperInstallerError(message, exitCode));
       return 1;
     }
 

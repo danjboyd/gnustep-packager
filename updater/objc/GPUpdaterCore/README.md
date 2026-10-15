@@ -26,6 +26,10 @@ Current public entry points:
 - `-checkForUpdatesSynchronously:`
 - `GPUpdaterDownloadData()` and `GPUpdaterDownloadToFile()`
   (`GPUpdaterDownload.h`), which the feed check and `gp-update-helper` use
+- `GPUpdaterApplyOutcome` (`GPUpdaterApplyOutcome.h`), which records that the
+  app is quitting to install an update and, at the next launch, reads what
+  became of it from the helper's state file, with `GPUpdaterDescribeMSIExitCode()`
+  for msiexec's exit codes in plain words
 
 Downloads don't use `-[NSData dataWithContentsOfURL:]`: GNUstep's doesn't
 follow HTTP redirects, and GitHub serves release assets through one. On
