@@ -108,6 +108,46 @@ Describe "AppImage backend" {
     }
   }
 
+  Context "Copying the stage" {
+    It "keeps symbolic links within the stage, replaces those that leave it, and counts each library once" {
+      $root = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-links-" + [guid]::NewGuid().ToString("N"))
+      $stage = Join-Path $root "stage"
+      $libraries = Join-Path $stage "runtime/lib"
+      $outside = Join-Path $root "outside"
+      $usrRoot = Join-Path $root "AppDir/usr"
+      New-Item -ItemType Directory -Force -Path $libraries, $outside, $usrRoot | Out-Null
+      try {
+        $bytes = [byte[]]::new(1MB)
+        [System.IO.File]::WriteAllBytes((Join-Path $libraries "libgnustep-gui.so.0.32.0"), $bytes)
+        New-Item -ItemType SymbolicLink -Path (Join-Path $libraries "libgnustep-gui.so.0") -Target "libgnustep-gui.so.0.32.0" | Out-Null
+        New-Item -ItemType SymbolicLink -Path (Join-Path $libraries "libgnustep-gui.so") -Target "libgnustep-gui.so.0" | Out-Null
+        Set-Content -Path (Join-Path $outside "host.conf") -Value "from the build host"
+        New-Item -ItemType SymbolicLink -Path (Join-Path $libraries "host-absolute.conf") -Target (Join-Path $outside "host.conf") | Out-Null
+        New-Item -ItemType SymbolicLink -Path (Join-Path $libraries "host-relative.conf") -Target "../../../outside/host.conf" | Out-Null
+
+        $destination = Copy-GpRelativeStagePathToAppDir -StageRoot $stage -RelativePath "runtime" -UsrRoot $usrRoot
+        $copied = Join-Path $destination "lib"
+
+        foreach ($case in @(@{ Name = "libgnustep-gui.so.0"; Target = "libgnustep-gui.so.0.32.0" }, @{ Name = "libgnustep-gui.so"; Target = "libgnustep-gui.so.0" })) {
+          $item = Get-Item -LiteralPath (Join-Path $copied $case.Name) -Force
+          Assert-GpEqual -Actual ([string]$item.LinkTarget) -Expected $case.Target -Message "$($case.Name) should stay a link to $($case.Target) in the AppDir."
+        }
+        foreach ($name in @("host-absolute.conf", "host-relative.conf")) {
+          $item = Get-Item -LiteralPath (Join-Path $copied $name) -Force
+          Assert-GpTrue -Condition ([string]::IsNullOrEmpty([string]$item.LinkTarget)) -Message "$name points outside the stage, so the AppDir should hold a copy, not the link."
+          Assert-GpEqual -Actual (Get-Content -Raw -Path $item.FullName).Trim() -Expected "from the build host" -Message "$name should hold what it pointed to."
+        }
+
+        # The library is 1 MB; three names for it must not count three times.
+        $policy = [pscustomobject]@{ ForbiddenFiles = [string[]]@(); MaxPayloadBytes = [long](1MB + 1KB) }
+        $result = Test-GpPayloadPolicy -RootPath $usrRoot -Policy $policy
+        Assert-GpEqual -Actual @($result.Issues).Count -Expected 0 -Message "The library should count once toward maxPayloadBytes. Issues: $([string]::Join('; ', @($result.Issues)))"
+      } finally {
+        Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+      }
+    }
+  }
+
   Context "Packaging" {
     It "emits the AppImage artifact and sidecars" {
       Assert-GpTrue -Condition (Test-Path $script:packageResult.ArtifactPath) -Message "AppImage artifact should be created."

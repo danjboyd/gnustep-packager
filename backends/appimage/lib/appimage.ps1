@@ -51,6 +51,25 @@ function Copy-GpRelativeStagePathToAppDir {
   }
   $destination = Join-Path $destinationParent $leafName
 
+  if (-not $IsWindows) {
+    # cp -a keeps the stage's symbolic links (libgnustep-gui.so ->
+    # libgnustep-gui.so.0 -> libgnustep-gui.so.0.32.0) instead of copying the
+    # file once per name; a link that leaves the stage is then replaced by
+    # what it points to, so the AppImage never refers to the build host.
+    if ((Get-Item -LiteralPath $source) -is [System.IO.DirectoryInfo]) {
+      Ensure-GpDirectory -Path $destination | Out-Null
+      & cp -a -- ("{0}/." -f $source) $destination
+    } else {
+      Ensure-GpDirectory -Path (Split-Path -Parent $destination) | Out-Null
+      & cp -a -- $source $destination
+    }
+    if ($LASTEXITCODE -ne 0) {
+      throw "Copying the staged $RelativePath into the AppDir failed (cp -a exit $LASTEXITCODE)."
+    }
+    Resolve-GpAppImageEscapingLinks -StageRoot $StageRoot -SourceRoot $source -DestinationRoot $destination
+    return $destination
+  }
+
   if ((Get-Item $source) -is [System.IO.DirectoryInfo]) {
     Copy-Item -Recurse -Force $source $destination
   } else {
@@ -59,6 +78,52 @@ function Copy-GpRelativeStagePathToAppDir {
   }
 
   return $destination
+}
+
+# Replaces each symbolic link copied into the AppDir whose target, resolved
+# from its place in the stage, is outside the stage (an absolute path such as
+# /usr/lib/..., or ../ past the stage root) with a copy of what it points to.
+# Links within the stage stay links.
+function Resolve-GpAppImageEscapingLinks {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$StageRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$SourceRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$DestinationRoot
+  )
+
+  $stageFull = [System.IO.Path]::GetFullPath($StageRoot).TrimEnd("/") + "/"
+  $sourceFull = [System.IO.Path]::GetFullPath($SourceRoot)
+  $links = if (Test-Path -LiteralPath $DestinationRoot -PathType Container) {
+    @(Get-ChildItem -LiteralPath $DestinationRoot -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
+  } else {
+    @(Get-Item -LiteralPath $DestinationRoot -Force | Where-Object { $_.Attributes -band [System.IO.FileAttributes]::ReparsePoint })
+  }
+
+  foreach ($link in $links) {
+    $target = [string]$link.LinkTarget
+    if ([string]::IsNullOrEmpty($target)) {
+      continue
+    }
+    $relativeToDestination = [System.IO.Path]::GetRelativePath($DestinationRoot, $link.FullName)
+    $sourceLink = if ($relativeToDestination -eq ".") { $sourceFull } else { Join-Path $sourceFull $relativeToDestination }
+    $resolved = if ([System.IO.Path]::IsPathRooted($target)) {
+      [System.IO.Path]::GetFullPath($target)
+    } else {
+      [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $sourceLink) $target))
+    }
+    if ($resolved.StartsWith($stageFull, [System.StringComparison]::Ordinal)) {
+      continue
+    }
+
+    Remove-Item -LiteralPath $link.FullName -Force
+    & cp -a -L -- $sourceLink $link.FullName
+    if ($LASTEXITCODE -ne 0) {
+      throw "The staged link $sourceLink points outside the stage ($target), and what it points to could not be copied into the AppDir."
+    }
+  }
 }
 
 function Set-GpUnixExecutable {
