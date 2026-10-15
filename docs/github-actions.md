@@ -263,11 +263,16 @@ The reusable workflow checks out:
 - the caller repository as the consumer repo
 - this repo as the packager toolchain
 
-Pass `packager-repository` and `packager-ref` explicitly, with `packager-ref`
-set to the same tag as the `uses:` line (for example `v0.1.0`). Without them
-the workflow guesses the packager checkout from `github.workflow_ref`. In a
-reusable-workflow call that value names the caller's workflow, not this one, so
-the guess points at the wrong repository.
+When `packager-repository` and `packager-ref` are both left empty, the workflow
+checks out the exact packager commit that the caller's `uses:` line resolved to,
+using `job.workflow_repository` and `job.workflow_sha`. It does not use
+`github.workflow_ref`, which names the caller's workflow inside a
+reusable-workflow call. Set both inputs only to test packager scripts from a
+different repository or ref, or on GitHub Enterprise Server, where the
+`job.workflow_*` properties are not available.
+
+Packager `v0.1.0` predates this fallback, so callers pinned to `@v0.1.0` must
+still pass both inputs, as the examples above do.
 
 Keeping the two checkouts separate means the consumer manifest and build
 outputs stay in the caller repo while the packaging logic stays centralized

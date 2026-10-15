@@ -186,12 +186,16 @@ jobs:
             exit 0
           }
 
-          $workflowRef = '${{ github.workflow_ref }}'
-          if ($workflowRef -notmatch '^([^/]+/[^/]+)/\.github/workflows/[^@]+@(.+)$') {
-            throw "Unable to resolve packager checkout. Provide packager-repository and packager-ref inputs."
+          # github.workflow_ref names the caller's workflow inside a workflow_call;
+          # job.workflow_* names this reusable workflow, so use it to check out
+          # the exact packager commit the caller pinned in `uses:`.
+          $workflowRepository = '${{ job.workflow_repository }}'
+          $workflowSha = '${{ job.workflow_sha }}'
+          if ([string]::IsNullOrWhiteSpace($workflowRepository) -or [string]::IsNullOrWhiteSpace($workflowSha)) {
+            throw "Unable to resolve packager checkout: job.workflow_repository/job.workflow_sha are unavailable on this runner (for example GitHub Enterprise Server). Provide packager-repository and packager-ref inputs."
           }
-          "repository=$($Matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "ref=$($Matches[2])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "repository=$workflowRepository" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "ref=$workflowSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Checkout Packager Repo
         uses: actions/checkout@v4
