@@ -581,7 +581,8 @@ Fields:
 - `libraries`
   File-name patterns (`*` and `?`, matched without regard to case) for the
   libraries to record. The default covers the GNUstep runtime:
-  `libgnustep-*` (base, gui, back and its bundle), `libobjc*`, `libdispatch*`
+  `libgnustep-*` (base, corebase, gui, back and its bundle), `libobjc*`,
+  `libdispatch*`, `libBlocksRuntime*`
   and `dispatch.dll`. Setting it replaces the default list.
 
 The sidecar records:
@@ -601,7 +602,47 @@ libs-gui and libs-back builds a release shipped.
 ```json
 {
   "provenance": {
-    "libraries": ["libgnustep-*", "libobjc*", "libdispatch*", "libcmark*"]
+    "libraries": ["libgnustep-*", "libobjc*", "libdispatch*", "libBlocksRuntime*", "libcmark*"]
+  }
+}
+```
+
+## `toolchain`
+Pins the GNUstep toolchain a release must be built with: a custom toolchain
+built by gnustep-cli-new (`build-custom-toolchain`) from a lock file, which
+writes `gnustep-toolchain-provenance.json` into its prefix.
+
+Fields:
+- `provenanceFile`
+  The toolchain's `<prefix>/gnustep-toolchain-provenance.json`. The
+  `GP_TOOLCHAIN_PROVENANCE` environment variable overrides it, so CI can point
+  at its cached prefix.
+- `lockFile`
+  Optional: the lock the toolchain must have been built from, usually
+  `gnustep-toolchain.lock.json` in the app's repository.
+
+Shared validation (`validate`, and the pipeline before packaging) then fails
+when:
+- the provenance file is missing or isn't a gnustep-cli-new toolchain
+  provenance file (`kind: custom-gnustep-toolchain-provenance`,
+  `schema_version: 1`)
+- `lockFile` is set and its SHA-256 differs from the lock the toolchain was
+  built from: the lock (or one of its patches) changed without a rebuild
+- a staged file matching `provenance.libraries` has an ELF build ID that is not
+  among the toolchain's `elf_files`: the payload was built with a different
+  GNUstep. Build IDs are compared rather than hashes, since stripping and
+  `patchelf` change a file's hash but not its build ID.
+
+The release's `<artifact-base>.provenance.json` gains a `toolchain` entry with
+the toolchain's name, its lock's SHA-256 and each component's resolved commit,
+without the prefix or build host. A PE (Windows) payload has no ELF build IDs to
+compare; the lock check still applies.
+
+```json
+{
+  "toolchain": {
+    "provenanceFile": "/opt/ci-cache/gnustep/gnustep-toolchain-provenance.json",
+    "lockFile": "gnustep-toolchain.lock.json"
   }
 }
 ```

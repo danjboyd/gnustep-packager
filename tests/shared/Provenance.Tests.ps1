@@ -187,11 +187,119 @@ Describe "Release provenance" {
     }
   }
 
+  It "checks a staged payload against the pinned toolchain's lock and build IDs" {
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-toolchain-pin-" + [guid]::NewGuid().ToString("N"))
+    $stage = Join-Path $root "stage"
+    $libraryDirectory = Join-Path $stage "runtime/System/Library/Libraries"
+    New-Item -ItemType Directory -Force -Path $libraryDirectory | Out-Null
+    try {
+      New-GpTestElf -Path (Join-Path $libraryDirectory "libgnustep-base.so.1.31.1")
+      $lockPath = Join-Path $root "gnustep-toolchain.lock.json"
+      Set-Content -Path $lockPath -Value '{"schema_version":1,"kind":"custom-toolchain-lock","name":"fixture"}' -NoNewline
+      $provenancePath = Join-Path $root "gnustep-toolchain-provenance.json"
+      $writeProvenance = {
+        param([string]$BuildId, [string]$LockSha256)
+        [ordered]@{
+          kind = "custom-gnustep-toolchain-provenance"
+          schema_version = 1
+          name = "fixture-toolchain"
+          prefix = "/opt/private/build/prefix"
+          lock = [ordered]@{ path = "/home/builder/gnustep-toolchain.lock.json"; sha256 = $LockSha256 }
+          components = @([ordered]@{ name = "libs-base"; resolved_commit = "1111111111111111111111111111111111111111" })
+          elf_files = [ordered]@{
+            "System/Library/Libraries/libgnustep-base.so.1.31.1" = [ordered]@{ sha256 = ("0" * 64); build_id = $BuildId }
+            "Tools/gdnc" = [ordered]@{ sha256 = ("1" * 64); build_id = $null }
+          }
+        } | ConvertTo-Json -Depth 8 | Set-Content -Path $provenancePath
+      }
+      $context = [pscustomobject]@{
+        Manifest = @{
+          toolchain = @{ provenanceFile = $provenancePath; lockFile = $lockPath }
+          provenance = @{ libraries = @("libgnustep-*") }
+        }
+        ManifestRoot = $root
+      }
+
+      & $writeProvenance $script:buildId (Get-GpFileSha256 -Path $lockPath)
+      $result = Test-GpToolchainPin -Context $context -PayloadRoot $stage
+      Assert-GpEqual -Actual @($result.Issues).Count -Expected 0 -Message "A payload from the pinned toolchain should pass. Issues: $([string]::Join('; ', @($result.Issues)))"
+      $summary = Get-GpToolchainProvenanceSummary -Context $context
+      Assert-GpEqual -Actual $summary["name"] -Expected "fixture-toolchain" -Message "The release provenance should name the toolchain."
+      Assert-GpEqual -Actual $summary["components"][0]["resolvedCommit"] -Expected "1111111111111111111111111111111111111111" -Message "The release provenance should carry the component commits."
+      Assert-GpTrue -Condition (-not (($summary | ConvertTo-Json -Depth 6).Contains("/opt/private") -or ($summary | ConvertTo-Json -Depth 6).Contains("/home/builder"))) -Message "The release provenance should leave out the toolchain's paths."
+
+      & $writeProvenance ("f" * 40) (Get-GpFileSha256 -Path $lockPath)
+      $issues = [string]::Join("`n", @((Test-GpToolchainPin -Context $context -PayloadRoot $stage).Issues))
+      Assert-GpTrue -Condition ($issues -match "runtime/System/Library/Libraries/libgnustep-base\.so\.1\.31\.1 has build ID $($script:buildId), which toolchain fixture-toolchain did not build") -Message "A library from another GNUstep should fail, naming it. Issues: $issues"
+
+      & $writeProvenance $script:buildId ("a" * 64)
+      $issues = [string]::Join("`n", @((Test-GpToolchainPin -Context $context -PayloadRoot $stage).Issues))
+      Assert-GpTrue -Condition ($issues -match "built from a different lock") -Message "A changed lock should fail. Issues: $issues"
+
+      $context.Manifest["toolchain"]["provenanceFile"] = (Join-Path $root "missing.json")
+      $issues = [string]::Join("`n", @((Test-GpToolchainPin -Context $context -PayloadRoot $stage).Issues))
+      Assert-GpTrue -Condition ($issues -match "toolchain provenance file was not found") -Message "A missing provenance file should fail. Issues: $issues"
+
+      $context.Manifest["toolchain"].Remove("provenanceFile")
+      $issues = [string]::Join("`n", @((Test-GpToolchainPin -Context $context -PayloadRoot $stage).Issues))
+      Assert-GpTrue -Condition ($issues -match "No toolchain provenance file is set") -Message "A toolchain section without a provenance file should say so. Issues: $issues"
+
+      $context.Manifest.Remove("toolchain")
+      Assert-GpEqual -Actual @((Test-GpToolchainPin -Context $context -PayloadRoot $stage).Issues).Count -Expected 0 -Message "Without a toolchain section nothing is checked."
+    } finally {
+      Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+    }
+  }
+
+  It "fails shared validation for a payload built with a different GNUstep" {
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-toolchain-validate-" + [guid]::NewGuid().ToString("N"))
+    $stage = Join-Path $root "stage"
+    New-Item -ItemType Directory -Force -Path (Join-Path $stage "runtime/lib") | Out-Null
+    $baseManifestPath = Join-Path $script:repoRoot "examples/sample-linux/package.manifest.json"
+    $manifestPath = Join-Path (Split-Path -Parent $baseManifestPath) ("pester-toolchain-" + [guid]::NewGuid().ToString("N") + ".json")
+    try {
+      New-GpTestElf -Path (Join-Path $stage "runtime/lib/libobjc.so.4.6")
+      $provenancePath = Join-Path $root "gnustep-toolchain-provenance.json"
+      [ordered]@{
+        kind = "custom-gnustep-toolchain-provenance"
+        schema_version = 1
+        name = "other-toolchain"
+        lock = [ordered]@{ sha256 = ("0" * 64) }
+        components = @()
+        elf_files = [ordered]@{ "lib/libobjc.so.4.6" = [ordered]@{ sha256 = ("0" * 64); build_id = ("e" * 40) } }
+      } | ConvertTo-Json -Depth 8 | Set-Content -Path $provenancePath
+
+      $manifest = Get-GpJsonFile -Path $baseManifestPath
+      $manifest["payload"]["stageRoot"] = $stage
+      foreach ($key in @("root", "packageRoot", "logRoot", "tempRoot", "validationRoot")) {
+        $manifest["outputs"][$key] = (Join-Path $root ("dist-" + $key))
+      }
+      $manifest["validation"]["smoke"]["requiredPaths"] = @()
+      $manifest["validation"].Remove("packageContract")
+      $manifest["toolchain"] = @{ provenanceFile = $provenancePath }
+      $manifest | ConvertTo-Json -Depth 20 | Set-Content -Path $manifestPath -Encoding utf8
+
+      $context = Get-GpManifestContext -Path $manifestPath
+      $message = $null
+      try {
+        Invoke-GpSharedValidation -Context $context | Out-Null
+      } catch {
+        $message = $_.Exception.Message
+      }
+      Assert-GpTrue -Condition ($null -ne $message) -Message "Shared validation should fail for a library the pinned toolchain didn't build."
+      $log = Get-Content -Raw -Path (Get-ChildItem -Path (Join-Path $root "dist-logRoot") -Recurse -Filter *.log | Select-Object -First 1).FullName
+      Assert-GpTrue -Condition ($log -match "\[toolchain\]" -and $log -match "runtime/lib/libobjc\.so\.4\.6 has build ID") -Message "The validation log should name the library. Log: $log"
+    } finally {
+      Remove-Item -Force -ErrorAction SilentlyContinue $manifestPath
+      Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+    }
+  }
+
   It "lists the GNUstep runtime libraries by default and can be turned off" {
     $manifest = Get-GpDefaultManifest
     $settings = Get-GpProvenanceSettings -Context ([pscustomobject]@{ Manifest = $manifest })
     Assert-GpTrue -Condition $settings.Enabled -Message "Provenance should be on by default."
-    foreach ($name in @("libgnustep-base.so.1.31", "libgnustep-gui-0_32.dll", "libobjc.so.4.6", "libdispatch.so", "dispatch.dll")) {
+    foreach ($name in @("libgnustep-base.so.1.31", "libgnustep-gui-0_32.dll", "libobjc.so.4.6", "libdispatch.so", "dispatch.dll", "libBlocksRuntime.so")) {
       Assert-GpTrue -Condition (@($settings.Libraries | Where-Object { $name -like $_ }).Count -gt 0) -Message "$name should be recorded by default."
     }
 

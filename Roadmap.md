@@ -1630,6 +1630,10 @@ Execution order: 18A, 18B, 18C, then 18D.
   Dependency:
   - gnustep-cli-new support for custom prefixes, lock patches and
     configure arguments, and a provenance file
+  Implemented against gnustep-cli-new #5's provenance format (provisional
+  until that merges): the `toolchain` manifest section, the lock and
+  build-ID checks in shared validation, and a `toolchain` entry in the
+  release provenance.
 
 ## Suggested Early Execution Order
 Prioritize these subphases first:
