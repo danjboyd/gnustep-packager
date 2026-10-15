@@ -1,312 +1,271 @@
 # gnustep-packager
 
-`gnustep-packager` is a packaging toolkit for GNUstep desktop applications.
+Package GNUstep desktop applications as a Windows MSI, a Linux AppImage, or a
+macOS DMG, all from one manifest and one staged payload.
 
-The repo is intended to separate packaging concerns from individual app repos.
-Instead of every GNUstep app carrying its own ad hoc installer scripts, this
-repo will provide a shared packaging model, backend implementations, and CI
-entry points that downstream apps can reuse.
+`gnustep-packager` takes packaging out of individual app repos. You describe
+your app once in `package.manifest.json`. The packager then builds and stages it
+and turns the staged payload into native distributables. It also smoke-tests
+each result and writes metadata, provenance, and update-feed files beside each
+artifact. You can run it from the command line or from a reusable GitHub Actions
+workflow, and both paths behave the same.
 
-## Why This Exists
-The immediate driver is to generalize the Windows MSI packaging method currently
-used for a GNUstep app built with MSYS2 `CLANG64`.
+| Backend | Host and toolchain | Output |
+| --- | --- | --- |
+| Windows MSI | Windows x64, MSYS2 `CLANG64` GNUstep, WiX 3.11 (fetched automatically) | `<name>-<version>-win64.msi` plus a portable `.zip` |
+| Linux AppImage | Linux x64, clang-based GNUstep, `appimagetool` (fetched automatically) | `<name>-<version>-x86_64.AppImage` plus an optional `.zsync` |
+| macOS DMG | macOS 13+, a native `.app` built with Xcode clang, Apple's built-in tools only | `<name>-<version>-macos-<arch>.dmg` |
 
-The broader goal is to build that work on a backend-neutral foundation so the
-same app can later target additional distribution formats such as Linux
-AppImage without rewriting the entire packaging system.
+See [docs/compatibility-matrix.md](docs/compatibility-matrix.md) for the full
+support table.
 
-## Intended Outcomes
-- A backend-neutral package manifest and staged payload contract
-- A Windows MSI backend suitable for MSYS2 `CLANG64` GNUstep apps
-- A Linux AppImage backend built on the same core packaging model
-- A macOS DMG backend for native app bundles built from GNUstep sources
-- Reusable local scripts and reusable GitHub Actions workflows
-- Clean validation paths for package smoke testing
-- A companion updater foundation for apps that publish MSI and AppImage
-  releases to GitHub
+## Features
+- **Stage-first pipeline**: `build -> stage -> provision -> package -> validate`.
+  The staged payload is the single source of truth for every backend.
+- **Backend-neutral manifest**: a JSON Schema-validated
+  `package.manifest.json` with layered defaults, built-in profiles for common
+  GNUstep app shapes (`gnustep-gui`, `gnustep-document-viewer`,
+  `gnustep-cmark`), and `platformOverrides` so one manifest can cover all three
+  platforms.
+- **Generated launchers**: a Windows bootstrap EXE or a Linux `AppRun` is
+  rendered from one launch contract. Environment defaults such as `GSTheme`
+  are applied only when the user has not already set them.
+- **Runtime closure checks**: MSI and AppImage validation fails when a DLL or
+  shared library the app needs is missing from the payload. You can allowlist
+  known optional imports.
+- **Smoke validation**: MSI install, launch, and uninstall; AppImage extract,
+  desktop-entry, and launch checks; DMG `hdiutil verify`, `codesign`, and
+  Gatekeeper assessment.
+- **Theme provisioning**: `themeInputs` builds GNUstep themes (for example
+  WinUITheme) from their own repos and bundles them, so apps don't need their
+  own clone-and-copy scripts.
+- **Release metadata**: each artifact gets a `.metadata.json`, a
+  `.diagnostics.txt`, and a publishable `.provenance.json` (artifact hash,
+  source and packager commits, bundled GNUstep libraries with ELF build IDs).
+- **Signing**: Authenticode hooks for MSI; ad-hoc, identity, and Developer ID
+  signing plus a notarization path for DMG.
+- **Updater**: a Foundation-only Objective-C updater library, an optional
+  AppKit UI, and a separate update helper. Apps that publish MSI and AppImage
+  releases on GitHub can use them to update themselves.
+- **Host dependencies**: manifest-declared MSYS2 and apt packages are checked
+  or installed before packaging, both locally and in CI.
 
-## Design Principles
-- Stage first. Packaging starts from a self-contained staged payload.
-- Keep the core model neutral. MSI and AppImage are backends, not the model.
-- Prefer declarative configuration over app-specific hard-coded paths.
-- Keep local and CI workflows aligned.
-- Keep generated packaging artifacts out of source control.
+## Quick Start
 
-## Planned Packaging Lifecycle
-1. Build the app with its native toolchain.
-2. Stage a self-contained payload tree plus manifest.
-3. Transform that staged payload into a backend-specific layout.
-4. Produce the distributable artifact.
-5. Validate the artifact in an automated smoke path.
+### Requirements
+- PowerShell 7+ (`pwsh`) on every host
+- The host and toolchain for your backend, listed in the table above
+- Linux AppImage validation also needs `squashfs-tools` and
+  `desktop-file-utils`
 
-## Supported Backends
-### Windows MSI
-Supported backend.
+### 1. Write a manifest
+Copy a template from [examples/downstream/](examples/downstream/) into your app
+repo, for example `packaging/package.manifest.json`. A minimal manifest
+that passes `manifest-check`:
 
-Expected stack:
-- MSYS2 `CLANG64`
-- GNUstep
-- WiX
-- GitHub Actions on Windows runners
-
-### Linux AppImage
-Supported backend.
-
-Current shape:
-- backend-specific AppDir transform
-- generated `AppRun`
-- desktop metadata, icon, and MIME handling
-- Linux validation path in CI
-
-### macOS DMG
-Supported backend for native macOS `.app` bundles (for example a GNUstep
-codebase built against Apple's AppKit with Xcode's clang).
-
-Current shape:
-- built only with Apple's tools (`hdiutil`, `codesign`, `ditto`, `osascript`,
-  `xcrun notarytool`/`stapler`)
-- `Applications` link, optional background and Finder window layout
-- APFS or HFS+, `UDZO` or `ULFO`, `<name>-<version>-macos-<arch>.dmg` with
-  `arch` detected by `lipo` (`universal` for arm64 + x86_64)
-- ad-hoc signing by default, optional re-signing with any identity, and a
-  Developer ID notarization path driven by a keychain profile named through an
-  environment variable
-- validation with `hdiutil verify`, a read-only hidden mount, `codesign`,
-  recorded `spctl` Gatekeeper assessment and an optional launch smoke
-- see [docs/dmg-backend.md](docs/dmg-backend.md)
-
-## Repo Status
-This repo includes the phase 1 through phase 4 implementation baseline:
-
-- layered manifest resolution
-- shared CLI entry points
-- shared path and shell abstractions
-- a normalized launch contract
-- shared staged-payload validation
-- an executable reference fixture for local and CI checks
-- MSI backend docs for backend boundary, runtime policy, launcher design, and
-  WiX rendering
-- a manifest-driven Windows launcher plus generated `.launcher.ini`
-- support for embedding a staged `.ico` into the MSI launcher
-- a real MSI backend that transforms the staged payload into an install tree,
-  harvests it with WiX, and emits both MSI and ZIP artifacts
-- backend MSI validation for install, launch, and uninstall smoke testing
-
-This repo also includes the phase 5 and phase 6 foundation:
-
-- a shared local/CI pipeline wrapper in `scripts/run-packaging-pipeline.ps1`
-- package version override support for release automation
-- a reusable GitHub Actions workflow for downstream repos
-- optional signing hooks for release packaging
-- platform-aware Pester regression tests for Windows MSI and Linux AppImage
-- a Windows sample fixture and a Linux AppImage sample fixture
-- a documented compatibility matrix and consumer setup path
-
-This repo also includes the phase 7 through phase 9 AppImage completion and
-hardening pass:
-
-- manifest-level compliance notice entries plus generated runtime notice reports
-- package-side artifact provenance and diagnostics sidecars
-- a publishable `<artifact-base>.provenance.json` per AppImage and MSI: the
-  artifact hash, source and packager commits, and the bundled GNUstep
-  libraries with their ELF build IDs, without build-machine paths
-- built-in manifest profiles for common GNUstep GUI app shapes
-- backend-specific runtime and transform docs for AppImage
-- a real AppImage backend that emits AppDir-based `.AppImage` artifacts
-- automated AppImage extractability, strict runtime-closure validation, desktop-entry validation, and configurable smoke validation
-- backend-aware reusable GitHub Actions workflows for Windows and Linux with caller-selected runners, preflight hooks, and additive prerequisite inputs
-- fail-by-default MSI runtime-closure enforcement with explicit `warn` and ignore overrides for known optional DLL imports
-- launch-environment assignment policies so packaged defaults such as `GSTheme` can use `ifUnset` instead of always overriding the user
-- Windows MSI and Linux AppImage app-domain packaged-default seeding for
-  first-run `NSUserDefaults` values without generic global GNUstep preference
-  writes
-- MSI and AppImage release-gate documentation
-
-This repo also includes the full phase 10 updater path:
-
-- a documented update architecture and trust model
-- manifest-level update feed and GitHub release settings
-- packaging-time updater runtime config emission inside MSI and AppImage payloads
-- package-side update-feed sidecars for downstream release publishing
-- AppImage embedded update information and `.zsync` sidecar integration support
-- a Foundation-only Objective-C updater core under `updater/`
-- an optional AppKit updater UI layer
-- a separate update helper executable contract and implementation
-- consumer docs and downstream release-publishing examples
-- dedicated updater contract and packaging regression coverage
-
-This repo also includes the phase 11 host dependency model plus phase 12A
-through phase 12D hardening:
-
-- manifest-driven host dependency verification and installation for Windows
-  MSYS2 and Linux apt providers
-- a shared internal provider abstraction used by local preflight and reusable
-  workflow setup planning
-- clearer reusable-workflow behavior for self-hosted `skip-default-host-setup`
-  runs, including explicit verify-only policy diagnostics
-- reusable host dependency profiles such as `gnustep-cmark` for downstream
-  manifest layering
-
-This repo now also includes the phase 12E through phase 12H packaging-contract
-and validation pass:
-
-- documented support boundaries for host provisioning and packaging contracts
-- manifest-level semantic package contracts and installed-result assertions
-- declarative packaged defaults such as a default theme carried through
-  generated launchers plus MSI and AppImage app-domain first-run defaults
-- backend validation hooks that check packaged or extracted results for drift
-
-This repo now also includes the phase 13 `gnustep-cli-new` integration:
-
-- `gnustep-cli-new` is the default GNUstep bootstrap path for supported
-  Windows/MSI and Linux/AppImage CI packaging flows
-- the reusable workflow exposes `gnustep-cli-manifest-url`,
-  `gnustep-cli-bootstrap-url`, and `gnustep-cli-root` for reproducible upstream
-  manifest selection and validation
-- hosted MSI and AppImage CI paths run a clean `gnustep-cli-new` bootstrap
-  smoke before the shared packaging pipeline
-- upstream bootstrap and artifact blockers are tracked as first-class packager
-  blockers through generated diagnostic reports instead of being hidden by
-  legacy setup fallback
-
-This repo now also includes the phase 14 hosted Windows hardening pass:
-
-- the hosted Windows MSI path treats the `gnustep-cli-new` bootstrap smoke as a
-  fail-closed release packaging gate
-- Windows/MSYS2 path, host-kind, command lookup, and blocker diagnostics are
-  uploaded as dedicated CI artifacts
-- downstream Windows migration docs cover hosted and self-hosted runners while
-  keeping app-specific MSYS2 packages manifest-owned
-- release-gate docs record the Windows runner, MSYS2, `gnustep-cli-new`, WiX,
-  and MSI smoke baseline expected for release readiness
-- the current hosted Windows blocker is documented upstream: MSYS2 `CLANG64`
-  is classified as `os: unknown` by the public bootstrap selector
-
-This repo now also includes the first phase 16 theme-input contract work:
-
-- `themeInputs` lets manifests declare packaging-time GNUstep theme sources
-- the shared pipeline has a `provision` step that can compose active theme
-  inputs into the staged runtime before validation and backend packaging
-- Windows/MSYS2 theme provisioning uses the managed GNUstep toolchain path,
-  builds and installs themes into a temporary GNUstep user root, then stages
-  complete `.theme` bundles
-- bundled theme validation checks known executable conventions and resource
-  metadata, and provisioning emits a staged theme payload report
-
-This repo now also includes the phase 17 macOS DMG work:
-
-- a `dmg` backend that packages a staged macOS `.app` into a DMG with Apple's
-  built-in tools, with signing, notarization hooks, and mounted-image
-  validation
-- backend-neutral `platformOverrides` so one manifest can describe a Linux or
-  Windows GNUstep payload and a native macOS payload, selected with
-  `-Platform`, the requested backend, or the host
-- a macOS reference fixture (`examples/sample-macos`), macOS Pester tests, and a
-  `macos-validation` CI job
-- `backend: dmg` in the reusable `package-gnustep-app.yml` workflow, on
-  `runs-on-dmg`, with optional Developer ID signing and notarization secrets
-
-Current sample verification covers:
-- `build`
-- `stage`
-- `provision`
-- `package -Backend msi`
-- `validate -Backend msi -RunSmoke`
-- `package -Backend appimage`
-- `validate -Backend appimage -RunSmoke`
-- `package -Backend dmg`
-- `validate -Backend dmg -RunSmoke`
-- `scripts/test-repo.ps1`
-
-## Proposed Structure
-- `AGENTS.md`
-- `README.md`
-- `Roadmap.md`
-- `schemas/`
-- `scripts/`
-- `updater/`
-- `backends/msi/`
-- `backends/appimage/`
-- `backends/dmg/`
-- `examples/`
-- `docs/`
-- `.github/workflows/`
-
-## What This Repo Will Not Try To Do Early
-- Support every GNUstep toolchain at once
-- Support every Linux package format before AppImage is working
-- Hide all packaging details behind opaque automation
-- Treat generated backend output as hand-maintained source
-
-## Backend Direction
-MSI was the first concrete deliverable, but the repo now supports both MSI and
-AppImage from the same staged payload model:
-- no MSI-only assumptions in shared code
-- launch behavior modeled as a contract, not a Windows bootstrap special case
-- runtime inclusion rules expressed declaratively
-- metadata modeled once and rendered differently per backend
-
-## Shared Commands
-Examples:
-
-```powershell
-./scripts/gnustep-packager.ps1 -Command resolve-manifest
-./scripts/gnustep-packager.ps1 -Command build
-./scripts/gnustep-packager.ps1 -Command stage
-./scripts/gnustep-packager.ps1 -Command provision -Backend msi
-./scripts/gnustep-packager.ps1 -Command validate
-./scripts/gnustep-packager.ps1 -Command package -Backend msi
-./scripts/gnustep-packager.ps1 -Command validate -Backend msi -RunSmoke
-./scripts/gnustep-packager.ps1 -Command package -Backend appimage
-./scripts/gnustep-packager.ps1 -Command validate -Backend appimage -RunSmoke
-./scripts/gnustep-packager.ps1 -Command package -Backend dmg
-./scripts/gnustep-packager.ps1 -Command validate -Backend dmg -RunSmoke
-./scripts/gnustep-packager.ps1 -Command manifest-check -Platform linux
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/danjboyd/gnustep-packager/main/schemas/gnustep-packager.schema.json",
+  "schemaVersion": 1,
+  "profiles": ["gnustep-gui"],
+  "package": {
+    "id": "com.example.MyGNUstepApp",
+    "name": "MyGNUstepApp",
+    "displayName": "My GNUstep App",
+    "version": "0.1.0",
+    "manufacturer": "Example Org",
+    "license": "MIT"
+  },
+  "pipeline": {
+    "workingDirectory": ".",
+    "shell": { "kind": "pwsh", "bootstrapCommands": [], "environment": {} },
+    "build": { "command": "./scripts/build.ps1" },
+    "stage": {
+      "command": "./scripts/stage.ps1 -StageRoot dist/stage",
+      "outputRoot": "dist/stage"
+    }
+  },
+  "payload": {
+    "layoutVersion": 1,
+    "stageRoot": "dist/stage",
+    "appRoot": "app",
+    "runtimeRoot": "runtime"
+  },
+  "launch": {
+    "entryRelativePath": "app/MyGNUstepApp.app/MyGNUstepApp.exe",
+    "workingDirectory": "."
+  },
+  "outputs": {
+    "root": "dist",
+    "packageRoot": "dist/packages",
+    "logRoot": "dist/logs",
+    "tempRoot": "dist/tmp",
+    "validationRoot": "dist/validation"
+  },
+  "validation": {
+    "smoke": { "enabled": true, "kind": "staged-layout", "requiredPaths": [], "timeoutSeconds": 30 },
+    "logs": { "retainOnSuccess": true }
+  },
+  "backends": {
+    "msi": { "enabled": true, "upgradeCode": "<your-stable-guid>" },
+    "appimage": {
+      "enabled": true,
+      "desktopEntryName": "my-gnustep-app.desktop",
+      "iconRelativePath": "metadata/icons/app.png"
+    }
+  }
+}
 ```
 
-`-Platform windows|linux|macos` selects which `platformOverrides` entry
-applies; without it the requested backend's platform, then the host, is used.
-`scripts/test-repo.ps1` runs `tests/shared` plus the host's platform tests
-(`tests/windows`, `tests/linux` or `tests/macos`).
+Your `build` command compiles the app. Your `stage` command lays out a
+self-contained payload under `app/`, `runtime/`, and `metadata/`. See
+[docs/staging-contract.md](docs/staging-contract.md) and
+[docs/manifest.md](docs/manifest.md).
 
-Backend design notes:
-- [docs/msi-boundary.md](docs/msi-boundary.md)
-- [docs/msi-runtime-policy.md](docs/msi-runtime-policy.md)
-- [docs/msi-launcher-design.md](docs/msi-launcher-design.md)
-- [docs/msi-wix-rendering.md](docs/msi-wix-rendering.md)
-- [docs/appimage-requirements.md](docs/appimage-requirements.md)
-- [docs/appimage-metadata-mapping.md](docs/appimage-metadata-mapping.md)
-- [docs/appimage-appdir-design.md](docs/appimage-appdir-design.md)
-- [docs/appimage-runtime-policy.md](docs/appimage-runtime-policy.md)
-- [docs/dmg-backend.md](docs/dmg-backend.md)
+### 2. Package locally
+From a checkout of this repo:
 
-Release and consumer docs:
-- [docs/local-ci-parity.md](docs/local-ci-parity.md)
+```powershell
+$m = '../my-app/packaging/package.manifest.json'
+./scripts/gnustep-packager.ps1 -Command build    -Manifest $m
+./scripts/gnustep-packager.ps1 -Command stage    -Manifest $m
+./scripts/gnustep-packager.ps1 -Command package  -Manifest $m -Backend appimage
+./scripts/gnustep-packager.ps1 -Command validate -Manifest $m -Backend appimage -RunSmoke
+```
+
+Use `-Backend msi` on Windows or `-Backend dmg` on macOS.
+`scripts/run-packaging-pipeline.ps1` runs every step in one call, the same way
+CI does.
+
+### 3. Package in GitHub Actions
+Call the reusable workflow from your app repo, pinned to a release tag:
+
+```yaml
+jobs:
+  package-linux:
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
+    with:
+      manifest-path: packaging/package.manifest.json
+      backend: appimage            # or msi, dmg
+      packager-repository: danjboyd/gnustep-packager
+      packager-ref: v0.1.0
+      package-version: ${{ github.ref_name }}
+      run-validation: true
+      run-smoke: true
+      artifact-name: my-app-linux
+```
+
+Keep `packager-ref` equal to the tag in `uses:`. The workflow uses it to check
+out the matching packager scripts. For signing secrets, self-hosted runners,
+preflight hooks, and an end-to-end release-with-updates example, see
+[docs/github-actions.md](docs/github-actions.md) and
+[examples/downstream/](examples/downstream/).
+
+## Example Output
+Output from running the bundled Linux fixture (`examples/sample-linux`)
+through `package` and `validate`:
+
+```text
+$ ./scripts/gnustep-packager.ps1 -Command package -Manifest examples/sample-linux/package.manifest.json -Backend appimage
+AppImage created: .../dist/packages/SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage
+Artifact metadata: .../dist/packages/SampleGNUstepLinuxApp-0.1.0-x86_64.metadata.json
+Diagnostics summary: .../dist/packages/SampleGNUstepLinuxApp-0.1.0-x86_64.diagnostics.txt
+AppRun: .../SampleGNUstepLinuxApp.AppDir/AppRun
+Desktop entry: .../SampleGNUstepLinuxApp.AppDir/usr/share/applications/sample-gnustep-linux.desktop
+Notice report: .../SampleGNUstepLinuxApp.AppDir/usr/metadata/THIRD-PARTY-NOTICES.txt
+Backend package command completed.
+
+$ ./scripts/gnustep-packager.ps1 -Command validate -Manifest examples/sample-linux/package.manifest.json -Backend appimage -RunSmoke
+AppImage validation completed.
+Backend validation completed.
+
+$ ls dist/packages
+SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage
+SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage.zsync
+SampleGNUstepLinuxApp-0.1.0-x86_64.diagnostics.txt
+SampleGNUstepLinuxApp-0.1.0-x86_64.metadata.json
+SampleGNUstepLinuxApp-0.1.0-x86_64.provenance.json
+SampleGNUstepLinuxApp-0.1.0-x86_64.update-feed.json
+```
+
+The provenance sidecar can be published next to the release asset:
+
+```json
+{
+  "formatVersion": 1,
+  "backend": "appimage",
+  "package": { "id": "com.example.SampleGNUstepLinuxApp", "name": "SampleGNUstepLinuxApp", "version": "0.1.0" },
+  "artifact": {
+    "name": "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage",
+    "sizeBytes": 952824,
+    "sha256": "69dd9891205362e8b42517121405f2771f0097786aaffc60114ff1df68aa1a0e"
+  },
+  "source":   { "commit": "7ac44ad7d16ecb3cb2af4f6eda1249ad97af8ef1", "dirty": false },
+  "packager": { "commit": "7ac44ad7d16ecb3cb2af4f6eda1249ad97af8ef1", "dirty": false },
+  "files": [ { "path": "usr/app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp", "role": "entry", "...": "..." } ]
+}
+```
+
+Fixtures for the other backends live in `examples/sample-gui` (Windows MSI) and
+`examples/sample-macos` (macOS DMG).
+
+## Repository Layout
+- `scripts/`: the `gnustep-packager.ps1` CLI, the pipeline wrapper, and shared libraries
+- `schemas/`: the manifest JSON Schema
+- `defaults/`: built-in defaults and profiles
+- `backends/msi/`, `backends/appimage/`, `backends/dmg/`: backend implementations
+- `updater/`: the Objective-C updater library, UI, and update helper
+- `examples/`: reference fixtures and downstream templates
+- `tests/`: Pester suites (`scripts/test-repo.ps1` runs the shared tests and the host's platform tests)
+- `docs/`: design notes and consumer guides
+- `.github/workflows/`: the reusable `package-gnustep-app.yml` and repo CI
+
+## Documentation
+Getting started:
+- [docs/consumer-setup.md](docs/consumer-setup.md)
+- [docs/manifest.md](docs/manifest.md)
+- [docs/staging-contract.md](docs/staging-contract.md)
+- [docs/shared-cli.md](docs/shared-cli.md)
 - [docs/github-actions.md](docs/github-actions.md)
+- [docs/compatibility-matrix.md](docs/compatibility-matrix.md)
+
+Backends:
+- MSI: [boundary](docs/msi-boundary.md), [runtime policy](docs/msi-runtime-policy.md),
+  [launcher](docs/msi-launcher-design.md), [WiX rendering](docs/msi-wix-rendering.md),
+  [triage](docs/windows-msi-triage.md)
+- AppImage: [requirements](docs/appimage-requirements.md),
+  [metadata mapping](docs/appimage-metadata-mapping.md),
+  [AppDir design](docs/appimage-appdir-design.md),
+  [runtime policy](docs/appimage-runtime-policy.md),
+  [backend README](backends/appimage/README.md)
+- DMG: [docs/dmg-backend.md](docs/dmg-backend.md), [backend README](backends/dmg/README.md)
+
+Releases, signing, and updates:
 - [docs/versioning-release.md](docs/versioning-release.md)
 - [docs/release-gate.md](docs/release-gate.md)
 - [docs/signing.md](docs/signing.md)
-- [docs/consumer-setup.md](docs/consumer-setup.md)
-- [docs/compatibility-matrix.md](docs/compatibility-matrix.md)
 - [docs/compliance-notices.md](docs/compliance-notices.md)
-- [docs/objcmarkdown-upstream-requests.md](docs/objcmarkdown-upstream-requests.md)
-- [docs/gnustep-cli-new-integration.md](docs/gnustep-cli-new-integration.md)
-- [docs/gnustep-cli-new-upstream-requests.md](docs/gnustep-cli-new-upstream-requests.md)
-- [docs/windows-gnustep-cli-new-hardening.md](docs/windows-gnustep-cli-new-hardening.md)
 - [docs/update-architecture.md](docs/update-architecture.md)
-- [docs/update-feed-contract.md](docs/update-feed-contract.md)
 - [docs/updater-consumer-guide.md](docs/updater-consumer-guide.md)
 - [docs/updater-release-publishing.md](docs/updater-release-publishing.md)
-- [docs/updater-helper-contract.md](docs/updater-helper-contract.md)
-- [docs/windows-msi-triage.md](docs/windows-msi-triage.md)
-- [backends/appimage/README.md](backends/appimage/README.md)
-- [backends/dmg/README.md](backends/dmg/README.md)
-- [docs/appimage-extension-path.md](docs/appimage-extension-path.md)
 
-See [Roadmap.md](Roadmap.md) for the implementation phases.
+Toolchain bootstrap:
+- [docs/gnustep-cli-new-integration.md](docs/gnustep-cli-new-integration.md)
+- [docs/windows-gnustep-cli-new-hardening.md](docs/windows-gnustep-cli-new-hardening.md)
+
+## Known Limitations
+- Only the toolchains listed above are supported: MSYS2 `CLANG64` on Windows
+  and clang-based GNUstep on Linux x64. The DMG backend expects a native macOS
+  `.app`.
+- DMG notarization is implemented but has not yet been exercised against
+  Apple's notary service.
+- Packaged app-domain defaults are implemented for MSI and AppImage only.
+
+## Roadmap
+[Roadmap.md](Roadmap.md) records the implementation phases, what has landed,
+and what is next.
 
 ## License
-
 gnustep-packager, including the updater in `updater/`, is released under the
 [MIT License](LICENSE). Monocypher, bundled with `gp-update-helper`, keeps its
 own license (BSD-2-Clause or CC0;
