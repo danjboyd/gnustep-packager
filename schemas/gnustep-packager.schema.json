@@ -477,6 +477,13 @@
         "lockFile": {
           "type": "string",
           "minLength": 1
+        },
+        "foreignLibraries": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
