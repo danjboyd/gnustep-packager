@@ -211,9 +211,20 @@ roots. Successful provisioning writes
 source/ref, resolved commit when available, staged path, executable, info plist,
 and resource inventory details. When that report is current for the active
 theme inputs, later package commands reuse the staged theme payload instead of
-building the same theme a second time. AppImage theme input provisioning is not
-implemented yet; required AppImage theme inputs fail early with an explicit
-unsupported-backend diagnostic.
+building the same theme a second time.
+
+On Linux (the AppImage backend), theme inputs build with the GNUstep toolchain
+on `PATH` (a `gnustep-cli-new` install, or `/usr/GNUstep`) in the pipeline's
+shell; `GNUSTEP_MAKEFILES` comes from `gnustep-config` when it isn't set. The
+built theme is staged in `<gnustepConfig.systemRoot>/Library/Themes` when
+`backends.appimage.gnustepConfig.systemRoot` is set (the system domain of the
+AppImage's own `GNUstep.conf`), and in `runtime/lib/GNUstep/Themes` otherwise.
+
+The default install command passes `GNUSTEP_HOME` to `make` on the command
+line: gnustep-make sets `GNUSTEP_HOME = $(HOME)` in its own configuration, so
+an exported `GNUSTEP_HOME` alone would install the theme into the build user's
+real `~/GNUstep/Library/Themes`, where it would later shadow the bundled copy
+of any app on that machine. A custom `build.installCommand` should do the same.
 
 ## `hostDependencies`
 Declares app-specific host/build prerequisites that the shared tooling may

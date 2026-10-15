@@ -1299,9 +1299,11 @@ Current status notes:
 - `Phase 16L` landed as explicit CLI and docs guidance that shared validation
   checks the current staged layout, while backend-aware theme behavior requires
   backend-scoped provision, package, or validation commands.
-- `Phase 16M` landed as an explicit AppImage support boundary: required
-  AppImage theme inputs fail early with a deliberate unsupported-backend
-  diagnostic until Linux provisioning is implemented in a later phase.
+- `Phase 16M` first landed as an explicit AppImage support boundary, and then
+  as Linux provisioning: theme inputs build with the Linux GNUstep toolchain
+  and stage into the AppImage's system domain
+  (`<gnustepConfig.systemRoot>/Library/Themes`), with a gnustep-make fixture
+  theme built end to end in the shared tests where a toolchain is present.
 
 - `Phase 16A`: Theme input manifest contract
   Deliverables:

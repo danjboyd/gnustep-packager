@@ -1688,7 +1688,7 @@ function Test-GpManifest {
       }
       $stagedThemePresent = $false
       if (-not [string]::IsNullOrWhiteSpace($stageRoot)) {
-        foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $resolvedDefaultTheme)) {
+        foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $resolvedDefaultTheme -Manifest $Manifest)) {
           if (Test-Path (Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $candidate)) {
             $stagedThemePresent = $true
             break
@@ -3509,17 +3509,50 @@ function Get-GpUpdaterHelperCandidates {
   )
 }
 
+# The AppImage's backends.appimage.gnustepConfig.systemRoot, with '/'
+# separators and no trailing one, or $null.
+function Get-GpAppImageSystemRoot {
+  param(
+    [System.Collections.IDictionary]$Manifest
+  )
+
+  if ($null -eq $Manifest) {
+    return $null
+  }
+  $backends = $Manifest["backends"]
+  if (($backends -is [System.Collections.IDictionary]) -and ($backends["appimage"] -is [System.Collections.IDictionary]) -and
+      ($backends["appimage"]["gnustepConfig"] -is [System.Collections.IDictionary]) -and
+      -not [string]::IsNullOrWhiteSpace([string]$backends["appimage"]["gnustepConfig"]["systemRoot"])) {
+    return ((([string]$backends["appimage"]["gnustepConfig"]["systemRoot"]) -replace "\\", "/").TrimEnd("/"))
+  }
+  return $null
+}
+
 function Get-GpBundledThemeCandidatePaths {
   param(
     [Parameter(Mandatory = $true)]
-    [string]$ThemeName
+    [string]$ThemeName,
+    # With an AppImage systemRoot, its Library/Themes is a candidate too:
+    # theme inputs are provisioned there.
+    [System.Collections.IDictionary]$Manifest
   )
 
-  return [string[]]@(
+  $candidates = [System.Collections.Generic.List[string]]::new()
+  $systemRoot = Get-GpAppImageSystemRoot -Manifest $Manifest
+  if (-not [string]::IsNullOrWhiteSpace($systemRoot)) {
+    $candidates.Add(("{0}/Library/Themes/{1}.theme" -f $systemRoot, $ThemeName)) | Out-Null
+  }
+  foreach ($candidate in @(
     (Join-Path "runtime/System/Library/Themes" ("{0}.theme" -f $ThemeName)),
     (Join-Path "runtime/lib/GNUstep/Themes" ("{0}.theme" -f $ThemeName)),
     (Join-Path "runtime/share/GNUstep/Themes" ("{0}.theme" -f $ThemeName))
-  )
+  )) {
+    if (-not $candidates.Contains(($candidate -replace "\\", "/"))) {
+      $candidates.Add($candidate) | Out-Null
+    }
+  }
+
+  return [string[]]@($candidates.ToArray())
 }
 
 function Get-GpThemeExecutableCandidates {
@@ -3734,10 +3767,11 @@ function Find-GpBundledThemePath {
     [Parameter(Mandatory = $true)]
     [string]$PayloadRoot,
     [Parameter(Mandatory = $true)]
-    [string]$ThemeName
+    [string]$ThemeName,
+    [System.Collections.IDictionary]$Manifest
   )
 
-  foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $ThemeName)) {
+  foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $ThemeName -Manifest $Manifest)) {
     $candidatePath = Resolve-GpPathRelativeToBase -BasePath $PayloadRoot -Path $candidate
     if (Test-Path $candidatePath -PathType Container) {
       return $candidatePath
@@ -3948,7 +3982,7 @@ function Invoke-GpPackageContractAssertions {
         $bundledThemeLabel = ("bundled-theme:{0}" -f $entry.Name)
         $candidatePaths = [System.Collections.Generic.List[string]]::new()
         $matchedPaths = [System.Collections.Generic.List[string]]::new()
-        foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $entry.Name)) {
+        foreach ($candidate in @(Get-GpBundledThemeCandidatePaths -ThemeName $entry.Name -Manifest $manifest)) {
           $candidatePath = Resolve-GpPathRelativeToBase -BasePath $payloadRoot -Path $candidate
           $candidatePaths.Add($candidatePath) | Out-Null
           if (Test-Path $candidatePath) {
@@ -3978,7 +4012,7 @@ function Invoke-GpPackageContractAssertions {
 
       "theme-resource" {
         $themeName = if (-not [string]::IsNullOrWhiteSpace([string]$entry.Theme)) { [string]$entry.Theme } else { [string]$entry.Name }
-        $themePath = Find-GpBundledThemePath -PayloadRoot $payloadRoot -ThemeName $themeName
+        $themePath = Find-GpBundledThemePath -PayloadRoot $payloadRoot -ThemeName $themeName -Manifest $manifest
         if ([string]::IsNullOrWhiteSpace($themePath)) {
           $message = ("MISSING theme-resource:{0}:{1} [{2}] -> no bundled theme found" -f $themeName, $entry.Path, $entry.Source)
           $lines.Add($message) | Out-Null
@@ -4472,15 +4506,25 @@ function Get-GpThemeBuildShellConfig {
   if (-not $shell["environment"].Contains("OBJC_CC")) { $shell["environment"]["OBJC_CC"] = "clang" }
   if (-not $shell["environment"].Contains("CXX")) { $shell["environment"]["CXX"] = "clang++" }
   if (-not $shell["environment"].Contains("OBJCXX")) { $shell["environment"]["OBJCXX"] = "clang++" }
-  if (-not $shell["environment"].Contains("CFLAGS")) { $shell["environment"]["CFLAGS"] = "-DHAVE_MODE_T=1" }
-  if (-not $shell["environment"].Contains("OBJCFLAGS")) { $shell["environment"]["OBJCFLAGS"] = "-DHAVE_MODE_T=1" }
-  # gnustep-make replaces CFLAGS/OBJCFLAGS from its own configuration but appends to these, which
-  # is how the gnustep CLI passes HAVE_MODE_T: without it, MSYS2 CLANG64's libdispatch headers
-  # redefine mode_t and every theme fails to compile.
-  if (-not $shell["environment"].Contains("ADDITIONAL_OBJCFLAGS")) { $shell["environment"]["ADDITIONAL_OBJCFLAGS"] = "-DHAVE_MODE_T=1" }
-  if (-not $shell["environment"].Contains("ADDITIONAL_CPPFLAGS")) { $shell["environment"]["ADDITIONAL_CPPFLAGS"] = "-DHAVE_MODE_T=1" }
-  if (-not $shell["environment"].Contains("GNUSTEP_MAKEFILES") -and -not [string]::IsNullOrWhiteSpace($env:GNUSTEP_MAKEFILES)) {
-    $shell["environment"]["GNUSTEP_MAKEFILES"] = $env:GNUSTEP_MAKEFILES
+  if ($targetPlatform -eq "windows") {
+    if (-not $shell["environment"].Contains("CFLAGS")) { $shell["environment"]["CFLAGS"] = "-DHAVE_MODE_T=1" }
+    if (-not $shell["environment"].Contains("OBJCFLAGS")) { $shell["environment"]["OBJCFLAGS"] = "-DHAVE_MODE_T=1" }
+    # gnustep-make replaces CFLAGS/OBJCFLAGS from its own configuration but appends to these, which
+    # is how the gnustep CLI passes HAVE_MODE_T: without it, MSYS2 CLANG64's libdispatch headers
+    # redefine mode_t and every theme fails to compile.
+    if (-not $shell["environment"].Contains("ADDITIONAL_OBJCFLAGS")) { $shell["environment"]["ADDITIONAL_OBJCFLAGS"] = "-DHAVE_MODE_T=1" }
+    if (-not $shell["environment"].Contains("ADDITIONAL_CPPFLAGS")) { $shell["environment"]["ADDITIONAL_CPPFLAGS"] = "-DHAVE_MODE_T=1" }
+  }
+  if (-not $shell["environment"].Contains("GNUSTEP_MAKEFILES")) {
+    if (-not [string]::IsNullOrWhiteSpace($env:GNUSTEP_MAKEFILES)) {
+      $shell["environment"]["GNUSTEP_MAKEFILES"] = $env:GNUSTEP_MAKEFILES
+    } elseif ($targetPlatform -ne "windows" -and (Get-Command gnustep-config -ErrorAction SilentlyContinue)) {
+      # A Linux toolchain on PATH (a gnustep-cli-new install, /usr/GNUstep) without GNUstep.sh sourced.
+      $makefiles = & gnustep-config --variable=GNUSTEP_MAKEFILES 2>$null
+      if (-not [string]::IsNullOrWhiteSpace([string]$makefiles)) {
+        $shell["environment"]["GNUSTEP_MAKEFILES"] = ([string]$makefiles).Trim()
+      }
+    }
   }
 
   return $shell
@@ -4489,7 +4533,10 @@ function Get-GpThemeBuildShellConfig {
 function Get-GpThemeBuildCommand {
   param(
     [Parameter(Mandatory = $true)]
-    [psobject]$Theme
+    [psobject]$Theme,
+    # The build shell's kind, for how the default install command names
+    # GNUSTEP_HOME.
+    [string]$ShellKind = "bash"
   )
 
   if (-not [string]::IsNullOrWhiteSpace([string]$Theme.BuildCommand)) {
@@ -4499,7 +4546,11 @@ function Get-GpThemeBuildCommand {
   $installCommand = if (-not [string]::IsNullOrWhiteSpace([string]$Theme.InstallCommand)) {
     [string]$Theme.InstallCommand
   } else {
-    "make install GNUSTEP_INSTALLATION_DOMAIN=USER"
+    # On the command line, since gnustep-make sets GNUSTEP_HOME = $(HOME) in
+    # its own configuration and so ignores the environment's: the theme then
+    # lands in the build user's real ~/GNUstep/Library/Themes.
+    $homeReference = if ($ShellKind -in @("pwsh", "powershell")) { '$env:GNUSTEP_HOME' } else { '$GNUSTEP_HOME' }
+    ('make install GNUSTEP_INSTALLATION_DOMAIN=USER GNUSTEP_HOME="{0}"' -f $homeReference)
   }
 
   return ("make clean; make; {0}" -f $installCommand)
@@ -4527,6 +4578,27 @@ function Find-GpInstalledThemeBundle {
   return $null
 }
 
+# Where a provisioned theme goes in the stage: runtime/lib/GNUstep/Themes, or,
+# for an AppImage whose GNUstep.conf the backend writes
+# (backends.appimage.gnustepConfig.systemRoot), that tree's Library/Themes,
+# the system domain's theme folder the bundled runtime searches.
+function Get-GpThemeStageRelativeRoot {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [string]$Backend
+  )
+
+  if ($Backend -eq "appimage") {
+    $systemRoot = Get-GpAppImageSystemRoot -Manifest $Context.Manifest
+    if (-not [string]::IsNullOrWhiteSpace($systemRoot)) {
+      return ($systemRoot + "/Library/Themes")
+    }
+  }
+
+  return "runtime/lib/GNUstep/Themes"
+}
+
 function Copy-GpThemeBundleToStage {
   param(
     [Parameter(Mandatory = $true)]
@@ -4534,11 +4606,12 @@ function Copy-GpThemeBundleToStage {
     [Parameter(Mandatory = $true)]
     [string]$ThemeName,
     [Parameter(Mandatory = $true)]
-    [string]$BundlePath
+    [string]$BundlePath,
+    [string]$Backend
   )
 
   $stageRoot = Resolve-GpManifestPath -Context $Context -RelativePath $Context.Manifest["payload"]["stageRoot"]
-  $themeRoot = Ensure-GpDirectory -Path (Join-Path $stageRoot "runtime/lib/GNUstep/Themes")
+  $themeRoot = Ensure-GpDirectory -Path (Join-Path $stageRoot (Get-GpThemeStageRelativeRoot -Context $Context -Backend $Backend))
   $destination = Join-Path $themeRoot ("{0}.theme" -f $ThemeName)
   if (Test-Path $destination) {
     Remove-Item -Recurse -Force $destination
@@ -4756,19 +4829,11 @@ function Invoke-GpThemeProvisioning {
   foreach ($theme in @($themes)) {
     $lines.Add(("THEME   {0} required={1} default={2}" -f $theme.Name, $theme.Required, $theme.Default)) | Out-Null
     try {
-      if ($Backend -eq "appimage") {
-        $message = "Theme input provisioning for AppImage is not implemented yet. Stage the theme manually or track Phase 16M for AppImage support."
-        if ($theme.Required) {
-          throw $message
-        }
-        $lines.Add(("WARN    {0}: {1}" -f $theme.Name, $message)) | Out-Null
-        continue
-      }
-
       $sourcePath = Resolve-GpThemeSourcePath -Context $Context -Theme $theme -SourceRoot $sourceRoot -DryRun:$DryRun
       $installRoot = Join-Path $installBaseRoot $theme.Name
       $resolvedCommit = if ($DryRun) { $null } else { Get-GpGitResolvedCommit -Path $sourcePath }
-      $buildCommand = Get-GpThemeBuildCommand -Theme $theme
+      $shellConfig = Get-GpThemeBuildShellConfig -Context $Context -Theme $theme -InstallRoot $installRoot -Backend $Backend
+      $buildCommand = Get-GpThemeBuildCommand -Theme $theme -ShellKind ([string]$shellConfig["kind"])
       $lines.Add(("SOURCE  {0}" -f $sourcePath)) | Out-Null
       if (-not [string]::IsNullOrWhiteSpace([string]$theme.Repo)) { $lines.Add(("REPO    {0}" -f $theme.Repo)) | Out-Null }
       if (-not [string]::IsNullOrWhiteSpace([string]$theme.Ref)) { $lines.Add(("REF     {0}" -f $theme.Ref)) | Out-Null }
@@ -4792,7 +4857,6 @@ function Invoke-GpThemeProvisioning {
       }
 
       Ensure-GpDirectory -Path $installRoot | Out-Null
-      $shellConfig = Get-GpThemeBuildShellConfig -Context $Context -Theme $theme -InstallRoot $installRoot -Backend $Backend
       $invocation = Get-GpShellInvocation -ShellConfig $shellConfig -Command $buildCommand
       $themeLogPath = New-GpCommandLogPath -Context $Context -CommandName ("provision-theme-" + $theme.Name)
       Invoke-GpShellCommand -Invocation $invocation -WorkingDirectory $sourcePath -LogPath $themeLogPath | Out-Null
@@ -4802,7 +4866,7 @@ function Invoke-GpThemeProvisioning {
         throw ("Theme bundle {0}.theme was not found after build/install. Checked {1} and {2}." -f $theme.Name, $installRoot, $sourcePath)
       }
 
-      $stagedPath = Copy-GpThemeBundleToStage -Context $Context -ThemeName $theme.Name -BundlePath $bundlePath
+      $stagedPath = Copy-GpThemeBundleToStage -Context $Context -ThemeName $theme.Name -BundlePath $bundlePath -Backend $Backend
       $lines.Add(("STAGED  {0}" -f $stagedPath)) | Out-Null
       $results.Add([pscustomobject]@{
         Name = $theme.Name
