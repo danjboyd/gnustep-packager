@@ -399,16 +399,16 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
     message = [NSString stringWithFormat:@"You are currently running %@.", [result currentVersion]];
   }
 
+  // GNUstep's alert panel shows at most three buttons. With release notes,
+  // the third is "More...", which offers View Changes and Skip This Version.
+  BOOL hasReleaseNotes = [[[result release] releaseNotesURL] absoluteString] != nil;
   while (YES) {
     NSAlert *alert = [[[NSAlert alloc] init] autorelease];
     [alert setMessageText:title];
     [alert setInformativeText:message];
     [alert addButtonWithTitle:@"Install Update"];
     [alert addButtonWithTitle:@"Later"];
-    [alert addButtonWithTitle:@"Skip This Version"];
-    if ([[[result release] releaseNotesURL] absoluteString] != nil) {
-      [alert addButtonWithTitle:@"View Changes"];
-    }
+    [alert addButtonWithTitle:(hasReleaseNotes ? @"More..." : @"Skip This Version")];
 
     NSInteger response = [alert runModal];
     if (response == NSAlertFirstButtonReturn) {
@@ -417,17 +417,28 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
       return;
     }
 
-    if (response == NSAlertThirdButtonReturn) {
+    if (response != NSAlertThirdButtonReturn) {
+      return;
+    }
+
+    if (!hasReleaseNotes) {
       [[self updater] skipVersion:[result latestVersion]];
       return;
     }
 
-    if (response == NSAlertFirstButtonReturn + 3) {
+    NSAlert *more = [[[NSAlert alloc] init] autorelease];
+    [more setMessageText:title];
+    [more setInformativeText:[NSString stringWithFormat:@"See what changed in %@, or skip it until a newer version is available.", [result latestVersion]]];
+    [more addButtonWithTitle:@"View Changes"];
+    [more addButtonWithTitle:@"Back"];
+    [more addButtonWithTitle:@"Skip This Version"];
+    NSInteger moreResponse = [more runModal];
+    if (moreResponse == NSAlertFirstButtonReturn) {
       [self _openReleaseNotesURL:[[result release] releaseNotesURL]];
-      continue;
+    } else if (moreResponse == NSAlertThirdButtonReturn) {
+      [[self updater] skipVersion:[result latestVersion]];
+      return;
     }
-
-    return;
   }
 }
 

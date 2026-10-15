@@ -117,8 +117,10 @@ The standard UI layer behaves as follows:
 
 - automatic checks stay quiet when the app is already current
 - manual checks show an explicit up-to-date or failure dialog
-- update-available prompts offer `Install Update`, `Later`, `Skip This Version`,
-  and release-note viewing
+- update-available prompts offer `Install Update`, `Later` and `Skip This Version`;
+  when the release has notes, the third button is `More...`, which offers
+  `View Changes` (then back to the prompt), `Back` and `Skip This Version`
+  (GNUstep's alert panel shows at most three buttons)
 - install preparation happens through `gp-update-helper`
 - once preparation finishes, the UI shows `Restart and Install`
 - AppImage installs fall back to a manual-download path when the current file
