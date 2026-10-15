@@ -583,7 +583,11 @@ Fields:
   libraries to record. The default covers the GNUstep runtime:
   `libgnustep-*` (base, corebase, gui, back and its bundle), `libobjc*`,
   `libdispatch*`, `libBlocksRuntime*`
-  and `dispatch.dll`. Setting it replaces the default list.
+  and `dispatch.dll`. Setting it replaces the default list. Only shared
+  libraries are matched (`*.so`, `*.so.*`, `*.dll`, `*.dylib`, and a file
+  with no extension such as the back bundle's binary), so a pattern
+  such as `libobjc*` leaves out the toolchain's `cmake/libobjc/*.cmake` files
+  and static archives.
 
 The sidecar records:
 - the package id, name and version, and the backend

@@ -134,6 +134,11 @@ Describe "Release provenance" {
       New-GpTestElf -Path (Join-Path $libraryDirectory "libobjc.so.4.6")
       Set-Content -Path (Join-Path $libraryDirectory "libgnustep-base-1_31.dll") -Value "a Windows build of the same library"
       Set-Content -Path (Join-Path $libraryDirectory "libz.so.1") -Value "not a GNUstep library"
+      New-Item -ItemType Directory -Force -Path (Join-Path $libraryDirectory "cmake/libobjc") | Out-Null
+      Set-Content -Path (Join-Path $libraryDirectory "cmake/libobjc/libobjcConfig.cmake") -Value "not a shared library"
+      Set-Content -Path (Join-Path $libraryDirectory "libobjc.a") -Value "a static archive"
+      New-Item -ItemType Directory -Force -Path (Join-Path $libraryDirectory "libgnustep-back-032.bundle") | Out-Null
+      New-GpTestElf -Path (Join-Path $libraryDirectory "libgnustep-back-032.bundle/libgnustep-back-032")
       New-GpTestElf -Path (Join-Path $entryDirectory "MyApp")
       if (-not $IsWindows) {
         New-Item -ItemType SymbolicLink -Path (Join-Path $libraryDirectory "libgnustep-base.so") -Target "libgnustep-base.so.1.31" | Out-Null
@@ -143,13 +148,14 @@ Describe "Release provenance" {
 
       Assert-GpEqual -Actual @($files | ForEach-Object { "$($_.role):$($_.path)" }) -Expected @(
         "entry:usr/app/MyApp.app/MyApp",
+        "library:usr/runtime/lib/libgnustep-back-032.bundle/libgnustep-back-032",
         "library:usr/runtime/lib/libgnustep-base-1_31.dll",
         "library:usr/runtime/lib/libgnustep-base.so.1.31",
         "library:usr/runtime/lib/libobjc.so.4.6"
-      ) -Message "The entry and matching libraries should be listed once each, without symbolic links or other libraries."
-      Assert-GpEqual -Actual $files[2].elfBuildId -Expected $script:buildId -Message "An ELF library should carry its build ID."
-      Assert-GpEqual -Actual $files[1].elfBuildId -Expected $null -Message "A non-ELF library has no build ID."
-      Assert-GpEqual -Actual $files[2].sha256 -Expected (Get-GpFileSha256 -Path (Join-Path $libraryDirectory "libgnustep-base.so.1.31")) -Message "Each file should carry its SHA-256."
+      ) -Message "The entry and matching shared libraries should be listed once each, without symbolic links, other libraries, cmake files or static archives."
+      Assert-GpEqual -Actual $files[3].elfBuildId -Expected $script:buildId -Message "An ELF library should carry its build ID."
+      Assert-GpEqual -Actual $files[2].elfBuildId -Expected $null -Message "A non-ELF library has no build ID."
+      Assert-GpEqual -Actual $files[3].sha256 -Expected (Get-GpFileSha256 -Path (Join-Path $libraryDirectory "libgnustep-base.so.1.31")) -Message "Each file should carry its SHA-256."
     } finally {
       Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
     }
