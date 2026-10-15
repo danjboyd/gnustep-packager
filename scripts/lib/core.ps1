@@ -2351,7 +2351,12 @@ function Get-GpPayloadProvenanceFiles {
       Where-Object { -not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) } |
       Where-Object {
         $name = $_.Name
-        @($LibraryPatterns | Where-Object { $name -like $_ }).Count -gt 0
+        # Shared libraries only: libobjc* would otherwise also match the
+        # cmake/libobjc/*.cmake files a toolchain installs beside them. A
+        # bundle's binary (libgnustep-back-032.bundle/libgnustep-back-032)
+        # has no extension, so that counts too.
+        ($name -like "*.so" -or $name -like "*.so.*" -or $name -like "*.dll" -or $name -like "*.dylib" -or [string]::IsNullOrEmpty([System.IO.Path]::GetExtension($name))) -and
+          @($LibraryPatterns | Where-Object { $name -like $_ }).Count -gt 0
       }
     # Ordinal, so the order is the same on every host and culture.
     $libraries = [System.IO.FileInfo[]]@($libraries)
