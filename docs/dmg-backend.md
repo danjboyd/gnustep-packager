@@ -318,13 +318,18 @@ tests, then the shared pipeline with `-Backend dmg -RunSmoke`. The `CI`
 environment variable makes `finderLayout: auto` skip the Finder layout, so the
 runner never needs Automation permission.
 
-The reusable `package-gnustep-app.yml` workflow does not have a `dmg` path
-yet. Downstream repos can use
-[examples/downstream/package-dmg.yml](../examples/downstream/package-dmg.yml),
-which checks out the packager, optionally imports a Developer ID certificate
-and stores a notary profile from secrets into a temporary keychain, exports the
-profile name in the variable the manifest names, and runs
-`run-packaging-pipeline.ps1 -Backend dmg -RunSmoke`.
+The reusable `package-gnustep-app.yml` workflow packages DMGs with
+`backend: dmg`, on `runs-on-dmg` (default `["macos-latest"]`). It installs no
+toolchain: the app's build and stage commands use the runner's Xcode, and
+`preflight-command` can add anything else. With `sign-artifacts: true` it
+imports a Developer ID certificate (`macos_certificate_p12`,
+`macos_certificate_password`) into a temporary keychain and, when the notary
+secrets (`notary_apple_id`, `notary_team_id`, `notary_app_password`) are set,
+stores a `notarytool` profile and exports its name in the variable that
+`backends.dmg.notarization.keychainProfileEnvVar` names. The manifest still
+decides the identity and whether to notarize. The keychain is deleted at the
+end of the job. See
+[examples/downstream/package-dmg.yml](../examples/downstream/package-dmg.yml).
 
 ## Troubleshooting
 - **"Staged app bundle not found"**: run `stage`, and check
@@ -351,5 +356,4 @@ profile name in the variable the manifest names, and runs
   route for that).
 - The updater runtime config and update-feed sidecars are not emitted for DMG
   artifacts.
-- The reusable GitHub workflow does not cover `dmg` yet (see CI Usage).
 - One app bundle per image.

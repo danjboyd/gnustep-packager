@@ -30,6 +30,10 @@ on:
         required: false
         type: string
         default: '["ubuntu-latest"]'
+      runs-on-dmg:
+        required: false
+        type: string
+        default: '["macos-latest"]'
       # An image to run the AppImage job in (with PowerShell and the
       # AppImage tools); usually with skip-default-host-setup: true. GHCR
       # images get the workflow token as their registry login.
@@ -124,6 +128,20 @@ on:
         required: false
       sign_cert_sha1:
         required: false
+      # DMG signing and notarization (backend: dmg, sign-artifacts: true): a
+      # Developer ID Application certificate as base64 .p12 and its password,
+      # and optionally the Apple ID, team ID and app-specific password that
+      # notarytool stores as a keychain profile.
+      macos_certificate_p12:
+        required: false
+      macos_certificate_password:
+        required: false
+      notary_apple_id:
+        required: false
+      notary_team_id:
+        required: false
+      notary_app_password:
+        required: false
     outputs:
       resolved-version:
         description: Resolved package version after defaults and optional override.
@@ -140,7 +158,7 @@ on:
 
 jobs:
   package:
-    runs-on: ${{ fromJSON(inputs.backend == 'appimage' && inputs.runs-on-appimage || inputs.runs-on-msi) }}
+    runs-on: ${{ fromJSON(inputs.backend == 'appimage' && inputs.runs-on-appimage || (inputs.backend == 'dmg' && inputs.runs-on-dmg || inputs.runs-on-msi)) }}
     container: ${{ (inputs.backend == 'appimage' && startsWith(inputs.container-appimage, 'ghcr.io/')) && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.container-appimage, github.actor, github.token)) || (inputs.backend == 'appimage' && inputs.container-appimage) || '' }}
     outputs:
       resolved-version: ${{ steps.manifest.outputs.resolved_version }}
@@ -228,6 +246,12 @@ jobs:
           "resolved_apt_packages=$($hostSetupPlan.ResolvedAptPackageText)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "host_setup_mode=$($hostSetupPlan.HostSetupMode)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "host_setup_summary=$($hostSetupPlan.Summary)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $notaryProfileEnvVar = ""
+          if ($manifest.Contains("backends") -and $manifest["backends"].Contains("dmg") -and $manifest["backends"]["dmg"].Contains("notarization") -and
+              $manifest["backends"]["dmg"]["notarization"].Contains("keychainProfileEnvVar")) {
+            $notaryProfileEnvVar = [string]$manifest["backends"]["dmg"]["notarization"]["keychainProfileEnvVar"]
+          }
+          "dmg_notary_profile_env_var=$notaryProfileEnvVar" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host $hostSetupPlan.Summary
 
       - name: Install MSYS2 Bootstrap Shell
@@ -625,6 +649,49 @@ jobs:
             "GP_SIGN_PFX_PATH=$pfxPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           }
 
+      # A temporary keychain with the Developer ID certificate, and the
+      # notarytool profile named by backends.dmg.notarization.keychainProfileEnvVar.
+      # The manifest decides the identity and whether to notarize; without
+      # notary secrets the DMG is signed but not notarized.
+      - name: Configure macOS Signing
+        if: ${{ inputs.sign-artifacts && inputs.backend == 'dmg' }}
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.macos_certificate_p12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.macos_certificate_password }}
+          NOTARY_APPLE_ID: ${{ secrets.notary_apple_id }}
+          NOTARY_TEAM_ID: ${{ secrets.notary_team_id }}
+          NOTARY_APP_PASSWORD: ${{ secrets.notary_app_password }}
+          NOTARY_PROFILE_ENV_VAR: ${{ steps.manifest.outputs.dmg_notary_profile_env_var }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MACOS_CERTIFICATE_P12}" ]; then
+            echo "sign-artifacts with backend dmg needs the macos_certificate_p12 secret" >&2
+            exit 1
+          fi
+          keychain="${RUNNER_TEMP}/gnustep-packager-signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          security create-keychain -p "${keychain_password}" "${keychain}"
+          security set-keychain-settings -lut 21600 "${keychain}"
+          security unlock-keychain -p "${keychain_password}" "${keychain}"
+          echo "${MACOS_CERTIFICATE_P12}" | base64 --decode > "${RUNNER_TEMP}/gnustep-packager-cert.p12"
+          security import "${RUNNER_TEMP}/gnustep-packager-cert.p12" -k "${keychain}" -P "${MACOS_CERTIFICATE_PASSWORD}" -T /usr/bin/codesign
+          rm -f "${RUNNER_TEMP}/gnustep-packager-cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "${keychain_password}" "${keychain}" >/dev/null
+          security list-keychains -d user -s "${keychain}" $(security list-keychains -d user | tr -d '"')
+          echo "GP_SIGNING_KEYCHAIN=${keychain}" >> "${GITHUB_ENV}"
+          if [ -n "${NOTARY_APPLE_ID}" ] && [ -n "${NOTARY_TEAM_ID}" ] && [ -n "${NOTARY_APP_PASSWORD}" ]; then
+            if [ -z "${NOTARY_PROFILE_ENV_VAR}" ]; then
+              echo "notary secrets are set, but the manifest has no backends.dmg.notarization.keychainProfileEnvVar" >&2
+              exit 1
+            fi
+            xcrun notarytool store-credentials gnustep-packager-notary --apple-id "${NOTARY_APPLE_ID}" \
+              --team-id "${NOTARY_TEAM_ID}" --password "${NOTARY_APP_PASSWORD}" --keychain "${keychain}"
+            echo "${NOTARY_PROFILE_ENV_VAR}=gnustep-packager-notary" >> "${GITHUB_ENV}"
+          else
+            echo "No notary secrets: the DMG is signed but not notarized."
+          fi
+
       - name: Run Packaging Pipeline
         run: |
           $toolRoot = Join-Path $env:GITHUB_WORKSPACE ".gnustep-packager-toolkit"
@@ -672,6 +739,14 @@ jobs:
             done
           done
 
+      - name: Remove macOS Signing Keychain
+        if: ${{ always() && inputs.sign-artifacts && inputs.backend == 'dmg' }}
+        shell: bash
+        run: |
+          if [ -n "${GP_SIGNING_KEYCHAIN:-}" ]; then
+            security delete-keychain "${GP_SIGNING_KEYCHAIN}" || true
+          fi
+
       - name: Upload Package Artifacts
         if: ${{ inputs.upload-artifacts }}
         uses: actions/upload-artifact@v4
@@ -691,7 +766,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload gnustep-cli-new Diagnostics
-        if: ${{ always() && inputs.upload-artifacts }}
+        if: ${{ always() && inputs.upload-artifacts && inputs.backend != 'dmg' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.artifact-name }}-gnustep-cli-new

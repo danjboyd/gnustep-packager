@@ -41,6 +41,29 @@ Describe "Reusable workflow surface" {
     }
   }
 
+  It "packages DMGs on macOS runners, with optional Developer ID signing and notarization" {
+    foreach ($pattern in @(
+      "runs-on-dmg:",
+      "inputs.backend == 'dmg' && inputs.runs-on-dmg",
+      "macos_certificate_p12:",
+      "notary_app_password:",
+      "dmg_notary_profile_env_var=",
+      "Configure macOS Signing",
+      "xcrun notarytool store-credentials",
+      "Remove macOS Signing Keychain"
+    )) {
+      if ($script:workflowText -notmatch [regex]::Escape($pattern)) {
+        throw "Reusable workflow is missing DMG surface: $pattern"
+      }
+    }
+    if ($script:validateRepoText -notmatch "(?s)macos-reusable-workflow:.*uses: \./\.github/workflows/package-gnustep-app\.yml.*backend: dmg") {
+      throw "validate-repo should run the reusable workflow's dmg path."
+    }
+    if ($script:githubActionsDocText -notmatch [regex]::Escape("runs-on-dmg")) {
+      throw "docs/github-actions.md should document runs-on-dmg."
+    }
+  }
+
   It "wires gnustep-cli-new into the default AppImage workflow path" {
     foreach ($pattern in @(
       "Bootstrap And Smoke Test gnustep-cli-new",
