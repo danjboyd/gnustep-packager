@@ -108,6 +108,8 @@ Primary inputs:
 - `manifest-path`
 - `backend`
 - `package-version`
+- `packager-repository`
+- `packager-ref`
 - `runs-on-msi`
 - `runs-on-appimage`
 - `runs-on-dmg`
@@ -165,8 +167,10 @@ still decide how the DMG is signed and whether it is notarized; see
 ```yaml
 jobs:
   package-windows:
-    uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
     with:
+      packager-repository: danjboyd/gnustep-packager
+      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: msi
       gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
@@ -178,8 +182,10 @@ jobs:
       sign_pfx_password: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
 
   package-linux:
-    uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
     with:
+      packager-repository: danjboyd/gnustep-packager
+      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: appimage
       gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
@@ -188,8 +194,10 @@ jobs:
       artifact-name: my-app-linux
 
   package-macos:
-    uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
     with:
+      packager-repository: danjboyd/gnustep-packager
+      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: dmg
       run-validation: true
@@ -209,8 +217,10 @@ Advanced self-hosted AppImage example:
 ```yaml
 jobs:
   package-linux:
-    uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
     with:
+      packager-repository: danjboyd/gnustep-packager
+      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: appimage
       runs-on-appimage: '["self-hosted","linux","gnustep-clang"]'
@@ -227,8 +237,10 @@ Advanced self-hosted Windows example:
 ```yaml
 jobs:
   package-windows:
-    uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
     with:
+      packager-repository: danjboyd/gnustep-packager
+      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: msi
       runs-on-msi: '["self-hosted","windows","msys2-clang64"]'
@@ -251,8 +263,15 @@ The reusable workflow checks out:
 - the caller repository as the consumer repo
 - this repo as the packager toolchain
 
-That means the consumer manifest and build outputs stay in the caller repo while
-the packaging logic stays centralized here. Caller preflight commands run in
+Pass `packager-repository` and `packager-ref` explicitly, with `packager-ref`
+set to the same tag as the `uses:` line (for example `v0.1.0`). Without them
+the workflow guesses the packager checkout from `github.workflow_ref`. In a
+reusable-workflow call that value names the caller's workflow, not this one, so
+the guess points at the wrong repository.
+
+Keeping the two checkouts separate means the consumer manifest and build
+outputs stay in the caller repo while the packaging logic stays centralized
+here. Caller preflight commands run in
 that checked-out workspace before the workflow resolves outputs or invokes the
 shared packaging pipeline.
 

@@ -8,8 +8,10 @@ on:
 
 jobs:
   package:
-    uses: <owner>/gnustep-packager/.github/workflows/package-gnustep-app.yml@main
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
     with:
+      packager-repository: danjboyd/gnustep-packager
+      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: msi
       package-version: ${{ github.ref_name }}
