@@ -2333,6 +2333,12 @@ function Get-GpPayloadProvenanceFiles {
   $describe = {
     param([System.IO.FileInfo]$File, [string]$Role)
     $relativePath = [System.IO.Path]::GetRelativePath($root, $File.FullName) -replace "\\", "/"
+    # GetRelativePath returns the full path when the two share no root (a
+    # different drive), and ../ when the file is outside the payload; either
+    # would publish a build machine path.
+    if ([System.IO.Path]::IsPathRooted($relativePath) -or $relativePath -eq ".." -or $relativePath.StartsWith("../")) {
+      throw "Provenance file $($File.FullName) is not inside the payload root $root."
+    }
     [pscustomobject][ordered]@{
       path = $relativePath
       role = $Role
@@ -2551,7 +2557,8 @@ function Write-GpProvenanceDocument {
     [string]$ArtifactPath,
     [Parameter(Mandatory = $true)]
     [string]$PayloadRoot,
-    [string]$EntryPath
+    [string]$EntryPath,
+    [string[]]$RelatedArtifactPaths = @()
   )
 
   $settings = Get-GpProvenanceSettings -Context $Context
@@ -2574,6 +2581,17 @@ function Write-GpProvenanceDocument {
       sizeBytes = $artifact.Length
       sha256 = Get-GpFileSha256 -Path $artifact.FullName
     }
+    # Other files the same build publishes, such as the MSI's portable ZIP.
+    relatedArtifacts = @(
+      foreach ($relatedPath in @($RelatedArtifactPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })) {
+        $related = Get-Item -LiteralPath $relatedPath
+        [ordered]@{
+          name = $related.Name
+          sizeBytes = $related.Length
+          sha256 = Get-GpFileSha256 -Path $related.FullName
+        }
+      }
+    )
     source = Get-GpSourceRevision -Path $Context.ManifestRoot
     packager = Get-GpSourceRevision -Path $Context.ToolRoot
     toolchain = Get-GpToolchainProvenanceSummary -Context $Context
