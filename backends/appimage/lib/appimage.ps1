@@ -742,7 +742,12 @@ function Get-GpAppImageSmokeAlertWindows {
 
   # Without a process, any viewable alert panel counts: used to note the
   # panels already on screen before the launch.
-  $processNames = if ($null -ne $Process) { @(Get-GpAppImageSmokeProcessNames -RootProcessId $Process.Id) } else { $null }
+  # Assigned in a block, not from an if expression: that would unroll an empty
+  # list (the app has exited) to $null, which means "any window" here.
+  $processNames = $null
+  if ($null -ne $Process) {
+    $processNames = [string[]]@(Get-GpAppImageSmokeProcessNames -RootProcessId $Process.Id)
+  }
   $displayArguments = @("DISPLAY=" + [string]$Environment["DISPLAY"])
   if ($Environment.Contains("XAUTHORITY")) {
     $displayArguments += "XAUTHORITY=" + [string]$Environment["XAUTHORITY"]
@@ -759,7 +764,7 @@ function Get-GpAppImageSmokeAlertWindows {
       continue
     }
     $owned = ($null -eq $processNames)
-    foreach ($name in @($processNames)) {
+    foreach ($name in @(if (-not $owned) { $processNames })) {
       if ($className.StartsWith($name) -or $name.StartsWith($className)) {
         $owned = $true
         break
