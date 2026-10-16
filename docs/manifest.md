@@ -454,7 +454,11 @@ AppImage GNUstep configuration (`gnustepConfig`):
   the build host's prefix: the AppImage then starts only on hosts that have
   GNUstep installed there. Packaging logs a warning when the staged runtime
   has a `System/Library` tree and `systemRoot` is unset. A `GNUSTEP_CONFIG_FILE`
-  in `launch.env` still takes precedence.
+  in `launch.env` still takes precedence. When the AppDir bundles
+  `libgnustep-gui`, packaging also logs a warning for each of `gdnc`, `gpbs`
+  and `make_services` missing from `<systemRoot>/Tools`: gnustep-gui starts
+  them on demand (`make_services` on a first launch), so a missing one only
+  fails on hosts without GNUstep installed.
 - `userLibrary`
   `app` (the default) or `host`. With `app`, the generated `GNUstep.conf` sets
   `GNUSTEP_USER_DIR_LIBRARY` to `GNUstep/Library/AppImage/<package.id>` under
