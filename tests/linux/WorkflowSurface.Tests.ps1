@@ -41,6 +41,20 @@ Describe "Reusable workflow surface" {
     }
   }
 
+  It "checks out its own packager commit instead of the caller's workflow ref" {
+    foreach ($pattern in @(
+      '${{ job.workflow_repository }}',
+      '${{ job.workflow_sha }}'
+    )) {
+      if ($script:workflowText -notmatch [regex]::Escape($pattern)) {
+        throw "Reusable workflow does not resolve the packager checkout from: $pattern"
+      }
+    }
+    if ($script:workflowText -match [regex]::Escape('${{ github.workflow_ref }}')) {
+      throw "Reusable workflow must not resolve the packager checkout from github.workflow_ref (it names the caller's workflow in a workflow_call)"
+    }
+  }
+
   It "packages DMGs on macOS runners, with optional Developer ID signing and notarization" {
     foreach ($pattern in @(
       "runs-on-dmg:",
