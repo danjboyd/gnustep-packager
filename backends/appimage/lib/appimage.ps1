@@ -1384,6 +1384,31 @@ function Write-GpAppImageGlobalDefaults {
   return $path
 }
 
+function Get-GpAppImageMissingGuiTools {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$AppDirRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$SystemRoot
+  )
+
+  # gnustep-gui runs these from GNUSTEP_SYSTEM_TOOLS on demand: gdnc at launch, make_services on
+  # a first launch (empty services cache), gpbs on the first pasteboard use. Missing ones show up
+  # only on hosts without GNUstep, so name them at package time.
+  $guiLibrary = Get-ChildItem -Path (Join-Path $AppDirRoot "usr") -Recurse -Filter "libgnustep-gui.so*" -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($null -eq $guiLibrary) {
+    return [string[]]@()
+  }
+
+  $toolsRoot = Join-Path $SystemRoot "Tools"
+  $missing = foreach ($name in @("gdnc", "gpbs", "make_services")) {
+    if (-not (Test-Path -PathType Leaf (Join-Path $toolsRoot $name))) {
+      $name
+    }
+  }
+  return [string[]]@($missing)
+}
+
 function Write-GpAppImageGnustepConfig {
   param(
     [Parameter(Mandatory = $true)]
@@ -1406,6 +1431,10 @@ function Write-GpAppImageGnustepConfig {
   $systemRoot = [System.IO.Path]::GetFullPath((Join-Path $usrRoot ($Config.GnustepConfig.SystemRootRelative -replace "/", [System.IO.Path]::DirectorySeparatorChar)))
   if (-not (Test-Path (Join-Path $systemRoot "Library"))) {
     throw "backends.appimage.gnustepConfig.systemRoot '$($Config.GnustepConfig.SystemRootRelative)' has no Library directory in the AppDir ($systemRoot)."
+  }
+  $missingTools = @(Get-GpAppImageMissingGuiTools -AppDirRoot $AppDirRoot -SystemRoot $systemRoot)
+  if ($missingTools.Count -gt 0) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("WARNING: the AppDir bundles gnustep-gui but {0} has no {1}. gnustep-gui starts these tools on demand, so the AppImage can fail on hosts without GNUstep installed (for example 'Unable to find the make_services tool' on a first launch)." -f (Join-Path $systemRoot "Tools"), ($missingTools -join ", "))
   }
 
   $layout = Get-GpAppImageGnustepConfigLayout -Config $Config

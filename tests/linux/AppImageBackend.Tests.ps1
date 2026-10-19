@@ -232,6 +232,31 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export GNUSTEP_CONFIG_FILE="$GP_GNUSTEP_CONFIG_FILE"')) -Message "AppRun should export GNUSTEP_CONFIG_FILE."
     }
 
+    It "names the gnustep-gui tools missing from the bundled System/Tools" {
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-gui-tools-" + [guid]::NewGuid().ToString("N"))
+      try {
+        $systemRoot = Join-Path $tempRoot "usr/runtime/System"
+        New-Item -ItemType Directory -Force -Path (Join-Path $systemRoot "Tools"), (Join-Path $tempRoot "usr/runtime/lib") | Out-Null
+        Set-Content -Path (Join-Path $systemRoot "Tools/gdnc") -Value ""
+
+        $missing = @(Get-GpAppImageMissingGuiTools -AppDirRoot $tempRoot -SystemRoot $systemRoot)
+        Assert-GpEqual -Actual $missing.Count -Expected 0 -Message "Without gnustep-gui in the AppDir, no tools are required."
+
+        Set-Content -Path (Join-Path $tempRoot "usr/runtime/lib/libgnustep-gui.so.0.32") -Value ""
+        $missing = @(Get-GpAppImageMissingGuiTools -AppDirRoot $tempRoot -SystemRoot $systemRoot)
+        Assert-GpEqual -Actual $missing -Expected @("gpbs", "make_services") -Message "A gnustep-gui AppDir should name each missing on-demand tool."
+
+        Set-Content -Path (Join-Path $systemRoot "Tools/gpbs") -Value ""
+        Set-Content -Path (Join-Path $systemRoot "Tools/make_services") -Value ""
+        $missing = @(Get-GpAppImageMissingGuiTools -AppDirRoot $tempRoot -SystemRoot $systemRoot)
+        Assert-GpEqual -Actual $missing.Count -Expected 0 -Message "With every tool bundled, nothing is missing."
+      } finally {
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
+        }
+      }
+    }
+
     It "launches against the bundled GNUstep tree from any location, with the theme only on the named desktops" {
       $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-gnustep-config-" + [guid]::NewGuid().ToString("N"))
       try {
