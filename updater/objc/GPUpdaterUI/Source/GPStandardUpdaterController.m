@@ -753,6 +753,7 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
   [_progressLabel setSelectable:NO];
   [_progressLabel setRefusesFirstResponder:YES];
   [_progressLabel setBordered:NO];
+  [_progressLabel setBezeled:NO];
   [_progressLabel setDrawsBackground:NO];
   [_progressLabel setStringValue:message];
   [contentView addSubview:_progressLabel];
