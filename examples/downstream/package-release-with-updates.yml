@@ -13,10 +13,8 @@ permissions:
 
 jobs:
   package-windows:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
     with:
-      packager-repository: danjboyd/gnustep-packager
-      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: msi
       package-version: ${{ github.ref_name }}
@@ -30,10 +28,8 @@ jobs:
       sign_pfx_password: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
 
   package-linux:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
     with:
-      packager-repository: danjboyd/gnustep-packager
-      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: appimage
       package-version: ${{ github.ref_name }}
