@@ -143,20 +143,20 @@ Call the reusable workflow from your app repo, pinned to a release tag:
 ```yaml
 jobs:
   package-linux:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
     with:
       manifest-path: packaging/package.manifest.json
       backend: appimage            # or msi, dmg
-      packager-repository: danjboyd/gnustep-packager
-      packager-ref: v0.1.0
       package-version: ${{ github.ref_name }}
       run-validation: true
       run-smoke: true
       artifact-name: my-app-linux
 ```
 
-Keep `packager-ref` equal to the tag in `uses:`. The workflow uses it to check
-out the matching packager scripts. For signing secrets, self-hosted runners,
+The workflow checks out the packager scripts at the same commit as the tag in
+`uses:`. `packager-repository` and `packager-ref` are optional overrides for
+testing packager changes from another repository or ref; on `@v0.1.0`, which
+predates that fallback, pass both. For signing secrets, self-hosted runners,
 preflight hooks, and an end-to-end release-with-updates example, see
 [docs/github-actions.md](docs/github-actions.md) and
 [examples/downstream/](examples/downstream/).
@@ -262,6 +262,8 @@ Toolchain bootstrap:
 - Packaged app-domain defaults are implemented for MSI and AppImage only.
 
 ## Roadmap
+[CHANGELOG.md](CHANGELOG.md) lists the changes in each release.
+
 [Roadmap.md](Roadmap.md) records the implementation phases, what has landed,
 and what is next.
 

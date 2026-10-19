@@ -108,8 +108,8 @@ Primary inputs:
 - `manifest-path`
 - `backend`
 - `package-version`
-- `packager-repository`
-- `packager-ref`
+- `packager-repository` (optional override; see Implementation Note)
+- `packager-ref` (optional override; see Implementation Note)
 - `runs-on-msi`
 - `runs-on-appimage`
 - `runs-on-dmg`
@@ -167,10 +167,8 @@ still decide how the DMG is signed and whether it is notarized; see
 ```yaml
 jobs:
   package-windows:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
     with:
-      packager-repository: danjboyd/gnustep-packager
-      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: msi
       gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
@@ -182,10 +180,8 @@ jobs:
       sign_pfx_password: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
 
   package-linux:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
     with:
-      packager-repository: danjboyd/gnustep-packager
-      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: appimage
       gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
@@ -194,10 +190,8 @@ jobs:
       artifact-name: my-app-linux
 
   package-macos:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
     with:
-      packager-repository: danjboyd/gnustep-packager
-      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: dmg
       run-validation: true
@@ -217,10 +211,8 @@ Advanced self-hosted AppImage example:
 ```yaml
 jobs:
   package-linux:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
     with:
-      packager-repository: danjboyd/gnustep-packager
-      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: appimage
       runs-on-appimage: '["self-hosted","linux","gnustep-clang"]'
@@ -237,10 +229,8 @@ Advanced self-hosted Windows example:
 ```yaml
 jobs:
   package-windows:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.0
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
     with:
-      packager-repository: danjboyd/gnustep-packager
-      packager-ref: v0.1.0
       manifest-path: packaging/package.manifest.json
       backend: msi
       runs-on-msi: '["self-hosted","windows","msys2-clang64"]'
@@ -271,8 +261,8 @@ reusable-workflow call. Set both inputs only to test packager scripts from a
 different repository or ref, or on GitHub Enterprise Server, where the
 `job.workflow_*` properties are not available.
 
-Packager `v0.1.0` predates this fallback, so callers pinned to `@v0.1.0` must
-still pass both inputs, as the examples above do.
+This fallback ships in `v0.1.1`. Callers pinned to `@v0.1.0`, which predates
+it, must still pass both inputs.
 
 Keeping the two checkouts separate means the consumer manifest and build
 outputs stay in the caller repo while the packaging logic stays centralized
