@@ -288,7 +288,9 @@ Describe "MSI backend" {
         New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
         Copy-Item -Recurse -Path $script:transform.InstallRoot -Destination $installRoot
         $launcher = Join-Path $installRoot (Split-Path -Leaf $script:transform.LauncherPath)
-        $workingDirectory = Join-Path $installRoot "app\SampleGNUstepApp.app"
+        $launch = Get-GpLaunchContract -Context $script:transformContext
+        $workingDirectory = [System.IO.Path]::GetFullPath((Join-Path $installRoot $launch.WorkingDirectory))
+        $entryPath = Join-Path $installRoot $launch.EntryRelativePath
 
         # A stub entry reports where it runs and what it receives.
         $stubSource = Join-Path $tempRoot "ArgvStub.c"
@@ -309,7 +311,7 @@ Describe "MSI backend" {
           '    return 0;'
           '}'
         )
-        & (Get-GpPreferredWindowsClang) -municode -mwindows -o (Join-Path $workingDirectory "SampleGNUstepApp.exe") $stubSource
+        & (Get-GpPreferredWindowsClang) -municode -mwindows -o $entryPath $stubSource
         Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message "The argv stub should compile."
 
         $callerDir = Join-Path $tempRoot "home"

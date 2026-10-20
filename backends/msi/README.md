@@ -49,6 +49,14 @@ The backend now implements:
   installer never writes an extension's default handler or the user's choice,
   so it doesn't take over files another app opens. MIME entries are
   AppImage-only.
+- relative path arguments resolved against the caller's directory: the
+  launcher starts the app in `launch.workingDirectory`, so before that it makes
+  an argument absolute when it exists in the directory the launcher was started
+  from, or when it contains `\` or `/` and is not a URL. `MyApp.exe
+  docs\notes.md` from a prompt then opens the caller's `docs\notes.md`.
+  Arguments starting with `-` or `/`, URLs, and rooted or drive paths pass
+  through unchanged. Explorer, Open with and shortcuts pass absolute paths, so
+  those launches are unaffected.
 
 Key backend assets:
 - `assets/GpWindowsLauncher.c`
