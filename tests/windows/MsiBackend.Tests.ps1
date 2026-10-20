@@ -277,6 +277,111 @@ Describe "MSI backend" {
       }
     }
 
+    It "resolves relative path arguments against the caller's directory, not the working directory" {
+      # Beside the install tree rather than under %TEMP%, whose 8.3 name
+      # (RUNNER~1) would make the expected paths differ in form.
+      $tempRoot = Join-Path (Split-Path -Parent $script:transform.InstallRoot) ("gp-msi-relative-args-" + [guid]::NewGuid().ToString("N"))
+      $previousNonInteractive = $env:GP_LAUNCHER_NONINTERACTIVE
+      $previousOutput = $env:GP_TEST_ARGV_PATH
+      try {
+        $installRoot = Join-Path $tempRoot "install"
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        Copy-Item -Recurse -Path $script:transform.InstallRoot -Destination $installRoot
+        $launcher = Join-Path $installRoot (Split-Path -Leaf $script:transform.LauncherPath)
+        $workingDirectory = Join-Path $installRoot "app\SampleGNUstepApp.app"
+
+        # A stub entry reports where it runs and what it receives.
+        $stubSource = Join-Path $tempRoot "ArgvStub.c"
+        Set-Content -Path $stubSource -Encoding ascii -Value @(
+          '#include <windows.h>'
+          '#include <stdio.h>'
+          '#include <stdlib.h>'
+          'int wmain(int argc, wchar_t **argv)'
+          '{'
+          '    wchar_t cwd[32768];'
+          '    FILE *out = _wfopen(_wgetenv(L"GP_TEST_ARGV_PATH"), L"w, ccs=UTF-8");'
+          '    int i;'
+          '    if (out == NULL) return 1;'
+          '    GetCurrentDirectoryW(32768, cwd);'
+          '    fwprintf(out, L"cwd=%ls\n", cwd);'
+          '    for (i = 1; i < argc; i++) fwprintf(out, L"arg=[%ls]\n", argv[i]);'
+          '    fclose(out);'
+          '    return 0;'
+          '}'
+        )
+        & (Get-GpPreferredWindowsClang) -municode -mwindows -o (Join-Path $workingDirectory "SampleGNUstepApp.exe") $stubSource
+        Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message "The argv stub should compile."
+
+        $callerDir = Join-Path $tempRoot "home"
+        New-Item -ItemType Directory -Force -Path (Join-Path $callerDir "Pictures"), (Join-Path $callerDir "My Docs") | Out-Null
+        foreach ($file in @("Pictures\x.png", "notes.txt", "My Docs\a b.md")) {
+          Set-Content -Path (Join-Path $callerDir $file) -Value ""
+        }
+
+        function Invoke-GpTestLauncher {
+          param([string]$From, [string[]]$Arguments)
+          $outputPath = Join-Path $tempRoot ("argv-" + [guid]::NewGuid().ToString("N") + ".txt")
+          $env:GP_LAUNCHER_NONINTERACTIVE = "1"
+          $env:GP_TEST_ARGV_PATH = $outputPath
+          $startArguments = @{ FilePath = $launcher; WorkingDirectory = $From; PassThru = $true }
+          if (@($Arguments).Count -gt 0) {
+            # Start-Process joins its arguments with spaces, so quote each one.
+            $startArguments["ArgumentList"] = @($Arguments | ForEach-Object { '"' + $_ + '"' })
+          }
+          $proc = Start-Process @startArguments
+          Assert-GpTrue -Condition ($proc.WaitForExit(15000)) -Message "The launcher should exit."
+          Assert-GpEqual -Actual $proc.ExitCode -Expected 0 -Message "The launcher should start the app."
+          # The launcher does not wait for the app; wait for the stub's report.
+          $deadline = [DateTime]::UtcNow.AddSeconds(15)
+          while (-not (Test-Path $outputPath) -and [DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Milliseconds 100
+          }
+          Start-Sleep -Milliseconds 200
+          Assert-GpTrue -Condition (Test-Path $outputPath) -Message "The app stub should have written its report."
+          return @(Get-Content -Path $outputPath -Encoding utf8)
+        }
+
+        # Launched from a prompt in the user's folder.
+        $prompt = Invoke-GpTestLauncher -From $callerDir -Arguments @(
+          "Pictures\x.png", "Pictures/x.png", "notes.txt", ".\notes.txt", "My Docs\a b.md", "exports\new.png",
+          "missing.txt", "--foo=bar", "-NSDebugLog", "YES", "/flag", "https://example.invalid/a?b=c", "mailto:someone@example.invalid"
+        )
+        Assert-GpEqual -Actual $prompt -Expected @(
+          "cwd=$workingDirectory"
+          "arg=[$callerDir\Pictures\x.png]"
+          "arg=[$callerDir\Pictures\x.png]"
+          "arg=[$callerDir\notes.txt]"
+          "arg=[$callerDir\notes.txt]"
+          "arg=[$callerDir\My Docs\a b.md]"
+          "arg=[$callerDir\exports\new.png]"
+          "arg=[missing.txt]"
+          "arg=[--foo=bar]"
+          "arg=[-NSDebugLog]"
+          "arg=[YES]"
+          "arg=[/flag]"
+          "arg=[https://example.invalid/a?b=c]"
+          "arg=[mailto:someone@example.invalid]"
+        ) -Message "Relative paths should resolve against the caller's directory, while the app still runs in launch.workingDirectory; options and URLs pass through."
+
+        # Explorer, Open with and shortcuts pass absolute paths or file URLs.
+        $absolute = Join-Path $callerDir "Pictures\x.png"
+        $fileUrl = ([System.Uri]$absolute).AbsoluteUri
+        $explorer = Invoke-GpTestLauncher -From ([System.IO.Path]::GetPathRoot($tempRoot)) -Arguments @($absolute, $fileUrl)
+        Assert-GpEqual -Actual $explorer -Expected @(
+          "cwd=$workingDirectory"
+          "arg=[$absolute]"
+          "arg=[$fileUrl]"
+        ) -Message "Absolute paths and file URLs should reach the app unchanged."
+
+        $noArguments = Invoke-GpTestLauncher -From $callerDir -Arguments @()
+        Assert-GpEqual -Actual $noArguments -Expected @("cwd=$workingDirectory") -Message "A launch without arguments should pass none."
+      } finally {
+        $env:GP_LAUNCHER_NONINTERACTIVE = $previousNonInteractive
+        $env:GP_TEST_ARGV_PATH = $previousOutput
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tempRoot
+      }
+    }
+
     It "writes a bundled notice report from compliance entries" {
       $noticeText = Get-Content -Raw -Path $script:transform.NoticeReportPath
 
