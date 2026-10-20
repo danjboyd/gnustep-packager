@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- AppImage and MSI launchers: the value after a single-dash option, such as the
+  `YES` in GNUstep's `-NSDebugLog YES`, is no longer made absolute just because
+  a file of that name exists in the caller's directory. It's still resolved
+  when it contains a path separator (`-GSLogFile logs/run.txt`). `--long`
+  options don't protect their value.
+
 ## v0.1.2
 
 ### Fixed

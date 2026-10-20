@@ -55,8 +55,9 @@ The backend now implements:
   from, or when it contains `\` or `/` and is not a URL. `MyApp.exe
   docs\notes.md` from a prompt then opens the caller's `docs\notes.md`.
   Arguments starting with `-` or `/`, URLs, and rooted or drive paths pass
-  through unchanged. Explorer, Open with and shortcuts pass absolute paths, so
-  those launches are unaffected.
+  through unchanged. The value after a single-dash option (`-Key value`) is
+  resolved only when it contains a separator. Explorer, Open with and
+  shortcuts pass absolute paths, so those launches are unaffected.
 
 Key backend assets:
 - `assets/GpWindowsLauncher.c`
