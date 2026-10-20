@@ -630,6 +630,53 @@ static BOOL GPEnvironmentVariableExists(const wchar_t *key)
     return TRUE;
 }
 
+static BOOL GPIsAsciiLetter(wchar_t c)
+{
+    return (c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z');
+}
+
+/* A URL starts with a scheme (a letter, then letters, digits, + . or -) and a
+   colon. A single letter before the colon is a drive, not a scheme. */
+static BOOL GPLooksLikeUrl(const wchar_t *arg)
+{
+    const wchar_t *p = arg;
+
+    if (!GPIsAsciiLetter(*p)) {
+        return FALSE;
+    }
+    for (p++; *p != L':'; p++) {
+        if (*p == L'\0' ||
+            !(GPIsAsciiLetter(*p) || (*p >= L'0' && *p <= L'9') || *p == L'+' || *p == L'.' || *p == L'-')) {
+            return FALSE;
+        }
+    }
+    return (p - arg) >= 2;
+}
+
+/* The app runs in the packaged working directory, so a relative path passed
+   on the command line (MyApp.exe docs\notes.md from a prompt) would resolve
+   inside the install tree. Make it absolute against the launcher's current
+   directory, which is still the caller's. An argument is resolved when it
+   exists there, or when it contains a path separator and is not a URL.
+   Options (-x, /x), URLs, rooted and drive paths pass through unchanged. */
+static const wchar_t *GPResolveCallerArgument(wchar_t *buffer, size_t bufferCount, const wchar_t *arg)
+{
+    DWORD length = 0;
+
+    if (arg[0] == L'\0' || arg[0] == L'-' || arg[0] == L'/' || arg[0] == L'\\' || !PathIsRelativeW(arg)) {
+        return arg;
+    }
+    if (GetFileAttributesW(arg) == INVALID_FILE_ATTRIBUTES &&
+        (GPLooksLikeUrl(arg) || (wcschr(arg, L'\\') == NULL && wcschr(arg, L'/') == NULL))) {
+        return arg;
+    }
+    length = GetFullPathNameW(arg, (DWORD)bufferCount, buffer, NULL);
+    if (length == 0 || length >= bufferCount) {
+        return arg;
+    }
+    return buffer;
+}
+
 static BOOL GPBuildChildCommandLine(wchar_t *dest,
                                     size_t destCount,
                                     const wchar_t *appPath,
@@ -640,6 +687,7 @@ static BOOL GPBuildChildCommandLine(wchar_t *dest,
     size_t used = 0;
     LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     wchar_t quotedArg[GP_MAX_PATH];
+    wchar_t resolvedArg[GP_MAX_PATH];
 
     if (argv == NULL) {
         return FALSE;
@@ -675,7 +723,8 @@ static BOOL GPBuildChildCommandLine(wchar_t *dest,
 
     for (i = 1; i < argc; i++) {
         size_t quotedLen = 0;
-        if (!GPQuoteArgument(quotedArg, GP_MAX_PATH, argv[i])) {
+        const wchar_t *arg = GPResolveCallerArgument(resolvedArg, GP_MAX_PATH, argv[i]);
+        if (!GPQuoteArgument(quotedArg, GP_MAX_PATH, arg)) {
             LocalFree(argv);
             return FALSE;
         }
