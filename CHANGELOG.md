@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.2
 
 ### Fixed
 - AppImage: a relative path on the command line, such as
@@ -13,6 +13,18 @@
   prompt now opens the caller's `docs\notes.md` instead of looking inside the
   install folder. Arguments starting with `-` or `/`, URLs, and rooted or drive
   paths pass through unchanged. (#63)
+
+### Changed
+- `docs/release-gate.md`: the hosted Windows MSI gate is now recorded as
+  passing. The `gnustep-cli-new` MSYS2 CLANG64 selector blocker no longer
+  reproduces, and the gate stays fail-closed. (#62)
+- The docs and `examples/downstream/` workflows pin `@v0.1.2`.
+
+### Upgrading
+Change `@v0.1.1` to `@v0.1.2` in your `uses:` line. Nothing else changes for
+callers. Command-line launches with relative paths now open the caller's file;
+launches from file managers, Explorer, Open with and shortcuts behave as
+before.
 
 ## v0.1.1
 
