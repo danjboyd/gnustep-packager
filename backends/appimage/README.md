@@ -118,7 +118,10 @@ against the directory the AppImage was started from. As a result,
 user's shell. An argument is resolved when it exists in the caller's directory,
 or when it contains a `/` and is not a URL. Arguments starting with `-` (such
 as `--foo=bar` or GNUstep's `-Key value`), URLs (`scheme:...`), absolute paths
-and `launch.arguments` from the manifest pass through unchanged. File managers
+and `launch.arguments` from the manifest pass through unchanged. The value
+after a single-dash option is resolved only when it contains a `/`: in
+`-NSDebugLog YES`, `YES` stays a value even if a file named `YES` exists, while
+`-GSLogFile logs/run.txt` is resolved. File managers
 and desktop launchers pass absolute paths or `file://` URLs, so those launches
 are unaffected.
 

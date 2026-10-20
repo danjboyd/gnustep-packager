@@ -316,7 +316,8 @@ Describe "MSI backend" {
 
         $callerDir = Join-Path $tempRoot "home"
         New-Item -ItemType Directory -Force -Path (Join-Path $callerDir "Pictures"), (Join-Path $callerDir "My Docs") | Out-Null
-        foreach ($file in @("Pictures\x.png", "notes.txt", "My Docs\a b.md")) {
+        # YES is there so the -NSDebugLog YES case shows that an option's value stays as is.
+        foreach ($file in @("Pictures\x.png", "notes.txt", "My Docs\a b.md", "YES")) {
           Set-Content -Path (Join-Path $callerDir $file) -Value ""
         }
 
@@ -346,7 +347,8 @@ Describe "MSI backend" {
         # Launched from a prompt in the user's folder.
         $prompt = Invoke-GpTestLauncher -From $callerDir -Arguments @(
           "Pictures\x.png", "Pictures/x.png", "notes.txt", ".\notes.txt", "My Docs\a b.md", "exports\new.png",
-          "missing.txt", "--foo=bar", "-NSDebugLog", "YES", "/flag", "https://example.invalid/a?b=c", "mailto:someone@example.invalid"
+          "missing.txt", "--foo=bar", "-NSDebugLog", "YES", "-Key", "notes.txt", "-GSLogFile", "logs\run.txt", "--out", "notes.txt",
+          "/flag", "https://example.invalid/a?b=c", "mailto:someone@example.invalid"
         )
         Assert-GpEqual -Actual $prompt -Expected @(
           "cwd=$workingDirectory"
@@ -360,10 +362,16 @@ Describe "MSI backend" {
           "arg=[--foo=bar]"
           "arg=[-NSDebugLog]"
           "arg=[YES]"
+          "arg=[-Key]"
+          "arg=[notes.txt]"
+          "arg=[-GSLogFile]"
+          "arg=[$callerDir\logs\run.txt]"
+          "arg=[--out]"
+          "arg=[$callerDir\notes.txt]"
           "arg=[/flag]"
           "arg=[https://example.invalid/a?b=c]"
           "arg=[mailto:someone@example.invalid]"
-        ) -Message "Relative paths should resolve against the caller's directory, while the app still runs in launch.workingDirectory; options and URLs pass through."
+        ) -Message "Relative paths should resolve against the caller's directory, while the app still runs in launch.workingDirectory; options, a -Key option's plain value, and URLs pass through."
 
         # Explorer, Open with and shortcuts pass absolute paths or file URLs.
         $absolute = Join-Path $callerDir "Pictures\x.png"

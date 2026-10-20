@@ -653,20 +653,29 @@ static BOOL GPLooksLikeUrl(const wchar_t *arg)
     return (p - arg) >= 2;
 }
 
+/* -Key, but not -- options or a lone -. */
+static BOOL GPIsSingleDashOption(const wchar_t *arg)
+{
+    return arg[0] == L'-' && arg[1] != L'\0' && arg[1] != L'-';
+}
+
 /* The app runs in the packaged working directory, so a relative path passed
    on the command line (MyApp.exe docs\notes.md from a prompt) would resolve
    inside the install tree. Make it absolute against the launcher's current
    directory, which is still the caller's. An argument is resolved when it
    exists there, or when it contains a path separator and is not a URL.
-   Options (-x, /x), URLs, rooted and drive paths pass through unchanged. */
-static const wchar_t *GPResolveCallerArgument(wchar_t *buffer, size_t bufferCount, const wchar_t *arg)
+   Options (-x, /x), URLs, rooted and drive paths pass through unchanged.
+   The value after a single-dash option (GNUstep's -Key value) is resolved
+   only when it contains a separator: in -Key YES, YES is a value even if a
+   file of that name exists. */
+static const wchar_t *GPResolveCallerArgument(wchar_t *buffer, size_t bufferCount, const wchar_t *arg, BOOL afterOption)
 {
     DWORD length = 0;
 
     if (arg[0] == L'\0' || arg[0] == L'-' || arg[0] == L'/' || arg[0] == L'\\' || !PathIsRelativeW(arg)) {
         return arg;
     }
-    if (GetFileAttributesW(arg) == INVALID_FILE_ATTRIBUTES &&
+    if ((afterOption || GetFileAttributesW(arg) == INVALID_FILE_ATTRIBUTES) &&
         (GPLooksLikeUrl(arg) || (wcschr(arg, L'\\') == NULL && wcschr(arg, L'/') == NULL))) {
         return arg;
     }
@@ -723,7 +732,8 @@ static BOOL GPBuildChildCommandLine(wchar_t *dest,
 
     for (i = 1; i < argc; i++) {
         size_t quotedLen = 0;
-        const wchar_t *arg = GPResolveCallerArgument(resolvedArg, GP_MAX_PATH, argv[i]);
+        const wchar_t *arg = GPResolveCallerArgument(resolvedArg, GP_MAX_PATH, argv[i],
+                                                     i > 1 && GPIsSingleDashOption(argv[i - 1]));
         if (!GPQuoteArgument(quotedArg, GP_MAX_PATH, arg)) {
             LocalFree(argv);
             return FALSE;

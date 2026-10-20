@@ -1595,17 +1595,23 @@ function Write-GpAppImageAppRun {
   # first. An argument is resolved when it exists there, or when it contains a
   # slash and is not a URL. Options (-x, --foo=bar), URLs, absolute paths and
   # the manifest's own launch arguments (added later) pass through unchanged.
-  # Without a usable caller directory (it was deleted), nothing is rewritten.
+  # The value after a single-dash option (GNUstep's -Key value) is resolved only
+  # when it contains a slash: in -Key YES, YES is a value even if a file of that
+  # name exists. Without a usable caller directory (it was deleted), nothing is
+  # rewritten.
   $lines.Add('GP_CALLER_DIR="$(pwd 2>/dev/null)" || GP_CALLER_DIR=""') | Out-Null
   $lines.Add('case "$GP_CALLER_DIR" in') | Out-Null
   $lines.Add('  /*)') | Out-Null
+  $lines.Add('    gp_after_option=0') | Out-Null
   $lines.Add('    for gp_arg do') | Out-Null
   $lines.Add('      shift') | Out-Null
+  $lines.Add('      gp_next_after_option=0') | Out-Null
   $lines.Add('      case "$gp_arg" in') | Out-Null
-  $lines.Add("        ''|-*|/*) ;;") | Out-Null
+  $lines.Add("        ''|-|--*|/*) ;;") | Out-Null
+  $lines.Add('        -*) gp_next_after_option=1 ;;') | Out-Null
   $lines.Add('        *)') | Out-Null
   $lines.Add('          gp_resolve=0') | Out-Null
-  $lines.Add('          if [ -e "$gp_arg" ] || [ -L "$gp_arg" ]; then') | Out-Null
+  $lines.Add('          if [ "$gp_after_option" = 0 ] && { [ -e "$gp_arg" ] || [ -L "$gp_arg" ]; }; then') | Out-Null
   $lines.Add('            gp_resolve=1') | Out-Null
   $lines.Add('          else') | Out-Null
   # A URL starts with a scheme (a letter, then letters, digits, + . or -) and a colon.
@@ -1623,6 +1629,7 @@ function Write-GpAppImageAppRun {
   $lines.Add('          ;;') | Out-Null
   $lines.Add('      esac') | Out-Null
   $lines.Add('      set -- "$@" "$gp_arg"') | Out-Null
+  $lines.Add('      gp_after_option=$gp_next_after_option') | Out-Null
   $lines.Add('    done') | Out-Null
   $lines.Add('    ;;') | Out-Null
   $lines.Add('esac') | Out-Null
