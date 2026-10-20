@@ -47,21 +47,21 @@ that claims hosted Windows MSI readiness:
 - diagnostics artifact: `windows-gnustep-cli-new` for repo validation or
   `<artifact-name>-gnustep-cli-new` for reusable workflow calls
 
-Current Windows hosted status: blocked before MSI build by the upstream
-`gnustep-cli-new` MSYS2 CLANG64 selector. The bootstrap classifies the hosted
-MSYS2 shell as `os: unknown` and does not select the published
-`windows-amd64-msys2-clang64` artifacts. Treat this as a release-blocking
-upstream issue until a retest records a successful bootstrap smoke and MSI
-package smoke on `windows-latest`.
+Current Windows hosted status: passing. The `gnustep-cli-new` bootstrap
+selects the published `windows-amd64-msys2-clang64` artifacts on the hosted
+MSYS2 CLANG64 shell, and the earlier `os: unknown` selector blocker no longer
+reproduces. The gate stays fail-closed: a skipped or failed bootstrap smoke
+still blocks MSI packaging.
 
-Latest phase 14 gate evidence:
+Latest gate evidence (v0.1.1):
 
-- run: `24738535673`
-- commit: `83cfc8f`
+- run: `39289016282`
+- commit: `23f1708`
+- Windows/MSI: passed `Bootstrap And Smoke Test gnustep-cli-new`, Pester
+  regression tests, and the shared packaging pipeline with MSI smoke
 - Linux/AppImage: passed bootstrap, Pester regression tests, and shared
   packaging pipeline
-- Windows/MSI: failed closed at `Bootstrap And Smoke Test gnustep-cli-new`
-  before packaging, with `windows-gnustep-cli-new` diagnostics uploaded
+- macOS/DMG: passed repo validation and the reusable workflow package job
 
 Release-note template:
 

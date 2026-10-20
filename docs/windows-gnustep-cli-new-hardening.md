@@ -92,6 +92,11 @@ and the shared AppImage packaging pipeline; Windows failed closed at
 manifest, Pester, build, stage, or MSI package steps ran, and still uploaded
 `windows-gnustep-cli-new` diagnostics.
 
+That selector blocker no longer reproduces. Hosted validation run
+`39289016282` on `23f1708` (v0.1.1) passed the Windows bootstrap smoke, Pester
+regression tests, and the shared MSI packaging pipeline with smoke validation.
+See [release-gate.md](release-gate.md) for the current gate status.
+
 Phase 14E-H are implemented as the release gate and handoff layer around that
 evidence:
 
