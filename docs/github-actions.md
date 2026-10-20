@@ -167,7 +167,7 @@ still decide how the DMG is signed and whether it is notarized; see
 ```yaml
 jobs:
   package-windows:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.2
     with:
       manifest-path: packaging/package.manifest.json
       backend: msi
@@ -180,7 +180,7 @@ jobs:
       sign_pfx_password: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
 
   package-linux:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.2
     with:
       manifest-path: packaging/package.manifest.json
       backend: appimage
@@ -190,7 +190,7 @@ jobs:
       artifact-name: my-app-linux
 
   package-macos:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.2
     with:
       manifest-path: packaging/package.manifest.json
       backend: dmg
@@ -211,7 +211,7 @@ Advanced self-hosted AppImage example:
 ```yaml
 jobs:
   package-linux:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.2
     with:
       manifest-path: packaging/package.manifest.json
       backend: appimage
@@ -229,7 +229,7 @@ Advanced self-hosted Windows example:
 ```yaml
 jobs:
   package-windows:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.2
     with:
       manifest-path: packaging/package.manifest.json
       backend: msi

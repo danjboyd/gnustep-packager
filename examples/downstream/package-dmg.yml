@@ -17,7 +17,7 @@ on:
 
 jobs:
   package-macos:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.1
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.2
     with:
       manifest-path: package.manifest.json
       backend: dmg
