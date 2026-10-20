@@ -29,9 +29,8 @@ Source:
   `d9c0905e1deb518892c999a387abf0e898ff0573`
 
 Why this matters:
-- `gnustep-packager` currently uses `ubuntu-latest` as the default AppImage
-  GitHub Actions runner
-- `ubuntu-latest` maps to the Ubuntu 24.04 hosted runner family
+- `gnustep-packager` uses `ubuntu-24.04` as the default AppImage GitHub
+  Actions runner (it pins that image rather than following `ubuntu-latest`)
 - using `gnustep-cli-new` as the default provider across MSI and AppImage
   packaging requires the Linux managed CLI to start on that runner
 
@@ -160,7 +159,7 @@ Suggested upstream fixes:
 Packager status:
 - resolved for clean Ubuntu 24.04 Docker smoke as of `d9c0905`
 - no longer blocks evaluating `gnustep-cli-new` as the default Linux/AppImage
-  toolchain provider for the `ubuntu-latest` runner family
+  toolchain provider for the `ubuntu-24.04` runner family
 
 ### 2. POSIX Bootstrap `setup --json` Option Placement
 

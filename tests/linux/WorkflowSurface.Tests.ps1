@@ -41,6 +41,22 @@ Describe "Reusable workflow surface" {
     }
   }
 
+  It "pins the default AppImage runner image instead of following ubuntu-latest" {
+    $match = [regex]::Match($script:workflowText, '(?ms)^\s+runs-on-appimage:\s*$.*?^\s+default:\s*''([^'']*)''')
+    if (-not $match.Success) {
+      throw "Reusable workflow should declare a runs-on-appimage default."
+    }
+    if ($match.Groups[1].Value -ne '["ubuntu-24.04"]') {
+      throw "runs-on-appimage should default to the pinned [""ubuntu-24.04""] (it sets the AppImage's glibc floor); got $($match.Groups[1].Value)"
+    }
+    if ($script:validateRepoText -notmatch '(?m)^  linux-validation:\s*$(\r?\n\s*#.*)*\r?\n\s+runs-on: ubuntu-24\.04\s*$') {
+      throw "Repo CI's linux-validation job should run on the same pinned image as the runs-on-appimage default."
+    }
+    if ($script:githubActionsDocText -notmatch "### AppImage Runner Image") {
+      throw "docs/github-actions.md should explain the pinned AppImage runner and how to opt into a newer image."
+    }
+  }
+
   It "checks out its own packager commit instead of the caller's workflow ref" {
     foreach ($pattern in @(
       '${{ job.workflow_repository }}',

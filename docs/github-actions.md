@@ -18,12 +18,38 @@ before it starts the shared packaging pipeline.
 Default runner JSON arrays:
 
 - `runs-on-msi`: `["windows-latest"]`
-- `runs-on-appimage`: `["ubuntu-latest"]`
+- `runs-on-appimage`: `["ubuntu-24.04"]`
 - `runs-on-dmg`: `["macos-latest"]`
 
 Callers may override either input with a different JSON array, for example:
 
 - `["self-hosted","linux","gnustep-clang"]`
+
+### AppImage Runner Image
+`runs-on-appimage` defaults to a pinned image, `ubuntu-24.04`, not
+`ubuntu-latest`. This matters for two reasons:
+
+- An AppImage only runs on hosts whose glibc is at least as new as the one it
+  was built against. Building on a newer image raises that floor and drops
+  older distributions.
+- The default host setup bootstraps the toolchain from `gnustep-cli-new`, whose
+  Linux artifacts are published for specific Ubuntu releases.
+
+So when GitHub moves `ubuntu-latest` to a new release, your AppImages don't
+change. To build on a newer image, opt in explicitly:
+
+```yaml
+    with:
+      runs-on-appimage: '["ubuntu-latest"]'   # follow GitHub's current image
+```
+
+or name a specific newer hosted image label the same way.
+
+Before switching, confirm that `gnustep-cli-new` supports that release (or
+use `container-appimage` / `skip-default-host-setup` with your own toolchain),
+and check that the resulting glibc floor is acceptable for the distributions
+you support. A job that builds inside `container-appimage` takes its glibc
+from the container image, not from the runner.
 
 ## Default Host Setup
 When `skip-default-host-setup` is `false`, the workflow provisions a documented

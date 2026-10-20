@@ -132,14 +132,15 @@ are unaffected.
 
 ## CI Usage
 Use `.github/workflows/package-gnustep-app.yml` with `backend: appimage`.
-By default the reusable workflow selects `["ubuntu-latest"]` and installs
+By default the reusable workflow selects `["ubuntu-24.04"]` (pinned; see
+"AppImage Runner Image" in `docs/github-actions.md`) and installs
 `gnustep-cli-new` bootstrap prerequisites, `squashfs-tools`, and
 `desktop-file-utils`. It then runs the `gnustep-cli-new` bootstrap smoke before
 calling the shared pipeline wrapper.
 
 Downstreams can override:
 
-- `runs-on-appimage` for self-hosted runner labels
+- `runs-on-appimage` for self-hosted runner labels or a newer hosted image
 - `skip-default-host-setup` when the runner is already provisioned
 - `appimage-apt-packages` to change the default apt package list
 - `gnustep-cli-manifest-url`, `gnustep-cli-bootstrap-url`, and

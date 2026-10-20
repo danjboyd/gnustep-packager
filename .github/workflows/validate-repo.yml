@@ -85,7 +85,8 @@ jobs:
           if-no-files-found: warn
 
   linux-validation:
-    runs-on: ubuntu-latest
+    # The reusable workflow's runs-on-appimage default.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: pwsh
