@@ -1590,6 +1590,42 @@ function Write-GpAppImageAppRun {
   $lines.Add(("METADATA_ROOT={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $Config.MetadataRootRelative))) | Out-Null
   $lines.Add(("ENTRY_PATH={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $launch.EntryRelativePath))) | Out-Null
   $lines.Add(("WORKING_DIRECTORY={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $launch.WorkingDirectory))) | Out-Null
+  # The cd below would make a relative argument such as Pictures/x.png resolve
+  # inside the bundle, so make it absolute against the caller's directory
+  # first. An argument is resolved when it exists there, or when it contains a
+  # slash and is not a URL. Options (-x, --foo=bar), URLs, absolute paths and
+  # the manifest's own launch arguments (added later) pass through unchanged.
+  # Without a usable caller directory (it was deleted), nothing is rewritten.
+  $lines.Add('GP_CALLER_DIR="$(pwd 2>/dev/null)" || GP_CALLER_DIR=""') | Out-Null
+  $lines.Add('case "$GP_CALLER_DIR" in') | Out-Null
+  $lines.Add('  /*)') | Out-Null
+  $lines.Add('    for gp_arg do') | Out-Null
+  $lines.Add('      shift') | Out-Null
+  $lines.Add('      case "$gp_arg" in') | Out-Null
+  $lines.Add("        ''|-*|/*) ;;") | Out-Null
+  $lines.Add('        *)') | Out-Null
+  $lines.Add('          gp_resolve=0') | Out-Null
+  $lines.Add('          if [ -e "$gp_arg" ] || [ -L "$gp_arg" ]; then') | Out-Null
+  $lines.Add('            gp_resolve=1') | Out-Null
+  $lines.Add('          else') | Out-Null
+  # A URL starts with a scheme (a letter, then letters, digits, + . or -) and a colon.
+  $lines.Add('            case "${gp_arg%%:*}" in') | Out-Null
+  $lines.Add("              ""`$gp_arg""|''|[!A-Za-z]*|*[!A-Za-z0-9+.-]*)") | Out-Null
+  $lines.Add('                case "$gp_arg" in') | Out-Null
+  $lines.Add('                  */*) gp_resolve=1 ;;') | Out-Null
+  $lines.Add('                esac') | Out-Null
+  $lines.Add('                ;;') | Out-Null
+  $lines.Add('            esac') | Out-Null
+  $lines.Add('          fi') | Out-Null
+  $lines.Add('          if [ "$gp_resolve" = 1 ]; then') | Out-Null
+  $lines.Add('            gp_arg="${GP_CALLER_DIR%/}/${gp_arg#./}"') | Out-Null
+  $lines.Add('          fi') | Out-Null
+  $lines.Add('          ;;') | Out-Null
+  $lines.Add('      esac') | Out-Null
+  $lines.Add('      set -- "$@" "$gp_arg"') | Out-Null
+  $lines.Add('    done') | Out-Null
+  $lines.Add('    ;;') | Out-Null
+  $lines.Add('esac') | Out-Null
   $lines.Add('if [ -d "$WORKING_DIRECTORY" ]; then') | Out-Null
   $lines.Add('  cd "$WORKING_DIRECTORY"') | Out-Null
   $lines.Add("fi") | Out-Null

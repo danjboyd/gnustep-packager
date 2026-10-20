@@ -110,6 +110,18 @@ Check the result on a host without GNUstep: the reusable workflow's
 fonts, under a GNOME and a non-GNOME `XDG_CURRENT_DESKTOP`. Fedora matters
 here: it has no DejaVu, which `gnustep-back` falls back to.
 
+## Command-Line Arguments
+`AppRun` runs the app in `launch.workingDirectory`, inside the mounted AppImage.
+Before changing into that directory, it makes relative path arguments absolute
+against the directory the AppImage was started from. As a result,
+`./MyApp.AppImage Pictures/x.png` opens `Pictures/x.png` relative to the
+user's shell. An argument is resolved when it exists in the caller's directory,
+or when it contains a `/` and is not a URL. Arguments starting with `-` (such
+as `--foo=bar` or GNUstep's `-Key value`), URLs (`scheme:...`), absolute paths
+and `launch.arguments` from the manifest pass through unchanged. File managers
+and desktop launchers pass absolute paths or `file://` URLs, so those launches
+are unaffected.
+
 ## Known Limitations
 - current artifact generation targets x86_64 only
 - the staged Linux payload must still include its runtime closure; the backend validates that closure but does not harvest missing libraries for you

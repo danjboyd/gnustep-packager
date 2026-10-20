@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- AppImage: a relative path on the command line, such as
+  `./MyApp.AppImage Pictures/x.png` run from `~`, now resolves against the
+  caller's directory. Previously `AppRun` changed into `launch.workingDirectory`
+  first, so the app looked for the file inside the bundle. Options, URLs and
+  absolute paths pass through unchanged, and the app still runs in
+  `launch.workingDirectory`. (fixes #63)
+
 ## v0.1.1
 
 ### Changed

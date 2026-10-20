@@ -292,6 +292,75 @@ Describe "AppImage backend" {
       }
     }
 
+    It "resolves relative path arguments against the caller's directory, not the working directory" {
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-relative-args-" + [guid]::NewGuid().ToString("N"))
+      try {
+        $appDir = Join-Path $tempRoot "AppDir"
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        & cp -a $script:packageResult.AppDirRoot $appDir
+        # A stub entry reports where it runs and what it receives.
+        $entryPath = Join-Path $appDir "usr/app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp"
+        Set-Content -Path $entryPath -Value @(
+          '#!/bin/sh'
+          'printf ''cwd=%s\n'' "$(pwd)"'
+          'for a do printf ''arg=[%s]\n'' "$a"; done'
+        )
+        Set-GpUnixExecutable -Path $entryPath
+        $appRun = Join-Path $appDir "AppRun"
+        $workingDirectory = Join-Path $appDir "usr/app/SampleGNUstepLinuxApp.app"
+
+        $callerDir = Join-Path $tempRoot "home"
+        New-Item -ItemType Directory -Force -Path (Join-Path $callerDir "Pictures"), (Join-Path $callerDir "My Docs") | Out-Null
+        foreach ($file in @("Pictures/x.png", "notes.txt", "My Docs/a b.md")) {
+          Set-Content -Path (Join-Path $callerDir $file) -Value ""
+        }
+
+        function Invoke-GpTestAppRun {
+          param([string]$From, [string[]]$Arguments)
+          $output = @(& env "HOME=$tempRoot" sh -c 'cd "$1" && shift && exec "$@"' sh $From $appRun @Arguments 2>&1)
+          Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message ("AppRun should succeed. Output: " + [string]::Join("`n", $output))
+          return @($output | ForEach-Object { [string]$_ } | Where-Object { $_ -match '^(cwd=|arg=\[)' })
+        }
+
+        # Launched from a terminal in the user's home.
+        $terminal = Invoke-GpTestAppRun -From $callerDir -Arguments @(
+          "Pictures/x.png", "notes.txt", "./notes.txt", "My Docs/a b.md", "exports/new.png",
+          "missing.txt", "--foo=bar", "-NSDebugLog", "YES", "https://example.invalid/a?b=c", "mailto:someone@example.invalid", ""
+        )
+        Assert-GpEqual -Actual $terminal -Expected @(
+          "cwd=$workingDirectory"
+          "arg=[$callerDir/Pictures/x.png]"
+          "arg=[$callerDir/notes.txt]"
+          "arg=[$callerDir/notes.txt]"
+          "arg=[$callerDir/My Docs/a b.md]"
+          "arg=[$callerDir/exports/new.png]"
+          "arg=[missing.txt]"
+          "arg=[--foo=bar]"
+          "arg=[-NSDebugLog]"
+          "arg=[YES]"
+          "arg=[https://example.invalid/a?b=c]"
+          "arg=[mailto:someone@example.invalid]"
+          "arg=[]"
+        ) -Message "Relative paths should resolve against the caller's directory, while the app still runs in launch.workingDirectory; options and URLs pass through."
+
+        # A file manager or desktop launcher passes absolute paths or file URLs from wherever it runs.
+        $absolute = Join-Path $callerDir "Pictures/x.png"
+        $fileManager = Invoke-GpTestAppRun -From "/" -Arguments @($absolute, "file://$absolute")
+        Assert-GpEqual -Actual $fileManager -Expected @(
+          "cwd=$workingDirectory"
+          "arg=[$absolute]"
+          "arg=[file://$absolute]"
+        ) -Message "Absolute paths and file URLs should reach the app unchanged."
+
+        $noArguments = Invoke-GpTestAppRun -From $callerDir -Arguments @()
+        Assert-GpEqual -Actual $noArguments -Expected @("cwd=$workingDirectory") -Message "A launch without arguments should pass none."
+      } finally {
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
+        }
+      }
+    }
+
     It "satisfies the semantic AppImage package contract in the AppDir" {
       $contract = Invoke-GpPackageContractAssertions -Context $script:packageContext -Scope "package" -Backend "appimage" -RootPath $script:packageResult.AppDirRoot
 
