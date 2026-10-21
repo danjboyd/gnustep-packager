@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+- The reusable workflow's `runs-on-appimage` default is now `["ubuntu-24.04"]`
+  instead of `["ubuntu-latest"]`. The build image sets an AppImage's glibc floor
+  and must be one `gnustep-cli-new` publishes for, so GitHub moving
+  `ubuntu-latest` to a new Ubuntu release no longer changes your AppImages
+  silently. To build on a newer image, pass `runs-on-appimage` explicitly; see
+  "AppImage Runner Image" in `docs/github-actions.md`. Repo CI's Linux job uses
+  the same pinned image.
+
 ### Fixed
 - AppImage and MSI launchers: the value after a single-dash option, such as the
   `YES` in GNUstep's `-NSDebugLog YES`, is no longer made absolute just because

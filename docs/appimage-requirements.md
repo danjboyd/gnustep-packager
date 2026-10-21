@@ -9,7 +9,8 @@ The implemented AppImage path targets:
 - `desktop-file-utils`
 - `appimagetool` x86_64
 
-Repo CI uses `ubuntu-latest` as the Linux baseline.
+Repo CI uses `ubuntu-24.04` as the Linux baseline, which is the reusable
+workflow's pinned `runs-on-appimage` default.
 
 ## Packaging Assumptions
 The AppImage backend assumes:

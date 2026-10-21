@@ -5,7 +5,7 @@
 | Area | Baseline | Status | Notes |
 | --- | --- | --- | --- |
 | Host OS | Windows x64 | Supported | MSI backend local and CI validation path |
-| Host OS | Linux x64 (`ubuntu-latest` default runner) | Supported | AppImage backend local and CI validation path |
+| Host OS | Linux x64 (`ubuntu-24.04` default runner, pinned) | Supported | AppImage backend local and CI validation path |
 | Host OS | Linux x64 self-hosted GNUstep runner | Supported | Reusable workflow accepts caller-supplied `runs-on-appimage` labels |
 | Host OS | macOS 13+ (Apple Silicon or Intel; `macos-latest` in CI) | Supported | DMG backend local and CI validation path; verified on macOS 26.5 with Xcode 26.4 |
 | PowerShell | PowerShell 7+ | Supported | Shared scripts and tests use `pwsh` |

@@ -26,10 +26,14 @@ on:
         required: false
         type: string
         default: '["windows-latest"]'
+      # Pinned rather than ubuntu-latest: the build image sets the AppImage's
+      # glibc floor and must be one gnustep-cli-new publishes for, so a new
+      # image is something callers opt into, not something that moves under
+      # them. See docs/github-actions.md.
       runs-on-appimage:
         required: false
         type: string
-        default: '["ubuntu-latest"]'
+        default: '["ubuntu-24.04"]'
       runs-on-dmg:
         required: false
         type: string
