@@ -78,6 +78,18 @@ Describe "Updater helper contract" {
     }
   }
 
+  It "ends an install-failed message with one period" {
+    # The helper's failure reasons are already sentences, such as
+    # "The new AppImage could not be copied next to the current one.", so the
+    # alert must not add a second period after them.
+    $controllerSource = Get-Content -Raw -Path (Join-Path $script:repoRoot "updater/objc/GPUpdaterUI/Source/GPStandardUpdaterController.m")
+    $helperSource = Get-Content -Raw -Path (Join-Path $script:repoRoot "updater/objc/gp-update-helper/Source/main.m")
+    Assert-GpTrue -Condition ($helperSource -match [regex]::Escape("could not be copied next to the current one.")) -Message "The helper should still report a failure reason that ends in a period."
+    Assert-GpTrue -Condition (-not ($controllerSource -match 'was not installed: %@\."')) -Message "The install-failed alert should not append '.' to the failure reason."
+    Assert-GpEqual -Actual ([regex]::Matches($controllerSource, 'was not installed: %@", [^;]*GPUpdaterUISentence\(\[outcome failureReason\]\)')).Count -Expected 2 -Message "Both install-failed messages should close the reason with GPUpdaterUISentence."
+    Assert-GpTrue -Condition ($controllerSource -match '(?s)static NSString \*GPUpdaterUISentence\(NSString \*text\) \{\s*if \(\[text hasSuffix:@"\."\]\)') -Message "GPUpdaterUISentence should leave a reason that already ends in '.' as is."
+  }
+
   It "documents the default app integration surface" {
     foreach ($pattern in @(
       "GPStandardUpdaterController",

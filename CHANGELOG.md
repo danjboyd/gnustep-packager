@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Updater: the install-failed alert no longer ends with a doubled period, as in
+  "...could not be copied next to the current one..". The failure reasons are
+  already sentences, so the alert adds a period only when one is missing.
+
 ## v0.1.3
 
 ### Changed
