@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.3
 
 ### Changed
 - The reusable workflow's `runs-on-appimage` default is now `["ubuntu-24.04"]`
@@ -10,6 +10,7 @@
   silently. To build on a newer image, pass `runs-on-appimage` explicitly; see
   "AppImage Runner Image" in `docs/github-actions.md`. Repo CI's Linux job uses
   the same pinned image.
+- The docs and `examples/downstream/` workflows pin `@v0.1.3`.
 
 ### Fixed
 - AppImage and MSI launchers: the value after a single-dash option, such as the
