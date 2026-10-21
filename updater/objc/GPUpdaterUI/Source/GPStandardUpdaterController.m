@@ -95,6 +95,15 @@ static BOOL GPUpdaterUIOpenURL(NSURL *url) {
 #endif
 }
 
+// A failure reason closed with one period. The helper's reasons are
+// usually full sentences already, so adding '.' blindly doubles it.
+static NSString *GPUpdaterUISentence(NSString *text) {
+  if ([text hasSuffix:@"."]) {
+    return text;
+  }
+  return [NSString stringWithFormat:@"%@.", text];
+}
+
 // A path as the user's platform writes it: backslashes on Windows.
 static NSString *GPUpdaterUIDisplayPath(NSString *path) {
 #if defined(_WIN32)
@@ -685,9 +694,9 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
 
   NSMutableString *message = [NSMutableString string];
   if ([version length] > 0) {
-    [message appendFormat:@"%@ %@ was not installed: %@.", displayName, version, [outcome failureReason]];
+    [message appendFormat:@"%@ %@ was not installed: %@", displayName, version, GPUpdaterUISentence([outcome failureReason])];
   } else {
-    [message appendFormat:@"The update was not installed: %@.", [outcome failureReason]];
+    [message appendFormat:@"The update was not installed: %@", GPUpdaterUISentence([outcome failureReason])];
   }
   if ([outcome downloadURL] != nil) {
     [message appendFormat:@"\n\nYou can download the %@ and install it yourself.", installer];
