@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## v0.1.4
+
+### Changed
+- The docs and `examples/downstream/` workflows pin `@v0.1.4`.
 
 ### Fixed
 - Updater: the install-failed alert no longer ends with a doubled period, as in
