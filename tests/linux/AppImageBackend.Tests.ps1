@@ -385,7 +385,21 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $desktopText -Pattern "Name=Sample GNUstep Linux App" -Message "Desktop entry should use the package display name."
       Assert-GpMatch -Actual $desktopText -Pattern "Exec=AppRun %F" -Message "Desktop entry should route launches through AppRun."
       Assert-GpMatch -Actual $desktopText -Pattern "MimeType=application/x-samplegnusteplinuxapp-samplelinux;" -Message "Desktop entry should include the generated MIME type."
+      Assert-GpMatch -Actual $desktopText -Pattern "(?m)^StartupWMClass=SampleGNUstepLinuxApp\r?$" -Message "By default StartupWMClass should be the launch entry's file name, the GNUstep app's window class."
       Assert-GpMatch -Actual $mimeText -Pattern "glob pattern='\*\.samplelinux'" -Message "Generated MIME package should describe the staged extension association."
+    }
+
+    It "takes StartupWMClass from backends.appimage.startupWMClass when it is set" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["startupWMClass"] = "SampleWindowClass"
+      }
+      try {
+        $config = Get-GpAppImageConfig -Context (Get-GpManifestContext -Path $manifestPath)
+        Assert-GpEqual -Actual $config.StartupWMClass -Expected "SampleWindowClass" -Message "An explicit startupWMClass should win over the launch entry's name."
+      } finally {
+        Remove-Item -Force $manifestPath -ErrorAction SilentlyContinue
+      }
     }
 
     It "keeps the host's user Library when gnustepConfig.userLibrary is host, and rejects other values" {

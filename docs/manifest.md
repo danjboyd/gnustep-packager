@@ -382,6 +382,7 @@ Important fields:
 Important fields:
 - `appDirName`
 - `desktopEntryName`
+- `startupWMClass`
 - `iconRelativePath`
 - `updates.feedUrl`
 - `updates.embedUpdateInformation`
@@ -412,6 +413,11 @@ Important fields:
 
 When `backends.appimage.enabled` is `true`, `iconRelativePath` must point to a
 staged `.png` asset.
+
+`startupWMClass` is written to the desktop entry as `StartupWMClass`, which
+docks use to match the running window to the entry (its icon and name). It
+defaults to the file name of `launch.entryRelativePath`, the window class a
+GNUstep app sets; set it when the process takes another name.
 
 Supported AppImage smoke modes:
 

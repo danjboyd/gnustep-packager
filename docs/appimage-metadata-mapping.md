@@ -15,6 +15,14 @@ The generated desktop entry maps:
 - `integrations.categories` to `Categories`
 - generated MIME types to `MimeType`
 - `backends.appimage.desktopEntryName` to the emitted `.desktop` filename
+- `backends.appimage.startupWMClass` to `StartupWMClass`; by default the
+  launch entry's file name (`launch.entryRelativePath`), which is the
+  window class a GNUstep app sets (its process name)
+
+`StartupWMClass` lets GNOME's dash, dash-to-dock and other docks match the
+running window to the desktop entry, so they show its icon and name. Without
+it they match only a desktop file named after the window class, and AppImage
+integrators such as Gear Lever install the entry under a name of their own.
 
 The backend writes the desktop file to both:
 - `AppDir/usr/share/applications/<desktopEntryName>`
