@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## v0.1.5
+
+### Changed
+- The docs and `examples/downstream/` workflows pin `@v0.1.5`.
 
 ### Fixed
 - AppImage: the desktop entry has `StartupWMClass`, so GNOME's dash,
