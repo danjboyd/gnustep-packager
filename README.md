@@ -143,7 +143,7 @@ Call the reusable workflow from your app repo, pinned to a release tag:
 ```yaml
 jobs:
   package-linux:
-    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.4
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.5
     with:
       manifest-path: packaging/package.manifest.json
       backend: appimage            # or msi, dmg
