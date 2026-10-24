@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- AppImage: the desktop entry has `StartupWMClass`, so GNOME's dash,
+  dash-to-dock and other docks match the running window to it and show the
+  app's icon instead of a generic one. Integrators such as Gear Lever install
+  the entry under a name of their own (`markdown_viewer.desktop`), which
+  never matched the window class. It defaults to the launch entry's file
+  name, a GNUstep app's window class; `backends.appimage.startupWMClass`
+  overrides it.
+
 ## v0.1.4
 
 ### Changed

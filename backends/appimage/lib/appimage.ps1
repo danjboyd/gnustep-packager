@@ -313,6 +313,14 @@ function Get-GpAppImageConfig {
   if ([string]::IsNullOrWhiteSpace($desktopEntryBaseName)) {
     $desktopEntryBaseName = [string]$package["name"]
   }
+  # GNOME and other docks match a running window to its desktop entry by WM_CLASS. A GNUstep app's
+  # WM_CLASS is its process name, the launch entry's file name; a desktop entry named otherwise
+  # (or renamed by an AppImage integrator) needs StartupWMClass to be found.
+  $startupWMClass = if ($backend.Contains("startupWMClass") -and -not [string]::IsNullOrWhiteSpace([string]$backend["startupWMClass"])) {
+    [string]$backend["startupWMClass"]
+  } else {
+    [System.IO.Path]::GetFileNameWithoutExtension([string]$manifest["launch"]["entryRelativePath"])
+  }
   $smoke = if ($backend.Contains("smoke") -and ($backend["smoke"] -is [System.Collections.IDictionary])) {
     $backend["smoke"]
   } else {
@@ -441,6 +449,7 @@ function Get-GpAppImageConfig {
     AppDirName = $appDirName
     DesktopEntryName = $desktopEntryName
     DesktopEntryBaseName = $desktopEntryBaseName
+    StartupWMClass = $startupWMClass
     IconRelativePath = [string]$backend["iconRelativePath"]
     IconFileName = [System.IO.Path]::GetFileName([string]$backend["iconRelativePath"])
     IconName = $desktopEntryBaseName
@@ -1239,6 +1248,9 @@ function Write-GpAppImageDesktopEntry {
   $lines.Add(("Exec={0}" -f $execValue)) | Out-Null
   $lines.Add(("Icon={0}" -f $Config.IconName)) | Out-Null
   $lines.Add("Terminal=false") | Out-Null
+  if (-not [string]::IsNullOrWhiteSpace($Config.StartupWMClass)) {
+    $lines.Add(("StartupWMClass={0}" -f $Config.StartupWMClass)) | Out-Null
+  }
   if (-not [string]::IsNullOrWhiteSpace($comment)) {
     $lines.Add(("Comment={0}" -f $comment)) | Out-Null
   }
