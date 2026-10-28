@@ -65,10 +65,13 @@ under `GP_GNUSTEP_CLI_LOG_ROOT`.
 
 - `gnustep-cli-manifest-url`
 - `gnustep-cli-bootstrap-url`
+- `gnustep-cli-bootstrap-sha256` and `gnustep-cli-bootstrap-ps1-sha256`
 - `gnustep-cli-root`
 
 Use these inputs to test a newly published upstream manifest or bootstrap
-change without editing packager backend code.
+change without editing packager backend code. The downloaded bootstrap script
+must match its digest input before it runs; an overridden bootstrap URL needs
+its own digest, or an empty one to skip the check.
 
 When `skip-default-host-setup: false`, the workflow runs the bootstrap smoke
 before packaging for both supported backends.

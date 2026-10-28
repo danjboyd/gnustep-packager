@@ -73,6 +73,19 @@ on:
         required: false
         type: string
         default: "https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/gnustep-bootstrap.sh"
+      # SHA-256 digests of the bootstrap scripts the gnustep-cli-bootstrap-url
+      # default names (gnustep-bootstrap.sh for AppImage, the .ps1 beside it
+      # for MSI). The download must match before it runs. A caller that
+      # overrides gnustep-cli-bootstrap-url sets the matching digest, or ""
+      # to skip the check.
+      gnustep-cli-bootstrap-sha256:
+        required: false
+        type: string
+        default: "26ac6763fcc9dd6a86bf1d43dba140c45b84737ecb4fa3c1d1ef43d9fa437406"
+      gnustep-cli-bootstrap-ps1-sha256:
+        required: false
+        type: string
+        default: "ef9159c6f27d272eea6f9525029da584def3a88b89d4ce403b37b42f9f374150"
       gnustep-cli-root:
         required: false
         type: string
@@ -288,6 +301,8 @@ jobs:
         env:
           GP_GNUSTEP_CLI_MANIFEST_URL: ${{ inputs.gnustep-cli-manifest-url }}
           GP_GNUSTEP_CLI_BOOTSTRAP_URL: ${{ inputs.gnustep-cli-bootstrap-url }}
+          GP_GNUSTEP_CLI_BOOTSTRAP_SHA256: ${{ inputs.gnustep-cli-bootstrap-sha256 }}
+          GP_GNUSTEP_CLI_BOOTSTRAP_PS1_SHA256: ${{ inputs.gnustep-cli-bootstrap-ps1-sha256 }}
           GP_GNUSTEP_CLI_ROOT: ${{ inputs.gnustep-cli-root }}
           GP_GNUSTEP_CLI_LOG_ROOT: ${{ steps.manifest.outputs.log_root }}\gnustep-cli-new
           GP_GNUSTEP_CLI_SMOKE_ROOT: ${{ runner.temp }}\gnustep-cli-new-smoke
@@ -481,6 +496,15 @@ jobs:
               -FilePath "curl.exe" `
               -ArgumentList @("--fail", "--location", "--show-error", "--connect-timeout", "30", "--max-time", "300", "--output", $bootstrapPath, $bootstrapUrl) `
               -TimeoutSeconds 360
+            $expectedSha256 = $env:GP_GNUSTEP_CLI_BOOTSTRAP_PS1_SHA256
+            if (-not [string]::IsNullOrWhiteSpace($expectedSha256)) {
+              $actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $bootstrapPath).Hash
+              "gnustep-bootstrap.ps1 sha256: $actualSha256 (expected $expectedSha256)" |
+                Tee-Object -FilePath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-bootstrap-download.log") -Append
+              if ($actualSha256 -ne $expectedSha256.Trim()) {
+                throw "gnustep-bootstrap.ps1 sha256 mismatch: got $actualSha256, expected $expectedSha256. Set gnustep-cli-bootstrap-ps1-sha256 to the digest of $bootstrapUrl, or to an empty string to skip the check."
+              }
+            }
             Invoke-LoggedProcess `
               -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-setup.log") `
               -FilePath "pwsh" `
@@ -601,6 +625,8 @@ jobs:
         env:
           GP_GNUSTEP_CLI_MANIFEST_URL: ${{ inputs.gnustep-cli-manifest-url }}
           GP_GNUSTEP_CLI_BOOTSTRAP_URL: ${{ inputs.gnustep-cli-bootstrap-url }}
+          GP_GNUSTEP_CLI_BOOTSTRAP_SHA256: ${{ inputs.gnustep-cli-bootstrap-sha256 }}
+          GP_GNUSTEP_CLI_BOOTSTRAP_PS1_SHA256: ${{ inputs.gnustep-cli-bootstrap-ps1-sha256 }}
           GP_GNUSTEP_CLI_ROOT: ${{ inputs.gnustep-cli-root }}
           GP_GNUSTEP_CLI_LOG_ROOT: ${{ steps.manifest.outputs.log_root }}/gnustep-cli-new
           GP_GNUSTEP_CLI_SMOKE_ROOT: ${{ runner.temp }}/gnustep-cli-new-smoke

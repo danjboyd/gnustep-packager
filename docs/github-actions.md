@@ -145,6 +145,8 @@ Primary inputs:
 - `appimage-apt-packages`
 - `gnustep-cli-manifest-url`
 - `gnustep-cli-bootstrap-url`
+- `gnustep-cli-bootstrap-sha256`
+- `gnustep-cli-bootstrap-ps1-sha256`
 - `gnustep-cli-root`
 - `preflight-shell`
 - `preflight-command`
@@ -313,6 +315,13 @@ that supported bootstrap path fails, treat it as an upstream blocker unless the
 failure is clearly in downstream app build/stage commands or packager
 transform/validation code. The generated `gnustep-cli-new-blocker-report.md`
 file is intended to be copied into the upstream issue body.
+
+The workflow checks the downloaded bootstrap script against
+`gnustep-cli-bootstrap-sha256` (`gnustep-bootstrap.sh`, AppImage) or
+`gnustep-cli-bootstrap-ps1-sha256` (`gnustep-bootstrap.ps1`, MSI) before it
+runs it. Both default to the digests of the default bootstrap URL's release.
+When you override `gnustep-cli-bootstrap-url`, set the matching digest, or
+pass an empty string to skip the check while testing an unreleased bootstrap.
 
 ## Release Publishing Follow-On
 The reusable workflow stops at packaging, validation, and artifact upload.
