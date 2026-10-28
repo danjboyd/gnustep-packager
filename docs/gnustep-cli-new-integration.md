@@ -14,13 +14,13 @@ the staged payload is packaged.
 The supported default release manifest is:
 
 ```text
-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
+https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json
 ```
 
 The supported default bootstrap script is:
 
 ```text
-https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/master/scripts/bootstrap/gnustep-bootstrap.sh
+https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/gnustep-bootstrap.sh
 ```
 
 The reusable workflow records both values in the `gnustep-cli-new` logs so a
@@ -146,5 +146,5 @@ Release notes should identify the known-good `gnustep-cli-new` release manifest
 used by the packager release. The current baseline is:
 
 ```text
-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
+https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json
 ```

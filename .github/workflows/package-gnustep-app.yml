@@ -68,11 +68,11 @@ on:
       gnustep-cli-manifest-url:
         required: false
         type: string
-        default: "https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json"
+        default: "https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json"
       gnustep-cli-bootstrap-url:
         required: false
         type: string
-        default: "https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/master/scripts/bootstrap/gnustep-bootstrap.sh"
+        default: "https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/gnustep-bootstrap.sh"
       gnustep-cli-root:
         required: false
         type: string
