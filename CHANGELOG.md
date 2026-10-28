@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- The reusable workflow, repo validation and the bootstrap smoke script default
+  to the `gnustep-cli-new` v0.1.3 release: the manifest moves off the
+  `v0.1.0-dev` pre-release, and the bootstrap script comes from the v0.1.3
+  release assets instead of the `master` branch. The docs and
+  `examples/downstream/` workflows name the same release.
+- The bootstrap smoke no longer puts `C:\Windows\System32` first on `PATH`
+  for the Windows bootstrap; the v0.1.3 `gnustep-bootstrap.ps1` picks the
+  Windows `tar.exe` itself. A caller that overrides `gnustep-cli-bootstrap-url`
+  with an older bootstrap should also pin the matching older packager release.
+
 ## v0.1.5
 
 ### Changed

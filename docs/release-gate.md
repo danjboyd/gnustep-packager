@@ -26,7 +26,7 @@ issue, a WiX issue, or an upstream `gnustep-cli-new` blocker.
 Current `gnustep-cli-new` release baseline:
 
 ```text
-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json
+https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json
 ```
 
 ## Windows Toolchain Baseline
@@ -40,7 +40,7 @@ that claims hosted Windows MSI readiness:
 - app-specific MSYS2 packages: declared under
   `hostDependencies.windows.msys2Packages`
 - `gnustep-cli-new` manifest URL:
-  `https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json`
+  `https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json`
 - WiX source: hosted runner WiX installation or the documented local WiX
   baseline used by the MSI backend
 - MSI smoke: shared pipeline `-Backend msi -RunSmoke` result

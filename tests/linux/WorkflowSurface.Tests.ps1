@@ -101,7 +101,7 @@ Describe "Reusable workflow surface" {
       "GP_GNUSTEP_CLI_MANIFEST_URL",
       "GP_GNUSTEP_CLI_BOOTSTRAP_URL",
       "GP_GNUSTEP_CLI_ROOT",
-      "gnustep-cli-new/releases/download/v0.1.0-dev/release-manifest.json"
+      "gnustep-cli-new/releases/download/v0.1.3/release-manifest.json"
     )) {
       if ($script:workflowText -notmatch [regex]::Escape($pattern)) {
         throw "Reusable AppImage workflow is missing gnustep-cli-new integration surface: $pattern"
@@ -324,7 +324,7 @@ Describe "Reusable workflow surface" {
   It "documents the release gate gnustep-cli-new baseline" {
     foreach ($pattern in @(
       "gnustep-cli-new",
-      "v0.1.0-dev",
+      "v0.1.3",
       "gnustep-cli-new-blocker-report.md",
       "windows-latest",
       "MSYS2",
