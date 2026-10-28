@@ -174,7 +174,9 @@ selected `gnustep-cli-new` root has been added to `PATH` when
 
 Use the reusable workflow's `gnustep-cli-manifest-url` and
 `gnustep-cli-bootstrap-url` inputs when validating a newly published
-`gnustep-cli-new` release manifest or bootstrap change. On self-hosted runners
+`gnustep-cli-new` release manifest or bootstrap change. A new bootstrap URL also
+needs `gnustep-cli-bootstrap-sha256` and `gnustep-cli-bootstrap-ps1-sha256`
+set to its digests, or to empty strings to skip the check. On self-hosted runners
 with `skip-default-host-setup: true`, the consumer owns that bootstrap and
 should fail preflight if the expected `gnustep` command is unavailable.
 

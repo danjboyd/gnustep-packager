@@ -31,6 +31,8 @@ Describe "Reusable workflow surface" {
       "appimage-apt-packages:",
       "gnustep-cli-manifest-url:",
       "gnustep-cli-bootstrap-url:",
+      "gnustep-cli-bootstrap-sha256:",
+      "gnustep-cli-bootstrap-ps1-sha256:",
       "gnustep-cli-root:",
       "preflight-shell:",
       "preflight-command:"
@@ -310,6 +312,50 @@ Describe "Reusable workflow surface" {
     $examplePath = Join-Path $script:repoRoot "examples/downstream/package-appimage-self-hosted.yml"
     if (-not (Test-Path $examplePath)) {
       throw "Expected self-hosted AppImage workflow example at $examplePath"
+    }
+  }
+
+  It "checks the downloaded gnustep-cli-new bootstrap against a pinned digest" {
+    foreach ($pattern in @(
+      "GP_GNUSTEP_CLI_BOOTSTRAP_SHA256: `${{ inputs.gnustep-cli-bootstrap-sha256 }}",
+      "GP_GNUSTEP_CLI_BOOTSTRAP_PS1_SHA256: `${{ inputs.gnustep-cli-bootstrap-ps1-sha256 }}",
+      "Get-FileHash -Algorithm SHA256 -LiteralPath `$bootstrapPath"
+    )) {
+      if ($script:workflowText -notmatch [regex]::Escape($pattern)) {
+        throw "Reusable workflow is missing bootstrap digest check: $pattern"
+      }
+    }
+  }
+
+  It "refuses a bootstrap script whose digest does not match, before running it" {
+    if (-not $IsLinux) {
+      Set-ItResult -Skipped -Because "the POSIX smoke path runs on Linux"
+      return
+    }
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-bootstrap-sha-" + [guid]::NewGuid().ToString("N"))
+    try {
+      New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+      $bootstrap = Join-Path $tempRoot "gnustep-bootstrap.sh"
+      Set-Content -Path $bootstrap -Value @("#!/bin/sh", "touch '$tempRoot/ran'")
+      $logRoot = Join-Path $tempRoot "logs"
+      $output = @(& env "GP_GNUSTEP_CLI_BOOTSTRAP_URL=file://$bootstrap" "GP_GNUSTEP_CLI_BOOTSTRAP_SHA256=0000" `
+          "GP_GNUSTEP_CLI_ROOT=$tempRoot/root" "GP_GNUSTEP_CLI_LOG_ROOT=$logRoot" "GP_GNUSTEP_CLI_SMOKE_ROOT=$tempRoot/smoke" `
+          sh (Join-Path $script:repoRoot "scripts/ci/gnustep-cli-new-bootstrap-smoke.sh") 2>&1)
+      if ($LASTEXITCODE -eq 0) {
+        throw "Bootstrap smoke should fail on a digest mismatch. Output: $($output -join "`n")"
+      }
+      if (($output -join "`n") -notmatch "sha256 mismatch") {
+        throw "Bootstrap smoke should report the digest mismatch. Output: $($output -join "`n")"
+      }
+      if (Test-Path -LiteralPath (Join-Path $tempRoot "ran")) {
+        throw "Bootstrap smoke ran a bootstrap script whose digest did not match."
+      }
+      if (-not (Test-Path -LiteralPath (Join-Path $logRoot "gnustep-cli-new-blocker-report.md"))) {
+        throw "Bootstrap smoke should still write the blocker report on a digest mismatch."
+      }
+    }
+    finally {
+      Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tempRoot
     }
   }
 

@@ -3,6 +3,10 @@ set -eu
 
 manifest_url="${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json}"
 bootstrap_url="${GP_GNUSTEP_CLI_BOOTSTRAP_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/gnustep-bootstrap.sh}"
+# Digests of the default bootstrap scripts. Unset uses these; an empty value
+# skips the check, for a caller testing an unpinned bootstrap URL.
+bootstrap_sha256="${GP_GNUSTEP_CLI_BOOTSTRAP_SHA256-26ac6763fcc9dd6a86bf1d43dba140c45b84737ecb4fa3c1d1ef43d9fa437406}"
+bootstrap_ps1_sha256="${GP_GNUSTEP_CLI_BOOTSTRAP_PS1_SHA256-ef9159c6f27d272eea6f9525029da584def3a88b89d4ce403b37b42f9f374150}"
 install_root="${GP_GNUSTEP_CLI_ROOT:-/tmp/gnustep-cli-new}"
 log_root="${GP_GNUSTEP_CLI_LOG_ROOT:-/tmp/gnustep-cli-new-logs}"
 smoke_root="${GP_GNUSTEP_CLI_SMOKE_ROOT:-/tmp/gnustep-cli-new-smoke}"
@@ -15,6 +19,7 @@ case "$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')" in
 esac
 if [ "$windows_host" -eq 1 ]; then
   bootstrap_url=$(printf '%s\n' "$bootstrap_url" | sed 's/gnustep-bootstrap\.sh$/gnustep-bootstrap.ps1/')
+  bootstrap_sha256="$bootstrap_ps1_sha256"
 fi
 
 mkdir -p "$install_root" "$log_root" "$smoke_root"
@@ -158,6 +163,22 @@ printf 'gnustep-cli-new root: %s\n' "$install_root" | tee -a "$log_root/gnustep-
 
 run_logged "$log_root/gnustep-cli-new-bootstrap-download.log" \
   curl -fsSL "$bootstrap_url" -o "$bootstrap_path"
+
+if [ -n "$bootstrap_sha256" ]; then
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual_sha256=$(sha256sum "$bootstrap_path" | cut -d ' ' -f 1)
+  else
+    actual_sha256=$(sha256 -q "$bootstrap_path")
+  fi
+  expected_sha256=$(printf '%s' "$bootstrap_sha256" | tr '[:upper:]' '[:lower:]')
+  printf '%s sha256: %s (expected %s)\n' "$(basename "$bootstrap_path")" "$actual_sha256" "$expected_sha256" \
+    | tee -a "$log_root/gnustep-cli-new-bootstrap-download.log"
+  if [ "$actual_sha256" != "$expected_sha256" ]; then
+    printf '%s sha256 mismatch: set the bootstrap digest for %s, or an empty one to skip the check\n' \
+      "$(basename "$bootstrap_path")" "$bootstrap_url" >&2
+    exit 1
+  fi
+fi
 
 if [ "$windows_host" -eq 1 ]; then
   # The MSYS2 shell's minimal PATH usually omits PowerShell 7.

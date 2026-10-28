@@ -144,7 +144,8 @@ Downstreams can override:
 - `skip-default-host-setup` when the runner is already provisioned
 - `appimage-apt-packages` to change the default apt package list
 - `gnustep-cli-manifest-url`, `gnustep-cli-bootstrap-url`, and
-  `gnustep-cli-root` to test or pin the selected upstream toolchain manifest
+  `gnustep-cli-root` to test or pin the selected upstream toolchain manifest;
+  `gnustep-cli-bootstrap-sha256` is the digest the bootstrap script must match
 - `preflight-shell` and `preflight-command` for repo-specific bootstrap work
 
 ## Related Docs

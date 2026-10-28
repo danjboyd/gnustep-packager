@@ -13,6 +13,15 @@
   Windows `tar.exe` itself. A caller that overrides `gnustep-cli-bootstrap-url`
   with an older bootstrap should also pin the matching older packager release.
 
+### Added
+- The reusable workflow and the bootstrap smoke check the downloaded
+  `gnustep-cli-new` bootstrap script against a SHA-256 digest before running
+  it: `gnustep-cli-bootstrap-sha256` (`gnustep-bootstrap.sh`, AppImage) and
+  `gnustep-cli-bootstrap-ps1-sha256` (`gnustep-bootstrap.ps1`, MSI), which
+  default to the v0.1.3 scripts. A caller that overrides
+  `gnustep-cli-bootstrap-url` must set the matching digests, or empty strings
+  to skip the check.
+
 ## v0.1.5
 
 ### Changed
