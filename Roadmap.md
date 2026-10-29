@@ -1637,6 +1637,62 @@ Execution order: 18A, 18B, 18C, then 18D.
   build-ID checks in shared validation, and a `toolchain` entry in the
   release provenance.
 
+## Phase 19 (Proposed): Headless GNUstep Runtime Delivery
+Goal: ship a pinned GNUstep runtime (libobjc2, libdispatch, libs-base) as a
+relocatable, validated tarball that a headless GNUstep service, starting with
+Arlen v0.3.1 and its patched runtime, can unpack and run from without a
+system-wide GNUstep install.
+Status: proposed, waiting for Dan's approval. Nothing here is implemented.
+
+Why this needs approval: it is outside the support boundary in `AGENTS.md`
+(MSI, AppImage and DMG for GNUstep desktop apps). There's no GUI, no launcher
+and no desktop integration; the payload is libraries plus configuration for a
+server process run by systemd or a container.
+
+Design:
+- New backend `linux-runtime-tarball` under `backends/runtime-tarball/`,
+  packaging the same staged payload shape (`runtime/` tree, `metadata/`) as
+  the other backends, into
+  `<name>-<version>-linux-<arch>-runtime.tar.zst` plus `.sha256`.
+- Relocation without a launcher: the builder links the runtime with an
+  `$ORIGIN`-relative `RUNPATH`, so the libraries find each other wherever the
+  tarball is unpacked. The package ships an `EnvironmentFile` (for systemd,
+  or `--env-file` for containers) that sets `GNUSTEP_CONFIG_FILE` to the
+  bundled `GNUstep.conf` and an absolute `GNUSTEP_USER_DEFAULTS_DIR`, so the
+  service never reads or writes the service user's `~/GNUstep`.
+- Bundle ICU in the runtime, since libs-base links against a specific ICU
+  soname that target distributions don't share.
+- Reuse, not reinvent:
+  - toolchain provenance: `Read-GpToolchainProvenance` and the Phase 18D
+    lock checks, so the tarball records and validates the exact patched
+    runtime it was built from
+  - closure and `RUNPATH` checks: the AppImage runtime closure validator
+    (`Invoke-GpAppImageRuntimeClosureValidation`), generalized to fail on
+    any library resolved outside the tarball
+- `validate -RunSmoke`: unpack into a fresh directory in a clean container
+  with no GNUstep, load the env file, and run a tiny Foundation tool from the
+  tarball (`NSProcessInfo`, `NSUserDefaults` round-trip, a libdispatch
+  queue).
+
+Open questions to settle before implementing:
+- whether libs-base can locate its `GNUstep.conf` relative to the library
+  without the env file, which would make the env file optional
+- the ICU version on the target hosts (Ubuntu 26.04 and Debian 13), which
+  decides whether bundling is required or merely safer
+- who owns the patched runtime build: gnustep-cli-new (preferred, as a
+  custom-prefix toolchain) or Arlen's own CI
+
+Size: about 4 to 6 PRs for the backend (scaffold and schema, package,
+closure validation, clean-container smoke, CI job, docs). A smaller first
+step is 1 to 2 PRs that add only a runtime closure validator Arlen can call
+on its own tarball.
+
+Exit criteria:
+- a tarball unpacked to an arbitrary path on a host with no GNUstep runs the
+  smoke tool
+- a tarball that resolves any library from the build host fails validation
+- the tarball's provenance names the exact runtime revisions it contains
+
 ## Suggested Early Execution Order
 Prioritize these subphases first:
 
