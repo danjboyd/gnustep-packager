@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## v0.1.6
 
 ### Changed
+- The docs and `examples/downstream/` workflows pin `@v0.1.6`.
 - The reusable workflow, repo validation and the bootstrap smoke script default
   to the `gnustep-cli-new` v0.1.3 release: the manifest moves off the
   `v0.1.0-dev` pre-release, and the bootstrap script comes from the v0.1.3
