@@ -24,7 +24,9 @@ GNUstep-on-Linux scope (see [Roadmap.md](../Roadmap.md), phase 17):
 - **The GNUstep launch contract is not rendered.** There is no generated
   launcher on macOS, so `launch.env`, `launch.pathPrepend`,
   `launch.resourceRoots`, `launch.arguments`, `packagedDefaults`,
-  `themeInputs`, and `updates` are not applied. The backend lists every such
+  `themeInputs`, and the shared `updates` runtime config are not applied
+  (macOS updates go through Sparkle instead; see
+  [Sparkle Appcast](#sparkle-appcast)). The backend lists every such
   setting it ignores as a `NOTE` in the package log and in the metadata
   sidecar (`ignoredSettings`) rather than failing, and the core model stays
   unchanged. Use `platformOverrides.macos` (below) to drop these settings from
@@ -219,7 +221,9 @@ Reference fixture:
 7. `hdiutil convert` writes the compressed read-only image.
 8. Signs the image (non-ad-hoc identities with `signDmg`), then notarizes and
    staples it when enabled and credentials are present.
-9. Writes the `.metadata.json` and `.diagnostics.txt` sidecars, deletes the
+9. Writes the `.dmg.sha256` sidecar (`checksumSidecar`) and the Sparkle
+   appcast (`updates.appcast`) from the final, stapled bytes.
+10. Writes the `.metadata.json` and `.diagnostics.txt` sidecars, deletes the
    read-write image and the volume folder, and detaches anything it attached,
    also on failure.
 
@@ -258,6 +262,7 @@ dist/packages/
   <name>-<version>-macos-<arch>.metadata.json
   <name>-<version>-macos-<arch>.diagnostics.txt
   <name>-<version>-macos-<arch>.dmg.sha256   (checksumSidecar)
+  <name>-<version>-macos-<arch>.appcast.xml  (updates.appcast)
 dist/logs/package-dmg/<timestamp>.log
 dist/logs/validate-dmg/<timestamp>.log
 dist/logs/validate-dmg/validation-summary.json
@@ -317,6 +322,51 @@ Notarization skipped: environment variable LINDIRSTAT_NOTARY_PROFILE is not set,
 
 See also [signing.md](signing.md).
 
+## Sparkle Appcast
+macOS apps update through [Sparkle](https://sparkle-project.org), which reads
+`SUFeedURL` and `SUPublicEDKey` from the app's own `Info.plist`. The build
+owns those. The DMG backend writes the feed entry for this one release:
+
+```json
+{
+  "updates": {
+    "github": { "owner": "danjboyd", "repo": "ScreenshotTool", "tagPattern": "v{version}" }
+  },
+  "backends": {
+    "dmg": {
+      "updates": {
+        "appcast": {
+          "enabled": true,
+          "required": true,
+          "privateKeyEnvVar": "SPARKLE_ED_PRIVATE_KEY"
+        }
+      }
+    }
+  }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `enabled` | Write `<artifact-base>.appcast.xml` next to the DMG |
+| `required` | Fail packaging when the appcast cannot be signed. Default `false`: skip it with a warning, because an unsigned entry is useless to an app with `SUPublicEDKey` |
+| `downloadUrlPattern` | Enclosure URL; tokens `{name}`, `{version}`, `{packageId}`, `{arch}`, `{artifact}` (URL-escaped file name), `{tag}`. Empty uses the GitHub release asset URL from `updates.github` |
+| `releaseNotesUrlPattern` | Same tokens. Empty uses `updates.github.releaseNotesUrlPattern` (the release page by default) |
+| `privateKeyEnvVar` | Environment variable holding the base64 EdDSA private key (`generate_keys -x`). Default `GP_SPARKLE_ED_PRIVATE_KEY`. Never put the key in the manifest |
+| `signUpdatePath` | Sparkle's `sign_update`; default `sign_update` on `PATH`. `GP_SPARKLE_SIGN_UPDATE` overrides it |
+
+The backend runs `sign_update --ed-key-file -` on the final image, writing the
+key to its standard input (never to disk or the log). It checks that the
+reported length matches the image, then writes `sparkle:version`
+(`CFBundleVersion`), `sparkle:shortVersionString`,
+`sparkle:minimumSystemVersion` (`LSMinimumSystemVersion`), the release notes
+link, and the enclosure with `sparkle:edSignature` and `length`. `validate`
+checks that the enclosure length matches the image.
+
+Publishing the file where `SUFeedURL` points (for example GitHub Pages) is
+the release job's work. The packager does not merge it into an existing
+multi-release appcast.
+
 ## CI Usage
 GitHub-hosted `macos-latest` runners have everything the backend needs.
 `validate-repo.yml` runs the macOS fixture (`macos-validation` job): Pester
@@ -360,6 +410,8 @@ end of the job. See
   which Apple has deprecated.
 - No license agreement shown on mount (Apple removed the `hdiutil udifrez`
   route for that).
-- The updater runtime config and update-feed sidecars are not emitted for DMG
-  artifacts.
+- The gnustep-packager updater runtime config and `.update-feed.json` are not
+  emitted for DMG artifacts. macOS updates use the Sparkle appcast instead.
+- The appcast holds one release. Merging it into a longer feed is up to the
+  publishing job.
 - One app bundle per image.

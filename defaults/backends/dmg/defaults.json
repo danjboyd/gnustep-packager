@@ -11,6 +11,16 @@
       "backgroundImageRelativePath": "",
       "extraVolumeFiles": [],
       "checksumSidecar": false,
+      "updates": {
+        "appcast": {
+          "enabled": false,
+          "required": false,
+          "downloadUrlPattern": "",
+          "releaseNotesUrlPattern": "",
+          "privateKeyEnvVar": "GP_SPARKLE_ED_PRIVATE_KEY",
+          "signUpdatePath": "sign_update"
+        }
+      },
       "finderLayout": "auto",
       "finderLayoutTimeoutSeconds": 60,
       "window": {

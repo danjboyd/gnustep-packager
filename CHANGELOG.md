@@ -11,6 +11,12 @@
 - DMG backend: `backends.dmg.checksumSidecar` writes `<artifact>.dmg.sha256`
   in `shasum -a 256 -c` format after signing and stapling. Validation checks
   that it matches the image.
+- DMG backend: `backends.dmg.updates.appcast` writes a Sparkle appcast
+  (`<artifact-base>.appcast.xml`) for the release. It signs the final image
+  with Sparkle's `sign_update`, feeding the EdDSA key from an environment
+  variable over stdin. Packaging skips the appcast, or fails when it is
+  `required`, if there is no key or no `sign_update`. Validation checks the
+  enclosure length against the image.
 
 ## v0.1.6
 

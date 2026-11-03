@@ -49,6 +49,9 @@ release titles.
 - `backends.appimage.updates.releaseSelector`
   Selector segment used in generated `gh-releases-zsync` metadata
 - `backends.appimage.updates.zsyncArtifactNamePattern`
+- `backends.dmg.updates.appcast.*`
+  Sparkle appcast for macOS, which uses Sparkle rather than the packaged
+  updater runtime config. See [dmg-backend.md](dmg-backend.md#sparkle-appcast)
 
 ## Example Manifest Snippet
 

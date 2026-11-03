@@ -376,6 +376,7 @@ function Get-GpDmgConfig {
   }
 
   $extraVolumeFiles = @(Get-GpDmgExtraVolumeFiles -Backend $backend -StageRoot $stageRoot -AppBundleName $appBundleName)
+  $appcast = Get-GpDmgAppcastConfig -Context $Context -Backend $backend -ArtifactName $artifactName -ArtifactPath $artifactPath -Tokens $artifactTokens
 
   $identity = [string](Get-GpDmgValue -Parent $signing -Key "identity" -Default "-")
   $entitlementsRelative = [string](Get-GpDmgValue -Parent $signing -Key "entitlementsPath" -Default "")
@@ -428,6 +429,7 @@ function Get-GpDmgConfig {
     BackgroundFileName = $(if ($backgroundPath) { Split-Path -Leaf $backgroundPath } else { $null })
     ExtraVolumeFiles = [object[]]$extraVolumeFiles
     ChecksumSidecar = [bool](Get-GpDmgValue -Parent $backend -Key "checksumSidecar" -Default $false)
+    Appcast = $appcast
     FinderLayout = $finderLayout
     FinderLayoutTimeoutSeconds = [int](Get-GpDmgValue -Parent $backend -Key "finderLayoutTimeoutSeconds" -Default 60)
     Window = [pscustomobject]@{
@@ -531,6 +533,207 @@ function Get-GpDmgExtraVolumeFiles {
   return $result.ToArray()
 }
 
+# Sparkle appcast for macOS updates. Sparkle reads SUFeedURL and SUPublicEDKey
+# from the app's own Info.plist, so the backend only writes the feed for this
+# one release; publishing it where SUFeedURL points is the release job's work.
+function Get-GpDmgAppcastConfig {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [System.Collections.IDictionary]$Backend,
+    [Parameter(Mandatory = $true)]
+    [string]$ArtifactName,
+    [Parameter(Mandatory = $true)]
+    [string]$ArtifactPath,
+    [Parameter(Mandatory = $true)]
+    [hashtable]$Tokens
+  )
+
+  $backendUpdates = Get-GpDmgSection -Parent $Backend -Key "updates"
+  $section = Get-GpDmgSection -Parent $backendUpdates -Key "appcast"
+  $enabled = [bool](Get-GpDmgValue -Parent $section -Key "enabled" -Default $false)
+  $updateSettings = Get-GpUpdateSettings -Context $Context -Backend "dmg"
+
+  $urlTokens = Copy-GpValue -Value $Tokens
+  $urlTokens["artifact"] = [System.Uri]::EscapeDataString($ArtifactName)
+  $urlTokens["tag"] = [string]$updateSettings.GitHub.Tag
+  $downloadPattern = [string](Get-GpDmgValue -Parent $section -Key "downloadUrlPattern" -Default "")
+  $downloadUrl = if (-not [string]::IsNullOrWhiteSpace($downloadPattern)) {
+    Resolve-GpPatternTokens -Pattern $downloadPattern -Tokens $urlTokens
+  } else {
+    Get-GpGitHubReleaseAssetUrl -UpdateSettings $updateSettings -AssetName $ArtifactName
+  }
+  $notesPattern = [string](Get-GpDmgValue -Parent $section -Key "releaseNotesUrlPattern" -Default "")
+  $releaseNotesUrl = if (-not [string]::IsNullOrWhiteSpace($notesPattern)) {
+    Resolve-GpPatternTokens -Pattern $notesPattern -Tokens $urlTokens
+  } else {
+    $updateSettings.GitHub.ReleaseNotesUrl
+  }
+  if ($enabled -and [string]::IsNullOrWhiteSpace($downloadUrl)) {
+    throw "backends.dmg.updates.appcast needs a download URL: set updates.github.owner and updates.github.repo, or backends.dmg.updates.appcast.downloadUrlPattern."
+  }
+
+  $signUpdatePath = [string](Get-GpDmgValue -Parent $section -Key "signUpdatePath" -Default "sign_update")
+  if (-not [string]::IsNullOrWhiteSpace($env:GP_SPARKLE_SIGN_UPDATE)) {
+    $signUpdatePath = $env:GP_SPARKLE_SIGN_UPDATE
+  }
+
+  return [pscustomobject]@{
+    Enabled = $enabled
+    Required = [bool](Get-GpDmgValue -Parent $section -Key "required" -Default $false)
+    DownloadUrl = $downloadUrl
+    ReleaseNotesUrl = $releaseNotesUrl
+    PrivateKeyEnvVar = [string](Get-GpDmgValue -Parent $section -Key "privateKeyEnvVar" -Default "GP_SPARKLE_ED_PRIVATE_KEY")
+    SignUpdatePath = $signUpdatePath
+    Path = Get-GpArtifactSidecarPath -ArtifactPath $ArtifactPath -Suffix "appcast.xml"
+  }
+}
+
+# Parses sign_update's `sparkle:edSignature="..." length="..."` line.
+function ConvertFrom-GpSparkleSignUpdateOutput {
+  param(
+    [string]$Text
+  )
+
+  $signature = [regex]::Match([string]$Text, 'sparkle:edSignature="([A-Za-z0-9+/=]+)"')
+  $length = [regex]::Match([string]$Text, '\blength="(\d+)"')
+  if (-not $signature.Success -or -not $length.Success) {
+    return $null
+  }
+  return [pscustomobject]@{
+    EdSignature = $signature.Groups[1].Value
+    Length = [long]$length.Groups[1].Value
+  }
+}
+
+function New-GpDmgAppcastXml {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Title,
+    [Parameter(Mandatory = $true)]
+    [string]$ShortVersion,
+    [Parameter(Mandatory = $true)]
+    [string]$BundleVersion,
+    [string]$MinimumSystemVersion,
+    [Parameter(Mandatory = $true)]
+    [string]$DownloadUrl,
+    [string]$ReleaseNotesUrl,
+    [Parameter(Mandatory = $true)]
+    [string]$EdSignature,
+    [Parameter(Mandatory = $true)]
+    [long]$Length,
+    [Parameter(Mandatory = $true)]
+    [datetime]$PublishedAt
+  )
+
+  function Esc([string]$Value) { return [System.Security.SecurityElement]::Escape($Value) }
+
+  $pubDate = $PublishedAt.ToUniversalTime().ToString("ddd, dd MMM yyyy HH:mm:ss '+0000'", [System.Globalization.CultureInfo]::InvariantCulture)
+  $lines = [System.Collections.Generic.List[string]]::new()
+  $lines.Add('<?xml version="1.0" encoding="utf-8"?>') | Out-Null
+  $lines.Add('<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">') | Out-Null
+  $lines.Add('  <channel>') | Out-Null
+  $lines.Add(('    <title>{0}</title>' -f (Esc $Title))) | Out-Null
+  if (-not [string]::IsNullOrWhiteSpace($ReleaseNotesUrl)) {
+    $lines.Add(('    <link>{0}</link>' -f (Esc $ReleaseNotesUrl))) | Out-Null
+  }
+  $lines.Add('    <item>') | Out-Null
+  $lines.Add(('      <title>{0} {1}</title>' -f (Esc $Title), (Esc $ShortVersion))) | Out-Null
+  $lines.Add(('      <pubDate>{0}</pubDate>' -f $pubDate)) | Out-Null
+  if (-not [string]::IsNullOrWhiteSpace($ReleaseNotesUrl)) {
+    $lines.Add(('      <link>{0}</link>' -f (Esc $ReleaseNotesUrl))) | Out-Null
+    $lines.Add(('      <sparkle:fullReleaseNotesLink>{0}</sparkle:fullReleaseNotesLink>' -f (Esc $ReleaseNotesUrl))) | Out-Null
+  }
+  $lines.Add(('      <sparkle:version>{0}</sparkle:version>' -f (Esc $BundleVersion))) | Out-Null
+  $lines.Add(('      <sparkle:shortVersionString>{0}</sparkle:shortVersionString>' -f (Esc $ShortVersion))) | Out-Null
+  if (-not [string]::IsNullOrWhiteSpace($MinimumSystemVersion)) {
+    $lines.Add(('      <sparkle:minimumSystemVersion>{0}</sparkle:minimumSystemVersion>' -f (Esc $MinimumSystemVersion))) | Out-Null
+  }
+  $lines.Add(('      <enclosure url="{0}" sparkle:edSignature="{1}" length="{2}" type="application/x-apple-diskimage"/>' -f (Esc $DownloadUrl), (Esc $EdSignature), $Length)) | Out-Null
+  $lines.Add('    </item>') | Out-Null
+  $lines.Add('  </channel>') | Out-Null
+  $lines.Add('</rss>') | Out-Null
+  return ([string]::Join("`n", $lines.ToArray()) + "`n")
+}
+
+# Signs the final image with Sparkle's sign_update and writes the appcast.
+# The private key goes to sign_update on stdin and is never logged. Returns
+# the outcome; throws only when the appcast is required and cannot be made.
+function Invoke-GpDmgAppcast {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config,
+    [string]$LogPath
+  )
+
+  $appcast = $Config.Appcast
+  $result = [ordered]@{ status = "disabled"; path = $null; downloadUrl = $appcast.DownloadUrl; reason = $null }
+  if (-not $appcast.Enabled) {
+    return $result
+  }
+
+  $fail = {
+    param([string]$Reason)
+    if ($appcast.Required) {
+      throw ("Sparkle appcast required but not written: {0}" -f $Reason)
+    }
+    $result["status"] = "skipped"
+    $result["reason"] = $Reason
+    Write-GpDmgLogLine -LogPath $LogPath -Message ("Sparkle appcast skipped: {0}" -f $Reason)
+    return $result
+  }
+
+  $key = [Environment]::GetEnvironmentVariable($appcast.PrivateKeyEnvVar)
+  if ([string]::IsNullOrWhiteSpace($key)) {
+    return (& $fail ("no EdDSA private key in `${0}" -f $appcast.PrivateKeyEnvVar))
+  }
+  $signUpdate = Get-Command -Name $appcast.SignUpdatePath -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($null -eq $signUpdate) {
+    return (& $fail ("Sparkle's sign_update not found ('{0}'; set GP_SPARKLE_SIGN_UPDATE or backends.dmg.updates.appcast.signUpdatePath)" -f $appcast.SignUpdatePath))
+  }
+
+  # Write the key to stdin without a trailing newline (as `printf '%s'` does);
+  # a PowerShell pipe would append one.
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new($signUpdate.Source)
+  foreach ($argument in @("--ed-key-file", "-", $Config.ArtifactPath)) {
+    $startInfo.ArgumentList.Add($argument) | Out-Null
+  }
+  $startInfo.RedirectStandardInput = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  $startInfo.UseShellExecute = $false
+  $process = [System.Diagnostics.Process]::Start($startInfo)
+  $process.StandardInput.Write($key.Trim())
+  $process.StandardInput.Close()
+  $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+  $stderrTask = $process.StandardError.ReadToEndAsync()
+  $process.WaitForExit()
+  $exitCode = $process.ExitCode
+  $parsed = ConvertFrom-GpSparkleSignUpdateOutput -Text $stdoutTask.Result
+  if ($exitCode -ne 0 -and -not [string]::IsNullOrWhiteSpace($stderrTask.Result)) {
+    Write-GpDmgLogLine -LogPath $LogPath -Message ("sign_update stderr: {0}" -f ($stderrTask.Result -replace "\s+", " ").Trim())
+  }
+  if ($exitCode -ne 0 -or $null -eq $parsed) {
+    return (& $fail ("sign_update exited {0} without a signature" -f $exitCode))
+  }
+  $actualLength = (Get-Item -LiteralPath $Config.ArtifactPath).Length
+  if ($parsed.Length -ne $actualLength) {
+    return (& $fail ("sign_update reported length {0}, the image is {1} bytes" -f $parsed.Length, $actualLength))
+  }
+
+  $xml = New-GpDmgAppcastXml -Title $Config.DisplayName `
+    -ShortVersion $(if ($Config.AppInfo.ShortVersion) { $Config.AppInfo.ShortVersion } else { $Config.Version }) `
+    -BundleVersion $(if ($Config.AppInfo.BundleVersion) { $Config.AppInfo.BundleVersion } else { $Config.Version }) `
+    -MinimumSystemVersion $Config.AppInfo.MinimumSystemVersion `
+    -DownloadUrl $appcast.DownloadUrl -ReleaseNotesUrl $appcast.ReleaseNotesUrl `
+    -EdSignature $parsed.EdSignature -Length $parsed.Length -PublishedAt (Get-Date)
+  [System.IO.File]::WriteAllText($appcast.Path, $xml, [System.Text.UTF8Encoding]::new($false))
+  Write-GpDmgLogLine -LogPath $LogPath -Message ("Wrote Sparkle appcast {0}" -f $appcast.Path)
+  $result["status"] = "written"
+  $result["path"] = $appcast.Path
+  return $result
+}
+
 function Write-GpDmgChecksumSidecar {
   param(
     [Parameter(Mandatory = $true)]
@@ -591,7 +794,7 @@ function Get-GpDmgIgnoredSettings {
 
   $updates = Get-GpUpdateSettings -Context $Context -Backend "dmg"
   if ($updates.Enabled) {
-    $notes.Add("updates.enabled is set, but the DMG backend does not emit updater runtime config or update-feed sidecars yet.") | Out-Null
+    $notes.Add("updates.enabled is set, but the DMG backend does not emit updater runtime config or update-feed sidecars; use backends.dmg.updates.appcast for Sparkle.") | Out-Null
   }
 
   return [string[]]@($notes.ToArray())
@@ -1106,6 +1309,7 @@ function Write-GpDmgArtifactMetadata {
       metadata = [ordered]@{ path = $Config.Sidecars.MetadataPath }
       diagnostics = [ordered]@{ path = $Config.Sidecars.DiagnosticsPath }
       checksum = $(if ($Config.ChecksumSidecar) { [ordered]@{ path = $Config.Sidecars.ChecksumPath } } else { $null })
+      appcast = $(if ($Details.Contains("appcast")) { $Details["appcast"] } else { $null })
     }
     app = [ordered]@{
       stagedPath = $Config.StagedAppPath
@@ -1436,6 +1640,14 @@ function Invoke-GpDmgPackage {
     Remove-Item -Force -LiteralPath $config.Sidecars.ChecksumPath
   }
 
+  if (Test-Path -LiteralPath $config.Appcast.Path) {
+    Remove-Item -Force -LiteralPath $config.Appcast.Path
+  }
+  $details["appcast"] = Invoke-GpDmgAppcast -Config $config -LogPath $LogPath
+  if ($details["appcast"]["status"] -eq "skipped") {
+    $details["warnings"].Add(("Sparkle appcast skipped: {0}" -f $details["appcast"]["reason"])) | Out-Null
+  }
+
   $details["warnings"] = [string[]]@($details["warnings"].ToArray())
   $metadataPath = Write-GpDmgArtifactMetadata -Context $Context -Config $config -Details $details -LogPath $LogPath
   $diagnosticsPath = Write-GpDmgDiagnosticsSummary -Context $Context -Config $config -Details $details -LogPath $LogPath
@@ -1450,6 +1662,7 @@ function Invoke-GpDmgPackage {
     MetadataPath = $metadataPath
     DiagnosticsPath = $diagnosticsPath
     ChecksumPath = $checksumPath
+    AppcastPath = $details["appcast"]["path"]
     FinderLayoutApplied = [bool]$details["finderLayoutApplied"]
     FinderLayoutReason = $details["finderLayoutReason"]
     NotarizationStatus = [string]$details["notarization"]["status"]
@@ -1560,6 +1773,17 @@ function Invoke-GpDmgValidation {
 
   $verify = Invoke-GpDmgTool -FilePath "hdiutil" -ArgumentList @("verify", $config.ArtifactPath) -LogPath $LogPath -AllowFailure -Quiet
   Add-GpDmgCheck -Name "hdiutil-verify" -Status $(if ($verify.ExitCode -eq 0) { "pass" } else { "fail" }) -Detail $(if ($verify.ExitCode -eq 0) { "checksum valid" } else { "exit $($verify.ExitCode)" })
+  if ($config.Appcast.Enabled -and (Test-Path -LiteralPath $config.Appcast.Path -PathType Leaf)) {
+    $appcastLength = $null
+    try {
+      [xml]$appcastXml = Get-Content -Raw -LiteralPath $config.Appcast.Path
+      $appcastLength = [long]$appcastXml.rss.channel.item.enclosure.length
+    } catch {
+      $appcastLength = $null
+    }
+    $imageLength = (Get-Item -LiteralPath $config.ArtifactPath).Length
+    Add-GpDmgCheck -Name "sparkle-appcast" -Status $(if ($appcastLength -eq $imageLength) { "pass" } else { "fail" }) -Detail $(if ($appcastLength -eq $imageLength) { "enclosure length matches the image" } else { "enclosure length $appcastLength, image $imageLength bytes" })
+  }
   if ($config.ChecksumSidecar) {
     if (-not (Test-Path -LiteralPath $config.Sidecars.ChecksumPath -PathType Leaf)) {
       Add-GpDmgCheck -Name "checksum-sidecar" -Status "fail" -Detail ("missing {0}" -f (Split-Path -Leaf $config.Sidecars.ChecksumPath))

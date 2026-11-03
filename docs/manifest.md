@@ -554,6 +554,7 @@ default):
 - `backgroundImageRelativePath`
 - `extraVolumeFiles[].source`, `extraVolumeFiles[].destination`
 - `checksumSidecar`
+- `updates.appcast.*` (Sparkle appcast; see [dmg-backend.md](dmg-backend.md#sparkle-appcast))
 - `finderLayout` (`auto`, `applescript`, `off`)
 - `finderLayoutTimeoutSeconds`
 - `window.*`
