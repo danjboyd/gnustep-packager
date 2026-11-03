@@ -18,6 +18,8 @@ mkdir -p "$stage_root/app" "$stage_root/runtime" "$stage_root/metadata/licenses"
 ditto "$built_app" "$stage_root/app/SampleMacApp.app"
 printf 'SampleMacApp fixture license notice. License: MIT.\n' >"$stage_root/metadata/licenses/SampleMacApp.txt"
 
+# A plain note exercises backends.dmg.extraVolumeFiles.
+printf 'This fixture is ad-hoc signed. Right-click the app and choose Open.\n' >"$stage_root/metadata/dmg/opening-unsigned-app.txt"
 # A 1x1 PNG is enough to exercise the background-image path.
 printf '\211\120\116\107\015\012\032\012\000\000\000\015\111\110\104\122\000\000\000\001\000\000\000\001\010\004\000\000\000\265\034\014\002\000\000\000\013\111\104\101\124\170\332\143\374\377\037\000\003\003\002\000\357\277\153\111\000\000\000\000\111\105\116\104\256\102\140\202' >"$stage_root/metadata/dmg/background.png"
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- DMG backend: `backends.dmg.extraVolumeFiles` copies stage-relative files or
+  folders to the volume root next to the app, such as a note on opening an
+  unsigned app. Reserved names (the app bundle, `Applications`, `.background`,
+  `.DS_Store`) and duplicates are rejected, and validation checks that each
+  file is on the mounted volume.
+- DMG backend: `backends.dmg.checksumSidecar` writes `<artifact>.dmg.sha256`
+  in `shasum -a 256 -c` format after signing and stapling. Validation checks
+  that it matches the image.
+
 ## v0.1.6
 
 ### Changed

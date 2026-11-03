@@ -552,6 +552,8 @@ default):
 - `format` (`UDZO`, `ULFO`)
 - `applicationsLink`
 - `backgroundImageRelativePath`
+- `extraVolumeFiles[].source`, `extraVolumeFiles[].destination`
+- `checksumSidecar`
 - `finderLayout` (`auto`, `applescript`, `off`)
 - `finderLayoutTimeoutSeconds`
 - `window.*`

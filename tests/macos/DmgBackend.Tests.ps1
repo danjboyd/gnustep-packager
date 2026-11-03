@@ -132,6 +132,40 @@ Describe "DMG backend" {
       Assert-GpEqual -Actual (Split-Path -Leaf $script:packageResult.MetadataPath) -Expected "SampleMacApp-0.1.0-macos-universal.metadata.json" -Message "Sidecars share the artifact base name."
     }
 
+    It "writes a checksum sidecar that shasum accepts" {
+      Assert-GpTrue -Condition (Test-Path $script:packageResult.ChecksumPath) -Message "checksumSidecar should write <artifact>.dmg.sha256."
+      Assert-GpEqual -Actual (Split-Path -Leaf $script:packageResult.ChecksumPath) -Expected "SampleMacApp-0.1.0-macos-universal.dmg.sha256" -Message "The checksum sidecar keeps the .dmg extension."
+      Push-Location (Split-Path -Parent $script:packageResult.ChecksumPath)
+      try {
+        $output = & shasum -a 256 -c (Split-Path -Leaf $script:packageResult.ChecksumPath) 2>&1
+        Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message ("shasum -c should accept the sidecar: {0}" -f ($output -join " "))
+      } finally {
+        Pop-Location
+      }
+      Assert-GpEqual -Actual $script:metadata.artifacts.checksum.path -Expected $script:packageResult.ChecksumPath -Message "The metadata should name the checksum sidecar."
+    }
+
+    It "copies extra volume files and records them in the metadata" {
+      Assert-GpEqual -Actual @($script:metadata.layout.extraVolumeFiles | ForEach-Object { $_.destination }) -Expected @("Opening an unsigned app.txt") -Message "The metadata should list the extra volume files."
+      $check = @($script:validationResult.Checks | Where-Object { $_.name -eq "volume-file:Opening an unsigned app.txt" })
+      Assert-GpEqual -Actual $check.Count -Expected 1 -Message "Validation should check the extra volume file."
+      Assert-GpEqual -Actual $check[0].status -Expected "pass" -Message "The extra volume file should be on the volume."
+    }
+
+    It "rejects an extra volume file that shadows the Applications link" {
+      $badManifest = New-GpSiblingManifest -Customize {
+        param($manifest)
+        $manifest["backends"]["dmg"]["extraVolumeFiles"] = @(@{ source = "metadata/dmg/opening-unsigned-app.txt"; destination = "Applications" })
+      }
+      $message = $null
+      try {
+        Get-GpDmgConfig -Context (Get-GpManifestContext -Path $badManifest -Backend dmg) | Out-Null
+      } catch {
+        $message = $_.Exception.Message
+      }
+      Assert-GpMatch -Actual $message -Pattern "destination 'Applications' is reserved" -Message "A reserved destination should be rejected."
+    }
+
     It "records provenance, signing and notarization state in the metadata" {
       Assert-GpEqual -Actual $script:metadata.backend -Expected "dmg" -Message "Metadata should name the backend."
       Assert-GpEqual -Actual $script:metadata.app.arch -Expected "universal" -Message "Metadata should record the architecture."

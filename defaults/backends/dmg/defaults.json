@@ -9,6 +9,8 @@
       "format": "UDZO",
       "applicationsLink": true,
       "backgroundImageRelativePath": "",
+      "extraVolumeFiles": [],
+      "checksumSidecar": false,
       "finderLayout": "auto",
       "finderLayoutTimeoutSeconds": 60,
       "window": {

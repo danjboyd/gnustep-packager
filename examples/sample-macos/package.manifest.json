@@ -83,6 +83,13 @@
     "dmg": {
       "enabled": true,
       "backgroundImageRelativePath": "metadata/dmg/background.png",
+      "extraVolumeFiles": [
+        {
+          "source": "metadata/dmg/opening-unsigned-app.txt",
+          "destination": "Opening an unsigned app.txt"
+        }
+      ],
+      "checksumSidecar": true,
       "finderLayout": "off",
       "noticeReport": {
         "enabled": true
