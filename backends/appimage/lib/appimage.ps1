@@ -1066,6 +1066,7 @@ function Convert-GpAppImageValueToShellExpression {
     "{@appRoot}" = '${APP_ROOT}'
     "{@runtimeRoot}" = '${RUNTIME_ROOT}'
     "{@metadataRoot}" = '${METADATA_ROOT}'
+    "{@userRuntimeDir}" = '${GP_USER_RUNTIME_DIR}'
   }
 
   $resolved = [string]$Value
@@ -1699,6 +1700,29 @@ function Write-GpAppImageAppRun {
     }
   }
   $lines.Add('export PATH') | Out-Null
+
+  $usesUserRuntimeDir = @(
+    foreach ($key in $environment.Keys) {
+      $entry = $environment[$key]
+      $value = if (($entry -is [System.Collections.IDictionary]) -and $entry.Contains("value")) { [string]$entry["value"] } else { [string]$entry }
+      if ($value.Contains("{@userRuntimeDir}")) { $key }
+    }
+  ).Count -gt 0
+  if ($usesUserRuntimeDir) {
+    # {@userRuntimeDir}: a directory of this app's own for the user, kept between launches, so
+    # launches share it and other apps don't. Pointing TMP at it gives GNUstep a temporary
+    # directory, and with it message port names, of its own: the app then starts its own gpbs
+    # and gdnc instead of using a distribution GNUstep's (gnustep-gui names its pasteboard
+    # server the same in every version). It goes in XDG_RUNTIME_DIR, which only the user can
+    # reach; in /tmp, a directory someone else made or a symlink is not used, and a fresh one
+    # is made instead.
+    $runtimeDirName = "gp-" + (Convert-GpAppImageIdentifierFragment -Value $Config.PackageId)
+    $lines.Add(('GP_USER_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/' + $runtimeDirName + '-$(id -u)"')) | Out-Null
+    $lines.Add('if [ -L "$GP_USER_RUNTIME_DIR" ] || ! mkdir -p -m 0700 "$GP_USER_RUNTIME_DIR" 2>/dev/null || [ ! -O "$GP_USER_RUNTIME_DIR" ]; then') | Out-Null
+    $lines.Add(('  GP_USER_RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/' + $runtimeDirName + '-XXXXXX")"')) | Out-Null
+    $lines.Add('fi') | Out-Null
+    $lines.Add('chmod 0700 "$GP_USER_RUNTIME_DIR"') | Out-Null
+  }
 
   foreach ($key in ($environment.Keys | Sort-Object)) {
     $entry = $environment[$key]

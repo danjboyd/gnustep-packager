@@ -58,6 +58,8 @@ Backend renderers may expand these tokens inside launch-environment values:
 - `{@appRoot}`
 - `{@runtimeRoot}`
 - `{@metadataRoot}`
+- `{@userRuntimeDir}` (AppImage only; see `appimage-runtime-policy.md`. Other backends
+  leave it as written, so set it under `platformOverrides.linux.launch.env`.)
 
 Those tokens let one manifest describe launch requirements without hard-coding
 Windows install paths or Linux mount paths.

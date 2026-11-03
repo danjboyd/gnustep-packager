@@ -232,6 +232,76 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export GNUSTEP_CONFIG_FILE="$GP_GNUSTEP_CONFIG_FILE"')) -Message "AppRun should export GNUSTEP_CONFIG_FILE."
     }
 
+    It "gives {@userRuntimeDir} a private directory of the app's own, the same for every launch" {
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-user-runtime-dir-" + [guid]::NewGuid().ToString("N"))
+      try {
+        $appDir = Join-Path $tempRoot "AppDir"
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        & cp -a $script:packageResult.AppDirRoot $appDir
+        # A stub entry reports the directory it was given and its mode.
+        $entryPath = Join-Path $appDir "usr/app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp"
+        Set-Content -Path $entryPath -Value @(
+          '#!/bin/sh'
+          'printf ''dir=%s\n'' "$GP_FIXTURE_RUNTIME_DIR"'
+          'printf ''mode=%s\n'' "$(stat -c %a "$GP_FIXTURE_RUNTIME_DIR")"'
+        )
+        Set-GpUnixExecutable -Path $entryPath
+        $appRun = Join-Path $appDir "AppRun"
+
+        $appRunText = Get-Content -Raw -Path $appRun
+        Assert-GpMatch -Actual $appRunText -Pattern ([regex]::Escape('export GP_FIXTURE_RUNTIME_DIR="${GP_USER_RUNTIME_DIR}"')) -Message "AppRun should expand {@userRuntimeDir} to the directory it makes."
+
+        function Invoke-GpTestAppRun {
+          param([hashtable]$Environment)
+          $envArgs = @("HOME=$tempRoot") + @($Environment.Keys | ForEach-Object { "$_=$($Environment[$_])" })
+          $output = @(& env -u XDG_RUNTIME_DIR @envArgs $appRun 2>&1 | ForEach-Object { [string]$_ })
+          Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message ("AppRun should succeed. Output: " + [string]::Join("`n", $output))
+          return [pscustomobject]@{
+            Dir = (($output | Where-Object { $_ -like "dir=*" }) -replace '^dir=', '')
+            Mode = (($output | Where-Object { $_ -like "mode=*" }) -replace '^mode=', '')
+          }
+        }
+
+        $uid = (& id -u).Trim()
+        $runtimeDir = Join-Path $tempRoot "run"
+        New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
+        & chmod 0700 $runtimeDir
+        $expected = Join-Path $runtimeDir "gp-com-example-samplegnusteplinuxapp-$uid"
+
+        $first = Invoke-GpTestAppRun -Environment @{ XDG_RUNTIME_DIR = $runtimeDir }
+        Assert-GpEqual -Actual $first.Dir -Expected $expected -Message "The directory should be the app's, under XDG_RUNTIME_DIR."
+        Assert-GpEqual -Actual $first.Mode -Expected "700" -Message "Only the user should reach the directory."
+        $second = Invoke-GpTestAppRun -Environment @{ XDG_RUNTIME_DIR = $runtimeDir }
+        Assert-GpEqual -Actual $second.Dir -Expected $expected -Message "Every launch should get the same directory, so they share it."
+
+        # A directory that others can open is made private again.
+        & chmod 0755 $expected
+        $reopened = Invoke-GpTestAppRun -Environment @{ XDG_RUNTIME_DIR = $runtimeDir }
+        Assert-GpEqual -Actual $reopened.Mode -Expected "700" -Message "An existing directory of the user's should be made private."
+
+        # Without XDG_RUNTIME_DIR it goes in /tmp, where a symlink in its place is not followed.
+        $tmpRoot = Join-Path $tempRoot "tmp"
+        $decoy = Join-Path $tempRoot "decoy"
+        New-Item -ItemType Directory -Force -Path $tmpRoot, $decoy | Out-Null
+        $planted = "/tmp/gp-com-example-samplegnusteplinuxapp-$uid"
+        if (-not (Test-Path $planted)) {
+          & ln -s $decoy $planted
+          try {
+            $fallback = Invoke-GpTestAppRun -Environment @{ TMPDIR = $tmpRoot }
+            Assert-GpTrue -Condition ($fallback.Dir -like "$tmpRoot/gp-com-example-samplegnusteplinuxapp-*") -Message "A symlink in /tmp should be passed over for a fresh directory. Got: $($fallback.Dir)"
+            Assert-GpEqual -Actual $fallback.Mode -Expected "700" -Message "The fresh directory should be private."
+            Assert-GpEqual -Actual @(Get-ChildItem -Force $decoy).Count -Expected 0 -Message "Nothing should be made through the symlink."
+          } finally {
+            Remove-Item -Force $planted
+          }
+        }
+      } finally {
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
+        }
+      }
+    }
+
     It "names the gnustep-gui tools missing from the bundled System/Tools" {
       $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-gui-tools-" + [guid]::NewGuid().ToString("N"))
       try {

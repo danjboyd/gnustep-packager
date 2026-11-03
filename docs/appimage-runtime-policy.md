@@ -23,6 +23,13 @@ The AppImage backend renders these shared tokens into shell expressions:
 - `{@appRoot}` -> `${APP_ROOT}`
 - `{@runtimeRoot}` -> `${RUNTIME_ROOT}`
 - `{@metadataRoot}` -> `${METADATA_ROOT}`
+- `{@userRuntimeDir}` -> `${GP_USER_RUNTIME_DIR}`: AppImage only. A directory of the
+  app's own for the user, `${XDG_RUNTIME_DIR:-/tmp}/gp-<package id>-<uid>`, which `AppRun`
+  creates with mode 0700 and reuses at every launch. A symlink in its place, or a directory
+  the user doesn't own (in a shared `/tmp`), is passed over for a fresh `mktemp -d` one.
+  Pointing `TMP` at it gives gnustep-base a temporary directory, and so message port names,
+  of the app's own: the app then starts its bundled `gpbs` and `gdnc` instead of talking to a
+  distribution GNUstep's, which register under the same names.
 
 ## GNUstep Defaults
 If the manifest does not supply `GNUSTEP_PATHPREFIX_LIST`, the backend defaults
