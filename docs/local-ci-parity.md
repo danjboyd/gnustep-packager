@@ -37,6 +37,13 @@ It drives the same sequence in both local and CI contexts:
 The reusable GitHub Actions workflow calls the same wrapper rather than
 re-encoding packaging logic in YAML.
 
+`validate-repo.yml` also calls the reusable workflow itself once per backend,
+so each one builds an installer through the entry point consumers use:
+`linux-reusable-workflow` (AppImage, `examples/sample-linux`, plus a launch in
+a clean `ubuntu:24.04` container), `windows-reusable-workflow` (MSI,
+`examples/sample-gui`) and `macos-reusable-workflow` (DMG,
+`examples/sample-macos`).
+
 That keeps:
 
 - local reproduction straightforward

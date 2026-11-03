@@ -3,6 +3,20 @@
 ## Unreleased
 
 ### Added
+- DMG backend: `backends.dmg.extraVolumeFiles` copies stage-relative files or
+  folders to the volume root next to the app, such as a note on opening an
+  unsigned app. Reserved names (the app bundle, `Applications`, `.background`,
+  `.DS_Store`) and duplicates are rejected, and validation checks that each
+  file is on the mounted volume.
+- DMG backend: `backends.dmg.checksumSidecar` writes `<artifact>.dmg.sha256`
+  in `shasum -a 256 -c` format after signing and stapling. Validation checks
+  that it matches the image.
+- DMG backend: `backends.dmg.updates.appcast` writes a Sparkle appcast
+  (`<artifact-base>.appcast.xml`) for the release. It signs the final image
+  with Sparkle's `sign_update`, feeding the EdDSA key from an environment
+  variable over stdin. Packaging skips the appcast, or fails when it is
+  `required`, if there is no key or no `sign_update`. Validation checks the
+  enclosure length against the image.
 - AppImage backend: `backends.appimage.gnustepConfig.keyBindings` bundles key
   binding files under `<systemRoot>/Library/KeyBindings` and loads them after
   libs-gui's `DefaultKeyBindings` through `GSKeyBindingsFiles` in
