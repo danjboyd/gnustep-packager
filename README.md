@@ -229,6 +229,7 @@ Getting started:
 - [docs/github-actions.md](docs/github-actions.md)
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md)
 - [docs/app-coverage.md](docs/app-coverage.md): which downstream apps ship which formats
+- [docs/swift-apps.md](docs/swift-apps.md): design note for packaging Swift GNUstep apps (proposal)
 
 Backends:
 - MSI: [boundary](docs/msi-boundary.md), [runtime policy](docs/msi-runtime-policy.md),
