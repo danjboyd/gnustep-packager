@@ -721,6 +721,13 @@ static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
 }
 
 - (void)checkForUpdates {
+  // This check replaces the one start scheduled. Left pending, that timer can't fire during the modal
+  // alert this check may show (it runs in the default mode only), so it fired when Install Update
+  // closed the alert, and offered the same update again over the download.
+  [_startupTimer invalidate];
+  [_startupTimer release];
+  _startupTimer = nil;
+
   @synchronized (self) {
     if (_checkInProgress) {
       return;
