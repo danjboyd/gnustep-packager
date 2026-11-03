@@ -10,6 +10,7 @@ Describe "Updater defaults" {
     . (Join-Path $script:repoRoot "scripts\\lib\\core.ps1")
 
     $script:probePath = $null
+    $script:lastCheckProbePath = $null
     $script:libraryPath = $null
     if (-not $IsWindows -and (Get-Command gnustep-config -ErrorAction SilentlyContinue) -and (Get-Command make -ErrorAction SilentlyContinue)) {
       $buildRoot = Join-Path $script:repoRoot "dist/test-updater-defaults"
@@ -38,6 +39,18 @@ Describe "Updater defaults" {
         throw "skip-version-probe did not build:`n$($output -join "`n")"
       }
 
+      $script:lastCheckProbePath = Join-Path $buildRoot "last-check-probe"
+      $arguments = @($objcFlags) + @(
+        "-I", (Join-Path $coreDirectory "Headers"),
+        "-o", $script:lastCheckProbePath,
+        (Join-Path $script:repoRoot "tests/fixtures/updater/last-check-probe.m"),
+        (Join-Path $coreDirectory "libGPUpdaterCore.a")
+      ) + @($baseLibs)
+      $output = & clang @arguments 2>&1
+      if ($LASTEXITCODE -ne 0) {
+        throw "last-check-probe did not build:`n$($output -join "`n")"
+      }
+
       # GNUstep's libraries need not be on the default search path.
       $libraryDirectories = @(
         foreach ($variable in @("GNUSTEP_USER_LIBRARIES", "GNUSTEP_LOCAL_LIBRARIES", "GNUSTEP_SYSTEM_LIBRARIES")) {
@@ -57,9 +70,9 @@ Describe "Updater defaults" {
     }
 
     function Invoke-GpSkipProbe {
-      param([string]$GnustepHome, [string[]]$ArgumentList)
+      param([string]$GnustepHome, [string[]]$ArgumentList, [string]$ProbePath = $script:probePath)
 
-      $startInfo = [System.Diagnostics.ProcessStartInfo]::new($script:probePath)
+      $startInfo = [System.Diagnostics.ProcessStartInfo]::new($ProbePath)
       foreach ($argument in $ArgumentList) {
         $startInfo.ArgumentList.Add($argument)
       }
@@ -70,6 +83,9 @@ Describe "Updater defaults" {
       # gnustep-base takes the home directory from passwd unless GNUSTEP_HOME is set.
       $startInfo.Environment["GNUSTEP_HOME"] = $GnustepHome
       $startInfo.Environment["HOME"] = $GnustepHome
+      # West of UTC: the zone gnustep-base shifted stored dates by on Windows (see last-check-probe).
+      $startInfo.Environment["TZ"] = "America/Chicago"
+      $startInfo.Environment["GNUSTEP_TZ"] = "America/Chicago"
       $process = [System.Diagnostics.Process]::Start($startInfo)
       $stdoutTask = $process.StandardOutput.ReadToEndAsync()
       $null = $process.StandardError.ReadToEndAsync()
@@ -95,6 +111,56 @@ Describe "Updater defaults" {
       if ($read.Output -ne "1.2.3") {
         throw "The skipped version should survive an exit without -terminate:. Read: '$($read.Output)'"
       }
+    } finally {
+      Remove-Item -Recurse -Force $gnustepHome -ErrorAction SilentlyContinue
+    }
+  }
+
+  It "keeps the last check time through writes and reads of the defaults, and counts a future or old one as due" {
+    if ($null -eq $script:lastCheckProbePath) {
+      Set-ItResult -Skipped -Because "GPUpdaterCore can't be built here (it needs gnustep-config and make, off Windows)"
+      return
+    }
+
+    $gnustepHome = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-updater-defaults-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $gnustepHome | Out-Null
+    function Invoke-Probe {
+      (Invoke-GpSkipProbe -GnustepHome $gnustepHome -ArgumentList $args -ProbePath $script:lastCheckProbePath).Output
+    }
+    try {
+      $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+      Invoke-Probe set "$now" | Out-Null
+      foreach ($cycle in 1..2) {
+        Invoke-Probe rewrite | Out-Null
+        Invoke-Probe read | Should -Be "$now"
+      }
+      Invoke-Probe due | Should -Be "no"
+
+      Invoke-Probe set "$($now + 30 * 86400)" | Out-Null
+      Invoke-Probe due | Should -Be "yes"
+      Invoke-Probe set "$($now - 30 * 86400)" | Out-Null
+      Invoke-Probe due | Should -Be "yes"
+    } finally {
+      Remove-Item -Recurse -Force $gnustepHome -ErrorAction SilentlyContinue
+    }
+  }
+
+  It "ignores a last check stored as a date, as releases up to v0.1.7 did, so one check is due" {
+    if ($null -eq $script:lastCheckProbePath) {
+      Set-ItResult -Skipped -Because "GPUpdaterCore can't be built here (it needs gnustep-config and make, off Windows)"
+      return
+    }
+
+    $gnustepHome = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-updater-defaults-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $gnustepHome | Out-Null
+    function Invoke-Probe {
+      (Invoke-GpSkipProbe -GnustepHome $gnustepHome -ArgumentList $args -ProbePath $script:lastCheckProbePath).Output
+    }
+    try {
+      $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+      Invoke-Probe legacy "$now" | Out-Null
+      Invoke-Probe read | Should -Be "none"
+      Invoke-Probe due | Should -Be "yes"
     } finally {
       Remove-Item -Recurse -Force $gnustepHome -ErrorAction SilentlyContinue
     }
