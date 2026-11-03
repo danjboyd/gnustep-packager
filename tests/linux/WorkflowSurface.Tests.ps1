@@ -91,6 +91,12 @@ Describe "Reusable workflow surface" {
     if ($script:validateRepoText -notmatch "(?s)macos-reusable-workflow:.*uses: \./\.github/workflows/package-gnustep-app\.yml.*backend: dmg") {
       throw "validate-repo should run the reusable workflow's dmg path."
     }
+    if ($script:validateRepoText -notmatch "(?s)windows-reusable-workflow:.*uses: \./\.github/workflows/package-gnustep-app\.yml.*backend: msi") {
+      throw "validate-repo should run the reusable workflow's msi path."
+    }
+    if ($script:validateRepoText -notmatch "(?s)linux-reusable-workflow:.*uses: \./\.github/workflows/package-gnustep-app\.yml.*backend: appimage") {
+      throw "validate-repo should run the reusable workflow's appimage path."
+    }
     if ($script:githubActionsDocText -notmatch [regex]::Escape("runs-on-dmg")) {
       throw "docs/github-actions.md should document runs-on-dmg."
     }

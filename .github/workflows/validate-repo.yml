@@ -204,3 +204,31 @@ jobs:
       run-smoke: true
       artifact-name: sample-macos-reusable
       artifact-retention-days: 7
+
+  # The reusable workflow's msi path, end to end, on the GUI fixture: default
+  # host setup, so the gnustep-cli-new bootstrap and its ps1 digest check run.
+  windows-reusable-workflow:
+    uses: ./.github/workflows/package-gnustep-app.yml
+    with:
+      manifest-path: examples/sample-gui/package.manifest.json
+      backend: msi
+      run-validation: true
+      run-smoke: true
+      artifact-name: sample-gui-reusable
+      artifact-retention-days: 7
+
+  # The reusable workflow's appimage path, end to end, on the Linux fixture:
+  # default host setup (the gnustep-cli-new bootstrap and its digest check),
+  # then a launch in a clean container with no GNUstep installed. With the
+  # dmg and msi jobs above, every backend builds one installer through the
+  # same entry point consumers use.
+  linux-reusable-workflow:
+    uses: ./.github/workflows/package-gnustep-app.yml
+    with:
+      manifest-path: examples/sample-linux/package.manifest.json
+      backend: appimage
+      run-validation: true
+      run-smoke: true
+      appimage-clean-smoke-image: ubuntu:24.04
+      artifact-name: sample-linux-reusable
+      artifact-retention-days: 7
