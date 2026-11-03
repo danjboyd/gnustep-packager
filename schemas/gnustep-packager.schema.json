@@ -1375,6 +1375,44 @@
               "type": "boolean",
               "description": "Write <artifact>.dmg.sha256 in `shasum -a 256 -c` format after signing and stapling."
             },
+            "updates": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "appcast": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "Sparkle appcast for this release, written next to the DMG as <artifact-base>.appcast.xml after signing and stapling.",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "description": "Fail packaging when the appcast cannot be signed (no key or no sign_update). Default false: skip with a warning."
+                    },
+                    "downloadUrlPattern": {
+                      "type": "string",
+                      "description": "Enclosure URL. Tokens {name}, {version}, {packageId}, {arch}, {artifact}, {tag}. Empty uses the GitHub release asset URL from updates.github."
+                    },
+                    "releaseNotesUrlPattern": {
+                      "type": "string",
+                      "description": "Release notes link. Same tokens. Empty uses updates.github.releaseNotesUrlPattern."
+                    },
+                    "privateKeyEnvVar": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Name of the environment variable holding the base64 EdDSA private key (Sparkle's generate_keys -x). Never put the key in the manifest."
+                    },
+                    "signUpdatePath": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Sparkle's sign_update. GP_SPARKLE_SIGN_UPDATE overrides it."
+                    }
+                  }
+                }
+              }
+            },
             "finderLayout": {
               "type": "string",
               "enum": [
