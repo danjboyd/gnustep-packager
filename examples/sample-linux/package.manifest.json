@@ -160,6 +160,11 @@
         "globalDefaults": {
           "GSFirstCommandKey": "Control_L"
         },
+        "keyBindings": [
+          {
+            "preset": "CommandWordMoves"
+          }
+        ],
         "defaultTheme": {
           "name": "Adwaita",
           "desktops": [

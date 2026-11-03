@@ -1170,6 +1170,43 @@
                     ]
                   }
                 },
+                "keyBindings": {
+                  "type": "array",
+                  "description": "Key binding files bundled under <systemRoot>/Library/KeyBindings and loaded after libs-gui's DefaultKeyBindings through GSKeyBindingsFiles.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "preset": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9]+$",
+                        "description": "A template shipped with gnustep-packager under templates/keybindings, for example CommandWordMoves."
+                      },
+                      "file": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A .dict file, relative to the manifest."
+                      },
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]+$",
+                        "description": "File name in KeyBindings without .dict. Defaults to the source's name. DefaultKeyBindings is refused."
+                      }
+                    },
+                    "oneOf": [
+                      {
+                        "required": [
+                          "preset"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "file"
+                        ]
+                      }
+                    ]
+                  }
+                },
                 "defaultTheme": {
                   "type": "object",
                   "additionalProperties": false,

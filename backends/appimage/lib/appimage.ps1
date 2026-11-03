@@ -290,6 +290,57 @@ function ConvertTo-GpAppImageGlobalDefaultEntries {
   )
 }
 
+function Get-GpAppImageKeyBindings {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [object[]]$Entries
+  )
+
+  $seen = @{}
+  return @(
+    foreach ($entry in @($Entries)) {
+      if (-not ($entry -is [System.Collections.IDictionary])) {
+        throw "backends.appimage.gnustepConfig.keyBindings entries are objects with 'preset' or 'file'."
+      }
+      $hasPreset = -not [string]::IsNullOrWhiteSpace([string]$entry["preset"])
+      $hasFile = -not [string]::IsNullOrWhiteSpace([string]$entry["file"])
+      if ($hasPreset -eq $hasFile) {
+        throw "Each backends.appimage.gnustepConfig.keyBindings entry needs exactly one of 'preset' or 'file'."
+      }
+      $source = if ($hasPreset) {
+        $preset = [string]$entry["preset"]
+        if ($preset -notmatch '^[A-Za-z0-9]+$') {
+          throw "backends.appimage.gnustepConfig.keyBindings preset '$preset' is not a valid name."
+        }
+        $presetPath = Join-Path (Join-Path (Join-Path (Get-GpToolRoot) "templates") "keybindings") ($preset + ".dict")
+        if (-not (Test-Path -LiteralPath $presetPath -PathType Leaf)) {
+          throw "backends.appimage.gnustepConfig.keyBindings preset '$preset' does not exist (templates/keybindings/$preset.dict)."
+        }
+        $presetPath
+      } else {
+        Resolve-GpManifestPath -Context $Context -RelativePath ([string]$entry["file"])
+      }
+      $name = if (-not [string]::IsNullOrWhiteSpace([string]$entry["name"])) {
+        [string]$entry["name"]
+      } else {
+        [System.IO.Path]::GetFileNameWithoutExtension($source)
+      }
+      if ($name -notmatch '^[A-Za-z0-9_-]+$') {
+        throw "backends.appimage.gnustepConfig.keyBindings name '$name' must be letters, digits, '-' or '_'."
+      }
+      if ($name -eq "DefaultKeyBindings") {
+        throw "backends.appimage.gnustepConfig.keyBindings cannot be named DefaultKeyBindings: it would replace libs-gui's stock bindings. Give it its own name."
+      }
+      if ($seen.ContainsKey($name)) {
+        throw "backends.appimage.gnustepConfig.keyBindings lists '$name' more than once."
+      }
+      $seen[$name] = $true
+      [pscustomobject]@{ Name = $name; SourcePath = $source }
+    }
+  )
+}
+
 function Get-GpAppImageConfig {
   param(
     [Parameter(Mandatory = $true)]
@@ -361,6 +412,27 @@ function Get-GpAppImageConfig {
       throw "backends.appimage.gnustepConfig.globalDefaults requires backends.appimage.gnustepConfig.systemRoot."
     }
     $gnustepGlobalDefaults = @(ConvertTo-GpAppImageGlobalDefaultEntries -Values $gnustepConfig["globalDefaults"])
+  }
+
+  # Key binding files go next to libs-gui's own DefaultKeyBindings.dict and load after it through
+  # GSKeyBindingsFiles. Writing a DefaultKeyBindings.dict of our own there would replace the stock
+  # one, so that name is refused.
+  $gnustepKeyBindings = @()
+  if ($gnustepConfig.Contains("keyBindings")) {
+    if ([string]::IsNullOrWhiteSpace($gnustepSystemRoot)) {
+      throw "backends.appimage.gnustepConfig.keyBindings requires backends.appimage.gnustepConfig.systemRoot."
+    }
+    $gnustepKeyBindings = @(Get-GpAppImageKeyBindings -Context $Context -Entries @($gnustepConfig["keyBindings"]))
+    if ($gnustepKeyBindings.Count -gt 0) {
+      if (@($gnustepGlobalDefaults | Where-Object { $_.Key -eq "GSKeyBindingsFiles" }).Count -gt 0) {
+        throw "backends.appimage.gnustepConfig.globalDefaults sets GSKeyBindingsFiles, which gnustepConfig.keyBindings writes. Use one or the other."
+      }
+      $gnustepGlobalDefaults = @($gnustepGlobalDefaults) + @([pscustomobject]@{
+        Key = "GSKeyBindingsFiles"
+        Type = "stringArray"
+        Value = [string[]](@("DefaultKeyBindings") + @($gnustepKeyBindings | ForEach-Object { $_.Name }))
+      })
+    }
   }
 
   # The user's GNUstep Library (~/GNUstep/Library) holds themes and bundles built against the
@@ -463,6 +535,7 @@ function Get-GpAppImageConfig {
       SystemRootRelative = $gnustepSystemRoot
       DefaultTheme = $gnustepDefaultTheme
       GlobalDefaults = @($gnustepGlobalDefaults)
+      KeyBindings = @($gnustepKeyBindings)
       UserLibraryRelative = if ($gnustepUserLibrary -eq "app") { "GNUstep/Library/AppImage/" + [string]$package["id"] } else { $null }
     }
     BundledFonts = @($bundledFonts)
@@ -963,6 +1036,10 @@ function Convert-GpPackagedDefaultToGnustepLiteral {
     "number" {
       return [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0}", $Entry.Value)
     }
+    "stringArray" {
+      $items = @(@($Entry.Value) | ForEach-Object { '"{0}"' -f ([string]$_).Replace('\', '\\').Replace('"', '\"') })
+      return ("({0})" -f [string]::Join(", ", $items))
+    }
     default {
       throw "Unsupported packaged default type for AppImage AppRun seeding: $($Entry.Type)"
     }
@@ -1451,6 +1528,19 @@ function Write-GpAppImageGnustepConfig {
 
   $layout = Get-GpAppImageGnustepConfigLayout -Config $Config
   $writtenPaths = [System.Collections.Generic.List[string]]::new()
+  $keyBindings = @($Config.GnustepConfig.KeyBindings)
+  if ($keyBindings.Count -gt 0) {
+    $keyBindingsDir = Ensure-GpDirectory -Path (Join-Path (Join-Path $systemRoot "Library") "KeyBindings")
+    foreach ($binding in $keyBindings) {
+      if (-not (Test-Path -LiteralPath $binding.SourcePath -PathType Leaf)) {
+        throw "backends.appimage.gnustepConfig.keyBindings file not found: $($binding.SourcePath)"
+      }
+      $target = Join-Path $keyBindingsDir ($binding.Name + ".dict")
+      Copy-Item -LiteralPath $binding.SourcePath -Destination $target -Force
+      $writtenPaths.Add($target) | Out-Null
+      Write-GpAppImageLogLine -LogPath $LogPath -Message ("Bundled key bindings {0} (loaded after DefaultKeyBindings)" -f $target)
+    }
+  }
   $plainDir = Ensure-GpDirectory -Path (Join-Path $usrRoot ($layout.PlainDirRelative -replace "/", [System.IO.Path]::DirectorySeparatorChar))
   $plainPath = Join-Path $plainDir "GNUstep.conf"
   Set-Content -Path $plainPath -Value (Get-GpAppImageGnustepConfigText -ConfigDirectory $plainDir -SystemRoot $systemRoot -UserLibraryRelative $Config.GnustepConfig.UserLibraryRelative) -Encoding ascii -NoNewline
