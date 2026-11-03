@@ -375,6 +375,8 @@ function Get-GpDmgConfig {
     $null
   }
 
+  $extraVolumeFiles = @(Get-GpDmgExtraVolumeFiles -Backend $backend -StageRoot $stageRoot -AppBundleName $appBundleName)
+
   $identity = [string](Get-GpDmgValue -Parent $signing -Key "identity" -Default "-")
   $entitlementsRelative = [string](Get-GpDmgValue -Parent $signing -Key "entitlementsPath" -Default "")
   $entitlementsPath = if (-not [string]::IsNullOrWhiteSpace($entitlementsRelative)) {
@@ -424,6 +426,8 @@ function Get-GpDmgConfig {
     BackgroundRelativePath = $(if ([string]::IsNullOrWhiteSpace($backgroundRelative)) { $null } else { $backgroundRelative })
     BackgroundPath = $backgroundPath
     BackgroundFileName = $(if ($backgroundPath) { Split-Path -Leaf $backgroundPath } else { $null })
+    ExtraVolumeFiles = [object[]]$extraVolumeFiles
+    ChecksumSidecar = [bool](Get-GpDmgValue -Parent $backend -Key "checksumSidecar" -Default $false)
     FinderLayout = $finderLayout
     FinderLayoutTimeoutSeconds = [int](Get-GpDmgValue -Parent $backend -Key "finderLayoutTimeoutSeconds" -Default 60)
     Window = [pscustomobject]@{
@@ -476,8 +480,67 @@ function Get-GpDmgConfig {
     Sidecars = [pscustomobject]@{
       MetadataPath = Get-GpArtifactSidecarPath -ArtifactPath $artifactPath -Suffix "metadata.json"
       DiagnosticsPath = Get-GpArtifactSidecarPath -ArtifactPath $artifactPath -Suffix "diagnostics.txt"
+      # <artifact>.dmg.sha256, the name and format `shasum -a 256 -c` expects.
+      ChecksumPath = ("{0}.sha256" -f $artifactPath)
     }
   }
+}
+
+# Extra files copied to the volume root next to the app, for example a note on
+# opening an unsigned app. Sources are stage-relative; destinations are plain
+# volume-root names and must not shadow what the backend itself writes.
+function Get-GpDmgExtraVolumeFiles {
+  param(
+    [System.Collections.IDictionary]$Backend,
+    [Parameter(Mandatory = $true)]
+    [string]$StageRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$AppBundleName
+  )
+
+  $entries = @(Get-GpDmgValue -Parent $Backend -Key "extraVolumeFiles" -Default @())
+  $reserved = @($AppBundleName, "Applications", ".background", ".DS_Store", ".fseventsd", ".Trashes")
+  $seen = @{}
+  $result = [System.Collections.Generic.List[object]]::new()
+  foreach ($entry in $entries) {
+    if (-not ($entry -is [System.Collections.IDictionary]) -or [string]::IsNullOrWhiteSpace([string]$entry["source"])) {
+      throw "Each backends.dmg.extraVolumeFiles entry needs a stage-relative 'source'."
+    }
+    $sourceRelative = [string]$entry["source"]
+    $destination = if ($entry.Contains("destination") -and -not [string]::IsNullOrWhiteSpace([string]$entry["destination"])) {
+      [string]$entry["destination"]
+    } else {
+      Split-Path -Leaf ($sourceRelative.TrimEnd("/", "\"))
+    }
+    if ($destination -match '[/\\]' -or $destination -in @(".", "..")) {
+      throw "backends.dmg.extraVolumeFiles destination '$destination' must be a plain name at the volume root."
+    }
+    if ($reserved -contains $destination) {
+      throw "backends.dmg.extraVolumeFiles destination '$destination' is reserved by the DMG backend."
+    }
+    if ($seen.ContainsKey($destination)) {
+      throw "backends.dmg.extraVolumeFiles lists destination '$destination' more than once."
+    }
+    $seen[$destination] = $true
+    $result.Add([pscustomobject]@{
+      SourceRelativePath = $sourceRelative
+      SourcePath = Resolve-GpPathRelativeToBase -BasePath $StageRoot -Path $sourceRelative
+      Destination = $destination
+    }) | Out-Null
+  }
+  return $result.ToArray()
+}
+
+function Write-GpDmgChecksumSidecar {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Config
+  )
+
+  $hash = Get-GpFileSha256 -Path $Config.ArtifactPath
+  $line = "{0}  {1}`n" -f $hash, (Split-Path -Leaf $Config.ArtifactPath)
+  [System.IO.File]::WriteAllText($Config.Sidecars.ChecksumPath, $line, [System.Text.UTF8Encoding]::new($false))
+  return $Config.Sidecars.ChecksumPath
 }
 
 function Get-GpDmgWorkPaths {
@@ -1042,6 +1105,7 @@ function Write-GpDmgArtifactMetadata {
       }
       metadata = [ordered]@{ path = $Config.Sidecars.MetadataPath }
       diagnostics = [ordered]@{ path = $Config.Sidecars.DiagnosticsPath }
+      checksum = $(if ($Config.ChecksumSidecar) { [ordered]@{ path = $Config.Sidecars.ChecksumPath } } else { $null })
     }
     app = [ordered]@{
       stagedPath = $Config.StagedAppPath
@@ -1057,6 +1121,7 @@ function Write-GpDmgArtifactMetadata {
     layout = [ordered]@{
       applicationsLink = [bool]$Config.ApplicationsLink
       backgroundImage = $Config.BackgroundRelativePath
+      extraVolumeFiles = [object[]]@($Config.ExtraVolumeFiles | ForEach-Object { [ordered]@{ source = $_.SourceRelativePath; destination = $_.Destination } })
       finderLayoutMode = $Config.FinderLayout
       finderLayoutApplied = [bool]$Details["finderLayoutApplied"]
       finderLayoutReason = $Details["finderLayoutReason"]
@@ -1190,6 +1255,11 @@ function Invoke-GpDmgPackage {
   if ($null -ne $config.BackgroundPath -and -not (Test-Path -LiteralPath $config.BackgroundPath -PathType Leaf)) {
     throw "Configured backends.dmg.backgroundImageRelativePath does not exist in the staged payload: $($config.BackgroundPath)"
   }
+  foreach ($extra in @($config.ExtraVolumeFiles)) {
+    if (-not (Test-Path -LiteralPath $extra.SourcePath)) {
+      throw "Configured backends.dmg.extraVolumeFiles source does not exist in the staged payload: $($extra.SourcePath)"
+    }
+  }
 
   $workPaths = Get-GpDmgWorkPaths -Config $config
   Ensure-GpDirectory -Path $workPaths.Root | Out-Null
@@ -1263,6 +1333,14 @@ function Invoke-GpDmgPackage {
     }
     if ($config.NoticeReport.Enabled) {
       Write-GpDmgNoticeReport -Context $Context -Config $config -VolumeRoot $workPaths.VolumeRoot -LogPath $LogPath | Out-Null
+    }
+    foreach ($extra in @($config.ExtraVolumeFiles)) {
+      $extraTarget = Join-Path $workPaths.VolumeRoot $extra.Destination
+      if (Test-Path -LiteralPath $extraTarget) {
+        throw "backends.dmg.extraVolumeFiles destination '$($extra.Destination)' collides with a file the DMG backend already wrote."
+      }
+      Invoke-GpDmgTool -FilePath "ditto" -ArgumentList @($extra.SourcePath, $extraTarget) -LogPath $LogPath -Quiet | Out-Null
+      Write-GpDmgLogLine -LogPath $LogPath -Message ("Added volume file {0} from {1}" -f $extra.Destination, $extra.SourceRelativePath)
     }
 
     # 2. Read-write image from the folder, with room for Finder's .DS_Store.
@@ -1349,6 +1427,15 @@ function Invoke-GpDmgPackage {
     }
   }
 
+  $checksumPath = $null
+  if ($config.ChecksumSidecar) {
+    # After signing and stapling, both of which rewrite the image.
+    $checksumPath = Write-GpDmgChecksumSidecar -Config $config
+    Write-GpDmgLogLine -LogPath $LogPath -Message ("Wrote checksum sidecar {0}" -f $checksumPath)
+  } elseif (Test-Path -LiteralPath $config.Sidecars.ChecksumPath) {
+    Remove-Item -Force -LiteralPath $config.Sidecars.ChecksumPath
+  }
+
   $details["warnings"] = [string[]]@($details["warnings"].ToArray())
   $metadataPath = Write-GpDmgArtifactMetadata -Context $Context -Config $config -Details $details -LogPath $LogPath
   $diagnosticsPath = Write-GpDmgDiagnosticsSummary -Context $Context -Config $config -Details $details -LogPath $LogPath
@@ -1362,6 +1449,7 @@ function Invoke-GpDmgPackage {
     VolumeName = $config.VolumeName
     MetadataPath = $metadataPath
     DiagnosticsPath = $diagnosticsPath
+    ChecksumPath = $checksumPath
     FinderLayoutApplied = [bool]$details["finderLayoutApplied"]
     FinderLayoutReason = $details["finderLayoutReason"]
     NotarizationStatus = [string]$details["notarization"]["status"]
@@ -1472,6 +1560,15 @@ function Invoke-GpDmgValidation {
 
   $verify = Invoke-GpDmgTool -FilePath "hdiutil" -ArgumentList @("verify", $config.ArtifactPath) -LogPath $LogPath -AllowFailure -Quiet
   Add-GpDmgCheck -Name "hdiutil-verify" -Status $(if ($verify.ExitCode -eq 0) { "pass" } else { "fail" }) -Detail $(if ($verify.ExitCode -eq 0) { "checksum valid" } else { "exit $($verify.ExitCode)" })
+  if ($config.ChecksumSidecar) {
+    if (-not (Test-Path -LiteralPath $config.Sidecars.ChecksumPath -PathType Leaf)) {
+      Add-GpDmgCheck -Name "checksum-sidecar" -Status "fail" -Detail ("missing {0}" -f (Split-Path -Leaf $config.Sidecars.ChecksumPath))
+    } else {
+      $recorded = ((Get-Content -Raw -LiteralPath $config.Sidecars.ChecksumPath) -split '\s+')[0].ToLowerInvariant()
+      $actual = Get-GpFileSha256 -Path $config.ArtifactPath
+      Add-GpDmgCheck -Name "checksum-sidecar" -Status $(if ($recorded -eq $actual) { "pass" } else { "fail" }) -Detail $(if ($recorded -eq $actual) { "matches the image" } else { "recorded $recorded, actual $actual" })
+    }
+  }
 
   $imageInfo = Invoke-GpDmgTool -FilePath "hdiutil" -ArgumentList @("imageinfo", "-plist", $config.ArtifactPath) -LogPath $LogPath -AllowFailure -Quiet
   $actualFormat = $null
@@ -1516,6 +1613,10 @@ function Invoke-GpDmgValidation {
     if ($config.BackgroundFileName) {
       $backgroundExists = Test-Path -LiteralPath (Join-Path $mount.MountPoint (".background/{0}" -f $config.BackgroundFileName))
       Add-GpDmgCheck -Name "background" -Status $(if ($backgroundExists) { "pass" } else { "fail" }) -Detail (".background/{0}" -f $config.BackgroundFileName)
+    }
+    foreach ($extra in @($config.ExtraVolumeFiles)) {
+      $extraExists = Test-Path -LiteralPath (Join-Path $mount.MountPoint $extra.Destination)
+      Add-GpDmgCheck -Name ("volume-file:{0}" -f $extra.Destination) -Status $(if ($extraExists) { "pass" } else { "fail" }) -Detail $extra.Destination
     }
     $hasDsStore = Test-Path -LiteralPath (Join-Path $mount.MountPoint ".DS_Store")
     Add-GpDmgCheck -Name "finder-layout" -Status "info" -Detail $(if ($hasDsStore) { ".DS_Store present (custom window layout)" } else { "no .DS_Store (Finder default window)" })

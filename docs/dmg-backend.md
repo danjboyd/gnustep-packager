@@ -127,6 +127,8 @@ Enable the backend under `backends.dmg`. All fields are optional except
 | `format` | `UDZO` (zlib level 9, default, mounts everywhere) or `ULFO` (lzfse, smaller, macOS 10.11+) |
 | `applicationsLink` | Adds the `Applications -> /Applications` symlink |
 | `backgroundImageRelativePath` | Stage-relative PNG/TIFF copied to `.background/` and used as the window background (needs the Finder layout) |
+| `extraVolumeFiles` | Files or folders copied to the volume root next to the app, for example a note on opening an unsigned app. `source` is stage-relative; `destination` is a plain name at the volume root and defaults to the source's file name. The app bundle, `Applications`, `.background`, `.DS_Store` and duplicate names are rejected. Validation checks each one is on the mounted volume |
+| `checksumSidecar` | Writes `<artifact>.dmg.sha256` (`<hash>  <file name>`, the format `shasum -a 256 -c` checks) after signing and stapling. Validation checks it matches the image. Default `false`; the hash is always in `.metadata.json` |
 | `finderLayout` | `auto`: lay out the window when a GUI session and Finder automation permission are available, else skip with a log line. `applescript`: always try, fail packaging if it fails. `off`: never. `GP_DMG_FINDER_LAYOUT` overrides it per run |
 | `window.*` | Window bounds, icon and text size, and icon positions (app on the left, Applications on the right by default) |
 | `noticeReport` | When enabled, writes a `THIRD-PARTY-NOTICES.txt` at the volume root from `compliance.runtimeNotices`, with the staged license texts inline |
@@ -223,12 +225,14 @@ Reference fixture:
 
 ## What `validate` Does
 1. `hdiutil verify` (checksum) and `hdiutil imageinfo` (format matches the
-   manifest).
+   manifest). With `checksumSidecar`, also checks that `<artifact>.dmg.sha256`
+   matches the image.
 2. Records the image's signature and whether a notarization ticket is stapled.
 3. Attaches the image read-only, `-nobrowse`, at a temporary mount point under
    the validation log directory (invisible to Finder).
 4. Checks the app bundle, its executable, the `Applications` link, the
-   background, and whether a `.DS_Store` layout is present.
+   background, each `extraVolumeFiles` destination, and whether a
+   `.DS_Store` layout is present.
 5. `codesign --verify --deep --strict` on the mounted app, plus the signature
    details (ad-hoc or authorities, team, hardened runtime).
 6. `spctl --assess --type execute` on the mounted app. A rejection is recorded
@@ -253,6 +257,7 @@ dist/packages/
   <name>-<version>-macos-<arch>.dmg
   <name>-<version>-macos-<arch>.metadata.json
   <name>-<version>-macos-<arch>.diagnostics.txt
+  <name>-<version>-macos-<arch>.dmg.sha256   (checksumSidecar)
 dist/logs/package-dmg/<timestamp>.log
 dist/logs/validate-dmg/<timestamp>.log
 dist/logs/validate-dmg/validation-summary.json
@@ -267,6 +272,7 @@ Volume contents:
 Applications -> /Applications
 THIRD-PARTY-NOTICES.txt     (noticeReport.enabled)
 .background/<image>         (backgroundImageRelativePath)
+<destination>               (each extraVolumeFiles entry)
 .DS_Store                   (Finder layout applied)
 ```
 

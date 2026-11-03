@@ -1347,6 +1347,34 @@
               "type": "string",
               "description": "Stage-relative background image (PNG or TIFF). Empty for none."
             },
+            "extraVolumeFiles": {
+              "type": "array",
+              "description": "Extra files or folders copied to the volume root next to the app, such as a note on opening an unsigned app.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "source"
+                ],
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Stage-relative file or folder."
+                  },
+                  "destination": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[^/\\\\]+$",
+                    "description": "Name at the volume root. Defaults to the source's file name. Must not be the app bundle, Applications, .background or .DS_Store."
+                  }
+                }
+              }
+            },
+            "checksumSidecar": {
+              "type": "boolean",
+              "description": "Write <artifact>.dmg.sha256 in `shasum -a 256 -c` format after signing and stapling."
+            },
             "finderLayout": {
               "type": "string",
               "enum": [
