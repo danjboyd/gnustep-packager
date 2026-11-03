@@ -274,6 +274,12 @@ Describe "AppImage backend" {
         $second = Invoke-GpTestAppRun -Environment @{ XDG_RUNTIME_DIR = $runtimeDir }
         Assert-GpEqual -Actual $second.Dir -Expected $expected -Message "Every launch should get the same directory, so they share it."
 
+        # Started from another packaged app, it gets its own directory, not the parent's.
+        $otherApp = Join-Path $tempRoot "gp-org-example-other-$uid"
+        New-Item -ItemType Directory -Force -Path $otherApp | Out-Null
+        $child = Invoke-GpTestAppRun -Environment @{ XDG_RUNTIME_DIR = $runtimeDir; GP_USER_RUNTIME_DIR = $otherApp }
+        Assert-GpEqual -Actual $child.Dir -Expected $expected -Message "An inherited directory of another app should not be used."
+
         # A directory that others can open is made private again.
         & chmod 0755 $expected
         $reopened = Invoke-GpTestAppRun -Environment @{ XDG_RUNTIME_DIR = $runtimeDir }
@@ -291,6 +297,14 @@ Describe "AppImage backend" {
             Assert-GpTrue -Condition ($fallback.Dir -like "$tmpRoot/gp-com-example-samplegnusteplinuxapp-*") -Message "A symlink in /tmp should be passed over for a fresh directory. Got: $($fallback.Dir)"
             Assert-GpEqual -Actual $fallback.Mode -Expected "700" -Message "The fresh directory should be private."
             Assert-GpEqual -Actual @(Get-ChildItem -Force $decoy).Count -Expected 0 -Message "Nothing should be made through the symlink."
+
+            # A process the app starts through AppRun again gets the same fresh directory.
+            $relaunch = Invoke-GpTestAppRun -Environment @{ TMPDIR = $tmpRoot; GP_USER_RUNTIME_DIR = $fallback.Dir }
+            Assert-GpEqual -Actual $relaunch.Dir -Expected $fallback.Dir -Message "A relaunch should keep the directory it was given, so the app's processes share it."
+
+            # When no directory can be made at all, the launch goes on without the value.
+            $failed = Invoke-GpTestAppRun -Environment @{ TMPDIR = (Join-Path $tempRoot "missing") }
+            Assert-GpEqual -Actual $failed.Dir -Expected "" -Message "Without a directory, a value using {@userRuntimeDir} should stay unset."
           } finally {
             Remove-Item -Force $planted
           }

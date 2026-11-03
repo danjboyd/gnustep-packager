@@ -27,6 +27,10 @@ The AppImage backend renders these shared tokens into shell expressions:
   app's own for the user, `${XDG_RUNTIME_DIR:-/tmp}/gp-<package id>-<uid>`, which `AppRun`
   creates with mode 0700 and reuses at every launch. A symlink in its place, or a directory
   the user doesn't own (in a shared `/tmp`), is passed over for a fresh `mktemp -d` one.
+  `AppRun` exports `GP_USER_RUNTIME_DIR`, and a relaunch through `AppRun` keeps a directory
+  named for the same app, so the app's processes share even a fresh one; another packaged
+  app started from it gets its own. If no directory can be made, values that use the token
+  are left unset and the app still starts.
   Pointing `TMP` at it gives gnustep-base a temporary directory, and so message port names,
   of the app's own: the app then starts its bundled `gpbs` and `gdnc` instead of talking to a
   distribution GNUstep's, which register under the same names.
