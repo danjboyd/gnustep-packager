@@ -28,6 +28,22 @@ Legend:
 | Adwaita ThemeDemo | none | none | n/a | none | `Examples/ThemeDemo` in plugins-themes-Adwaita |
 | WinUITheme ThemeDemo | n/a | none | n/a | none | `Examples/ThemeDemo` in plugins-themes-winuitheme |
 
+## Command-arrow word moves (PR #83)
+
+`gnustepConfig.keyBindings` with the `CommandWordMoves` preset belongs next to
+the Ctrl=Command remap (`GSFirstCommandKey: "Control_L"`). These apps set the
+remap on Linux and would turn it on once the libs-gui Command-modifier carry
+lands:
+
+| App | Where it sets the remap today | Change to turn it on |
+| --- | --- | --- |
+| ScreenshotTool | `backends.appimage.gnustepConfig.globalDefaults` | Add `keyBindings: [{ "preset": "CommandWordMoves" }]` |
+| ObjcMarkdown | `packagedDefaults.appDomain` | Add `gnustepConfig.systemRoot` and `keyBindings` |
+| LinDirStat | `scripts/package-stage.sh` (hand-written defaults) | Move the remap into `gnustepConfig`, then add `keyBindings` |
+| PerformanceDashboard | `scripts/package-stage.sh` (hand-written defaults) | Same as LinDirStat |
+
+No app sets the remap for MSI, so Windows is left out for now.
+
 ## Non-desktop consumers
 
 | Consumer | Format today | Packager path | Notes |
