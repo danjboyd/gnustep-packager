@@ -44,6 +44,7 @@
     "env": {
       "GP_FIXTURE_DEFAULTS_DOMAIN": "com.example.SampleGNUstepLinuxApp",
       "GP_FIXTURE_NAME": "SampleGNUstepLinuxApp",
+      "GP_FIXTURE_RUNTIME_DIR": "{@userRuntimeDir}",
       "GSTheme": {
         "value": "Adwaita",
         "policy": "ifUnset"

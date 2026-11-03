@@ -1066,6 +1066,7 @@ function Convert-GpAppImageValueToShellExpression {
     "{@appRoot}" = '${APP_ROOT}'
     "{@runtimeRoot}" = '${RUNTIME_ROOT}'
     "{@metadataRoot}" = '${METADATA_ROOT}'
+    "{@userRuntimeDir}" = '${GP_USER_RUNTIME_DIR}'
   }
 
   $resolved = [string]$Value
@@ -1700,6 +1701,39 @@ function Write-GpAppImageAppRun {
   }
   $lines.Add('export PATH') | Out-Null
 
+  $usesUserRuntimeDir = @(
+    foreach ($key in $environment.Keys) {
+      $entry = $environment[$key]
+      $value = if (($entry -is [System.Collections.IDictionary]) -and $entry.Contains("value")) { [string]$entry["value"] } else { [string]$entry }
+      if ($value.Contains("{@userRuntimeDir}")) { $key }
+    }
+  ).Count -gt 0
+  if ($usesUserRuntimeDir) {
+    # {@userRuntimeDir}: a directory of this app's own for the user, kept between launches, so
+    # launches share it and other apps don't. Pointing TMP at it gives GNUstep a temporary
+    # directory, and with it message port names, of its own: the app then starts its own gpbs
+    # and gdnc instead of using a distribution GNUstep's (gnustep-gui names its pasteboard
+    # server the same in every version). It goes in XDG_RUNTIME_DIR, which only the user can
+    # reach; in /tmp, a directory someone else made or a symlink is not used, and a fresh one
+    # is made instead. An app relaunched through AppRun keeps the directory it was given, so
+    # even a fresh one is shared. If none can be made, the values that use it aren't set.
+    $runtimeDirName = "gp-" + (Convert-GpAppImageIdentifierFragment -Value $Config.PackageId)
+    # Only a directory named for this app is kept: another packaged app started from this one
+    # inherits the variable and must get its own.
+    $lines.Add(('case "${GP_USER_RUNTIME_DIR:-}" in */' + $runtimeDirName + '-*) ;; *) GP_USER_RUNTIME_DIR="" ;; esac')) | Out-Null
+    $lines.Add('if [ -z "$GP_USER_RUNTIME_DIR" ] || [ -L "$GP_USER_RUNTIME_DIR" ] || [ ! -d "$GP_USER_RUNTIME_DIR" ] || [ ! -O "$GP_USER_RUNTIME_DIR" ]; then') | Out-Null
+    $lines.Add(('  GP_USER_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/' + $runtimeDirName + '-$(id -u)"')) | Out-Null
+    $lines.Add('  if [ -L "$GP_USER_RUNTIME_DIR" ] || ! mkdir -p -m 0700 "$GP_USER_RUNTIME_DIR" 2>/dev/null || [ ! -O "$GP_USER_RUNTIME_DIR" ]; then') | Out-Null
+    $lines.Add(('    GP_USER_RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/' + $runtimeDirName + '-XXXXXX" 2>/dev/null)" || GP_USER_RUNTIME_DIR=""')) | Out-Null
+    $lines.Add('  fi') | Out-Null
+    $lines.Add('fi') | Out-Null
+    $lines.Add('if [ -n "$GP_USER_RUNTIME_DIR" ] && chmod 0700 "$GP_USER_RUNTIME_DIR" 2>/dev/null; then') | Out-Null
+    $lines.Add('  export GP_USER_RUNTIME_DIR') | Out-Null
+    $lines.Add('else') | Out-Null
+    $lines.Add('  GP_USER_RUNTIME_DIR=""') | Out-Null
+    $lines.Add('fi') | Out-Null
+  }
+
   foreach ($key in ($environment.Keys | Sort-Object)) {
     $entry = $environment[$key]
     $value = if (($entry -is [System.Collections.IDictionary]) -and $entry.Contains("value")) { [string]$entry["value"] } else { [string]$entry }
@@ -1709,6 +1743,10 @@ function Write-GpAppImageAppRun {
       "override"
     }
     $valueExpression = Convert-GpAppImageValueToShellExpression -Value $value
+    $needsUserRuntimeDir = $value.Contains("{@userRuntimeDir}")
+    if ($needsUserRuntimeDir) {
+      $lines.Add('if [ -n "$GP_USER_RUNTIME_DIR" ]; then') | Out-Null
+    }
 
     switch ($policy) {
       "override" {
@@ -1745,6 +1783,9 @@ function Write-GpAppImageAppRun {
       default {
         throw "Unsupported AppImage launch environment policy '$policy' for key '$key'."
       }
+    }
+    if ($needsUserRuntimeDir) {
+      $lines.Add('fi') | Out-Null
     }
   }
 
