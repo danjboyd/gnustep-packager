@@ -17,6 +17,13 @@
   variable over stdin. Packaging skips the appcast, or fails when it is
   `required`, if there is no key or no `sign_update`. Validation checks the
   enclosure length against the image.
+- AppImage backend: `backends.appimage.gnustepConfig.keyBindings` bundles key
+  binding files under `<systemRoot>/Library/KeyBindings` and loads them after
+  libs-gui's `DefaultKeyBindings` through `GSKeyBindingsFiles` in
+  `GlobalDefaults.plist`. The new `CommandWordMoves` preset
+  (`templates/keybindings/`) puts word and document moves on Command-arrow for
+  apps that remap Ctrl to Command. It needs a libs-gui that handles the
+  Command modifier in key bindings.
 
 ## v0.1.6
 

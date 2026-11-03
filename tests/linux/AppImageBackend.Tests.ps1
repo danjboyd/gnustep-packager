@@ -220,6 +220,12 @@ Describe "AppImage backend" {
       Assert-GpMatch -Actual $themedDefaults -Pattern '"GSFirstCommandKey" = "Control_R";' -Message "A theme default should override a global default with the same key."
       Assert-GpTrue -Condition ($themedDefaults -notmatch 'Control_L') -Message "The overridden global value should not also appear in the themed config."
       $plainDefaults = Get-Content -Raw -Path (Join-Path (Split-Path -Parent $script:packageResult.GnustepConfigPath) "GlobalDefaults.plist")
+      foreach ($defaultsText in @($plainDefaults, $themedDefaults)) {
+        Assert-GpMatch -Actual $defaultsText -Pattern ([regex]::Escape('"GSKeyBindingsFiles" = ("DefaultKeyBindings", "CommandWordMoves");')) -Message "keyBindings should load the stock bindings first, then the preset, in both configs."
+      }
+      $keyBindingsDir = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $script:packageResult.GnustepConfigPath) "../../System/Library/KeyBindings"))
+      Assert-GpTrue -Condition (Test-Path -LiteralPath (Join-Path $keyBindingsDir "CommandWordMoves.dict")) -Message "The preset should be bundled under <systemRoot>/Library/KeyBindings."
+      Assert-GpMatch -Actual (Get-Content -Raw -LiteralPath (Join-Path $keyBindingsDir "CommandWordMoves.dict")) -Pattern ([regex]::Escape('"Command-LeftArrow" = "moveWordLeft:";')) -Message "The bundled file should be the preset."
       Assert-GpMatch -Actual $plainDefaults -Pattern '"GSFirstCommandKey" = "Control_L";' -Message "The plain config should carry the manifest's global defaults."
       Assert-GpTrue -Condition ($plainDefaults -notmatch 'GSTheme') -Message "The plain config should set no theme."
       Assert-GpTrue -Condition ($plainDefaults -notmatch 'GSX11HandlesWindowDecorations') -Message "The theme's own defaults should not apply without the theme."
