@@ -1,8 +1,21 @@
 # Changelog
 
-## Unreleased
+## v0.1.7
+
+### Changed
+- The docs and `examples/downstream/` workflows pin `@v0.1.7`.
 
 ### Added
+- AppImage backend: the launch-environment token `{@userRuntimeDir}` expands
+  to a directory of the app's own for the user,
+  `${XDG_RUNTIME_DIR:-/tmp}/gp-<package id>-<uid>`, which `AppRun` creates with
+  mode 0700 and reuses at every launch (a symlink, or a directory the user
+  doesn't own, gets a fresh `mktemp -d` one; a relaunch through `AppRun`
+  keeps it). Setting `TMP` and `TEMP` to it under
+  `platformOverrides.linux.launch.env` gives a GNUstep app message ports of
+  its own, so it starts its bundled `gpbs` and `gdnc` instead of using a
+  distribution GNUstep's. If no directory can be made, values that use the
+  token are left unset. AppImage only: other backends leave it as written.
 - DMG backend: `backends.dmg.extraVolumeFiles` copies stage-relative files or
   folders to the volume root next to the app, such as a note on opening an
   unsigned app. Reserved names (the app bundle, `Applications`, `.background`,
