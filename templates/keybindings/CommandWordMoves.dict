@@ -1,0 +1,24 @@
+{ /* -*-c-*- */
+  /* Word and document moves on the Command key, for apps that remap Ctrl to
+     Command (GSFirstCommandKey = Control_L). The stock word moves sit on
+     Alternate-arrow, which that remap puts on Super, where the desktop
+     usually takes it. Loaded after DefaultKeyBindings through
+     GSKeyBindingsFiles, so the stock bindings stay in place.
+
+     Needs a libs-gui that parses and matches the Command modifier in key
+     bindings. Older libs-gui logs "unknown modifier 'Command' ignored"
+     for each entry and skips it. */
+
+  "Command-LeftArrow" = "moveWordLeft:";
+  "Command-RightArrow" = "moveWordRight:";
+  "Command-Shift-LeftArrow" = "moveWordLeftAndModifySelection:";
+  "Command-Shift-RightArrow" = "moveWordRightAndModifySelection:";
+
+  "Command-Home" = "moveToBeginningOfDocument:";
+  "Command-End" = "moveToEndOfDocument:";
+  "Command-Shift-Home" = "moveToBeginningOfDocumentAndModifySelection:";
+  "Command-Shift-End" = "moveToEndOfDocumentAndModifySelection:";
+
+  "Command-Backspace" = "deleteWordBackward:";
+  "Command-Delete" = "deleteWordForward:";
+}

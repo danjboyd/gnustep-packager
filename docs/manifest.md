@@ -482,6 +482,25 @@ AppImage GNUstep configuration (`gnustepConfig`):
   Command key) or `NSMenuInterfaceStyle`. They rank below the user's own
   defaults, so a user's setting still wins, and nothing is written to the
   user's defaults database.
+- `keyBindings`
+  Key binding files to bundle, each `{ "preset": "<Name>" }` (a template from
+  this repo's `templates/keybindings/`) or `{ "file": "<path>" }` (relative to
+  the manifest), with an optional `name`. Each is copied to
+  `<systemRoot>/Library/KeyBindings/<name>.dict`, and `GlobalDefaults.plist`
+  gets `GSKeyBindingsFiles = ("DefaultKeyBindings", "<name>", ...)`, so
+  libs-gui loads its stock bindings first and these on top. The name
+  `DefaultKeyBindings` is refused because it would replace the stock file, and
+  so is setting `GSKeyBindingsFiles` in `globalDefaults` at the same time. A
+  user's own `GSKeyBindingsFiles` default still wins.
+
+  The `CommandWordMoves` preset is for apps that remap Ctrl to Command
+  (`GSFirstCommandKey: "Control_L"`). It puts word moves on Command-Left/Right
+  (with Shift to extend the selection), document start and end on
+  Command-Home/End, and word deletes on Command-Backspace/Delete. Under that
+  remap the stock word moves sit on Alternate-arrow, which is Super, and the
+  desktop usually takes it. It needs a libs-gui that parses and matches the
+  Command modifier in key bindings. Older libs-gui logs
+  `unknown modifier 'Command' ignored` for each entry and skips it.
 - `defaultTheme.name`
   A theme bundled under `<systemRoot>/Library/Themes/<name>.theme` to use as
   the default `GSTheme`, through the same `GlobalDefaults.plist`.

@@ -213,6 +213,7 @@ Fixtures for the other backends live in `examples/sample-gui` (Windows MSI) and
 - `scripts/`: the `gnustep-packager.ps1` CLI, the pipeline wrapper, and shared libraries
 - `schemas/`: the manifest JSON Schema
 - `defaults/`: built-in defaults and profiles
+- `templates/`: reusable files manifests can name, such as key binding presets (`templates/keybindings/`)
 - `backends/msi/`, `backends/appimage/`, `backends/dmg/`: backend implementations
 - `updater/`: the Objective-C updater library, UI, and update helper
 - `examples/`: reference fixtures and downstream templates
