@@ -14,6 +14,8 @@
   WinUITheme as an MSI.
 - `examples/downstream/gnustep-apps`: example AppImage setups for Gorm,
   ProjectCenter and GWorkspace, built from upstream tags.
+- The test suite now validates every manifest under `examples/` against the
+  schema and the validator.
 
 ### Fixed
 - Theme inputs: the default install command now names its install root in full.
