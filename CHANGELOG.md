@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `examples/downstream/gnustep-apps`: example AppImage setups for Gorm,
+  ProjectCenter and GWorkspace, built from upstream tags.
+
 ## v0.1.7
 
 ### Changed

@@ -12,6 +12,8 @@ Legend:
   scripts rather than gnustep-packager
 - **configured**: the manifest or workflow has it, but no released artifact
   exists yet
+- **example**: `examples/downstream/` has a tested setup, but no repo uses it
+  yet
 - **none**: no path today
 - *(CI)*: the evidence comes from CI runs and release assets only; nobody ran
   it by hand on a local host (every DMG cell)
@@ -27,6 +29,9 @@ Legend:
 | SpreadsheetApp | configured | configured (`release-msi.yml`) | none | reusable workflow `@main` (unpinned) | No release yet |
 | Adwaita ThemeDemo | none | none | n/a | none | `Examples/ThemeDemo` in plugins-themes-Adwaita |
 | WinUITheme ThemeDemo | n/a | none | n/a | none | `Examples/ThemeDemo` in plugins-themes-winuitheme |
+| Gorm | example (`gnustep-apps/gorm`) | none | none | none | Upstream GNUstep app, tag `gorm-1_5_0` |
+| ProjectCenter | example (`gnustep-apps/projectcenter`) | none | none | none | Upstream GNUstep app, tag `projectcenter-0_7_0` |
+| GWorkspace | example (`gnustep-apps/gworkspace`) | none | none | none | Upstream GNUstep app, tag `gworkspace-1_0_0` |
 
 ## Command-arrow word moves (PR #83)
 
