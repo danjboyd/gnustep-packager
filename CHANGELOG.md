@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Updater: automatic checks could stop west of UTC. gnustep-base reads a plist
+  date back shifted by the zone's offset, so the stored last check time moved on
+  every read and write of the defaults, into the future, where no check was due
+  until real time passed it. It's now stored as seconds since 1970, under
+  `lastCheckTime`, and a time in the future counts as due. The old
+  `lastCheckDate` is ignored and removed, so one automatic check runs after
+  updating.
+
 ## v0.1.7
 
 ### Changed

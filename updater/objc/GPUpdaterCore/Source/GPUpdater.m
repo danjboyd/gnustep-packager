@@ -581,8 +581,8 @@ static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
   return [NSString stringWithFormat:@"%@%@", _prefix, suffix];
 }
 
-// Seconds since 1970, not an NSDate: on Windows, gnustep-base reads a plist date back shifted by the
-// zone's offset, so one stored as a date moved on every read and write of the defaults. The old
+// Seconds since 1970, not an NSDate: gnustep-base reads a plist date back shifted by the zone's
+// offset, so one stored as a date moved on every read and write of the defaults. The old
 // "lastCheckDate" key can't be trusted, so it's ignored, which makes one check due, and goes with
 // the next time stored.
 - (NSDate *)lastCheckDate {

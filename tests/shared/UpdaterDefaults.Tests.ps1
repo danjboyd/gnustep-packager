@@ -83,7 +83,7 @@ Describe "Updater defaults" {
       # gnustep-base takes the home directory from passwd unless GNUSTEP_HOME is set.
       $startInfo.Environment["GNUSTEP_HOME"] = $GnustepHome
       $startInfo.Environment["HOME"] = $GnustepHome
-      # West of UTC: the zone gnustep-base shifted stored dates by on Windows (see last-check-probe).
+      # West of UTC: gnustep-base reads a stored date back shifted by the offset (see last-check-probe).
       $startInfo.Environment["TZ"] = "America/Chicago"
       $startInfo.Environment["GNUSTEP_TZ"] = "America/Chicago"
       $process = [System.Diagnostics.Process]::Start($startInfo)
