@@ -255,6 +255,12 @@ Important fields:
   after a backend's smoke launch first sees it (default 5). An app that
   throws while initialising is briefly running first.
 - `logs.retainOnSuccess`
+- `fetchesHttps`: whether the app fetches https through GNUstep. It defaults to
+  `updates.enabled`. For such an app, AppImage and MSI validation warn when the
+  package has no `GSTLS/ca-certificates.crt` from gnustep-base and no
+  `GS_TLS_CA_FILE`, `SSL_CERT_FILE` or `GSTLSCAFile` setting. Strict TLS
+  (gnustep-cli v0.1.5) refuses connections when no trusted authorities can be
+  read. It's a warning because the target's system store may be enough.
 - `packageContract.requiredContent`
 - `packageContract.requiredPaths`
 - `packageContract.forbiddenFiles`

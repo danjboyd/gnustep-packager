@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- AppImage and MSI validation warn when an app that fetches https has no CA
+  bundle in the package and no `GS_TLS_CA_FILE`, `SSL_CERT_FILE` or `GSTLSCAFile`
+  setting. `validation.fetchesHttps` declares whether an app does; it defaults
+  to `updates.enabled`.
+
 ## v0.1.7
 
 ### Changed
