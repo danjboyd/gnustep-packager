@@ -1,0 +1,113 @@
+{
+  "$schema": "https://raw.githubusercontent.com/danjboyd/gnustep-packager/v0.1.7/schemas/gnustep-packager.schema.json",
+  "schemaVersion": 1,
+  "profiles": [
+    "gnustep-gui"
+  ],
+  "hostDependencies": {
+    "linux": {
+      "aptPackages": [
+        "imagemagick",
+        "file"
+      ]
+    }
+  },
+  "package": {
+    "id": "org.gnustep.ProjectCenter",
+    "name": "ProjectCenter",
+    "displayName": "ProjectCenter",
+    "version": "0.7.0",
+    "manufacturer": "GNUstep",
+    "summary": "Integrated development environment for GNUstep.",
+    "license": "GPL-2.0-or-later",
+    "homepage": "https://github.com/gnustep/apps-projectcenter"
+  },
+  "pipeline": {
+    "workingDirectory": ".",
+    "shell": {
+      "kind": "bash",
+      "bootstrapCommands": [
+        ". \"${GP_GNUSTEP_CLI_ROOT:-/usr/GNUstep}/System/Library/Makefiles/GNUstep.sh\""
+      ],
+      "environment": {}
+    },
+    "build": {
+      "command": "./build-app.sh https://github.com/gnustep/apps-projectcenter.git projectcenter-0_7_0"
+    },
+    "stage": {
+      "command": "./stage-app.sh ProjectCenter dist/stage",
+      "outputRoot": "dist/stage"
+    }
+  },
+  "payload": {
+    "layoutVersion": 1,
+    "stageRoot": "dist/stage",
+    "appRoot": "app",
+    "runtimeRoot": "runtime",
+    "metadataRoot": "metadata"
+  },
+  "launch": {
+    "entryRelativePath": "app/ProjectCenter.app/ProjectCenter",
+    "workingDirectory": "app/ProjectCenter.app",
+    "arguments": [],
+    "pathPrepend": [
+      "runtime/bin",
+      "runtime/System/Tools"
+    ],
+    "env": {
+      "LD_LIBRARY_PATH": {
+        "value": "{@runtimeRoot}/lib:{@runtimeRoot}/System/Library/Libraries",
+        "policy": "prepend"
+      }
+    }
+  },
+  "outputs": {
+    "root": "dist",
+    "packageRoot": "dist/packages",
+    "logRoot": "dist/logs",
+    "tempRoot": "dist/tmp",
+    "validationRoot": "dist/validation"
+  },
+  "validation": {
+    "smoke": {
+      "enabled": true,
+      "kind": "staged-layout",
+      "requiredPaths": [
+        "metadata/icons/app.png"
+      ],
+      "timeoutSeconds": 30
+    },
+    "logs": {
+      "retainOnSuccess": true
+    }
+  },
+  "integrations": {
+    "shortcutName": "ProjectCenter",
+    "fileAssociations": []
+  },
+  "compliance": {
+    "runtimeNotices": [
+      {
+        "name": "ProjectCenter",
+        "license": "GPL-2.0-or-later",
+        "stageRelativePath": "metadata/licenses/ProjectCenter.txt"
+      }
+    ]
+  },
+  "backends": {
+    "msi": {
+      "enabled": false
+    },
+    "appimage": {
+      "enabled": true,
+      "desktopEntryName": "org.gnustep.ProjectCenter.desktop",
+      "iconRelativePath": "metadata/icons/app.png",
+      "gnustepConfig": {
+        "systemRoot": "runtime/System"
+      },
+      "smoke": {
+        "mode": "launch-only"
+      }
+    }
+  }
+}
