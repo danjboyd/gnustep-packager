@@ -2,9 +2,23 @@
 
 ## Unreleased
 
+### Changed
+- AppImage backend: the smoke launch refuses to run if `smoke.environment` points
+  `GNUSTEP_HOME` at the real home or clears it.
+
 ### Added
+- `scripts/run-gui-isolated.sh` runs a GUI app with a private display and
+  session bus and a scratch directory bound over the real home.
+- `examples/downstream/theme-demos`: examples that package the theme demo apps
+  with the theme bundled through `themeInputs`: Adwaita as an AppImage and
+  WinUITheme as an MSI.
 - `examples/downstream/gnustep-apps`: example AppImage setups for Gorm,
   ProjectCenter and GWorkspace, built from upstream tags.
+
+### Fixed
+- Theme inputs: the default install command now names its install root in full.
+  A manifest whose `bootstrapCommands` source `GNUstep.sh`, which unsets
+  `GNUSTEP_HOME`, no longer sends the theme install to `/GNUstep`.
 
 ## v0.1.7
 

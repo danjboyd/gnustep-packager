@@ -1,0 +1,107 @@
+{
+  "$schema": "https://raw.githubusercontent.com/danjboyd/gnustep-packager/v0.1.7/schemas/gnustep-packager.schema.json",
+  "schemaVersion": 1,
+  "profiles": [
+    "gnustep-gui"
+  ],
+  "package": {
+    "id": "io.github.danjboyd.WinUIThemeDemo",
+    "name": "WinUIThemeDemo",
+    "displayName": "WinUI Theme Demo",
+    "version": "0.1.0",
+    "manufacturer": "Daniel Boyd",
+    "summary": "Review app for the GNUstep WinUI theme.",
+    "license": "LGPL-2.1-or-later",
+    "homepage": "https://github.com/danjboyd/plugins-themes-winuitheme"
+  },
+  "pipeline": {
+    "workingDirectory": "..",
+    "shell": {
+      "kind": "pwsh",
+      "bootstrapCommands": [],
+      "environment": {}
+    },
+    "build": {
+      "command": "./packaging/build-theme-demo.ps1"
+    },
+    "stage": {
+      "command": "./packaging/stage-theme-demo.ps1 -StageRoot dist/stage",
+      "outputRoot": "../dist/stage"
+    }
+  },
+  "payload": {
+    "layoutVersion": 1,
+    "stageRoot": "../dist/stage",
+    "appRoot": "app",
+    "runtimeRoot": "runtime",
+    "metadataRoot": "metadata"
+  },
+  "launch": {
+    "entryRelativePath": "app/ThemeDemo.app/ThemeDemo.exe",
+    "workingDirectory": "app/ThemeDemo.app",
+    "arguments": [],
+    "pathPrepend": [
+      "runtime/bin"
+    ],
+    "env": {}
+  },
+  "themeInputs": [
+    {
+      "name": "WinUITheme",
+      "workspacePath": "..",
+      "platforms": [
+        "msi"
+      ],
+      "required": true,
+      "default": true
+    }
+  ],
+  "outputs": {
+    "root": "../dist",
+    "packageRoot": "../dist/packages",
+    "logRoot": "../dist/logs",
+    "tempRoot": "../dist/tmp",
+    "validationRoot": "../dist/validation"
+  },
+  "validation": {
+    "smoke": {
+      "enabled": true,
+      "kind": "staged-layout",
+      "requiredPaths": [
+        "runtime/bin/GNUstep.conf",
+        "runtime/System/Tools/gdnc.exe"
+      ],
+      "timeoutSeconds": 30
+    },
+    "logs": {
+      "retainOnSuccess": true
+    }
+  },
+  "integrations": {
+    "shortcutName": "WinUI Theme Demo",
+    "fileAssociations": []
+  },
+  "compliance": {
+    "runtimeNotices": [
+      {
+        "name": "GNUstep Runtime",
+        "license": "LGPL-2.1-or-later",
+        "stageRelativePath": "metadata/licenses/gnustep-runtime.txt"
+      }
+    ]
+  },
+  "backends": {
+    "msi": {
+      "enabled": true,
+      "upgradeCode": "994d59c3-2355-43e1-9391-aa9d46702ff9",
+      "installScope": "perUser",
+      "productName": "WinUI Theme Demo",
+      "shortcutName": "WinUI Theme Demo",
+      "installDirectoryName": "WinUIThemeDemo",
+      "launcherFileName": "WinUIThemeDemo.exe"
+    },
+    "appimage": {
+      "enabled": false
+    }
+  }
+}

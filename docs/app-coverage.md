@@ -12,8 +12,8 @@ Legend:
   scripts rather than gnustep-packager
 - **configured**: the manifest or workflow has it, but no released artifact
   exists yet
-- **example**: `examples/downstream/` has a tested setup, but no repo uses it
-  yet
+- **example**: `examples/downstream/` has a tested setup, but the app's repo
+  doesn't use it yet
 - **none**: no path today
 - *(CI)*: the evidence comes from CI runs and release assets only; nobody ran
   it by hand on a local host (every DMG cell)
@@ -27,8 +27,8 @@ Legend:
 | LinDirStat | configured | configured | configured *(CI)*: DMG backend via `scripts/ci-release-macos.sh` | pinned checkout | No GitHub release yet. This is the only app wired to the DMG backend |
 | PerformanceDashboard | packager (v0.1.3) | configured (manifest only) | none | pinned checkout | Release gate uses `--require-backend appimage`; the Windows CI job is skipped because the Linux job fails on `main` |
 | SpreadsheetApp | configured | configured (`release-msi.yml`) | none | reusable workflow `@main` (unpinned) | No release yet |
-| Adwaita ThemeDemo | none | none | n/a | none | `Examples/ThemeDemo` in plugins-themes-Adwaita |
-| WinUITheme ThemeDemo | n/a | none | n/a | none | `Examples/ThemeDemo` in plugins-themes-winuitheme |
+| Adwaita ThemeDemo | example (`theme-demos/adwaita`) | none | n/a | none | `Examples/ThemeDemo` in plugins-themes-Adwaita |
+| WinUITheme ThemeDemo | n/a | example (`theme-demos/winuitheme`) | n/a | none | `Examples/ThemeDemo` in plugins-themes-winuitheme |
 | Gorm | example (`gnustep-apps/gorm`) | none | none | none | Upstream GNUstep app, tag `gorm-1_5_0` |
 | ProjectCenter | example (`gnustep-apps/projectcenter`) | none | none | none | Upstream GNUstep app, tag `projectcenter-0_7_0` |
 | GWorkspace | example (`gnustep-apps/gworkspace`) | none | none | none | Upstream GNUstep app, tag `gworkspace-1_0_0` |
@@ -71,9 +71,9 @@ No app sets the remap for MSI, so Windows is left out for now.
 2. **PerformanceDashboard has no MSI.** This is on the app side: its Linux CI
    is red, so the Windows job never runs, and its release gate requires only
    AppImage.
-3. **The theme demos have no packaging.** `packagedDefaults.defaultTheme`
-   exists, but there is no example manifest that ships a theme bundle
-   alongside a demo app.
+3. **The theme repos don't use the demo examples yet.** Both setups are tested
+   in `examples/downstream/theme-demos`, and each theme repo still has to adopt
+   its own.
 4. **SpreadsheetApp tracks `@main`.** Any packager change can break its
    release. It should pin a tag.
 5. **Arlen and the Swift apps** wait on decisions (PR #77, the archive

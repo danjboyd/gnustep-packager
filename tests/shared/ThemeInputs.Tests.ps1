@@ -281,7 +281,7 @@ Describe "Theme input contract" {
 
       Assert-GpEqual -Actual @($result.Themes.Name) -Expected @("WinUITheme") -Message "Dry-run provisioning should report the active theme input."
       Assert-GpMatch -Actual $logText -Pattern "REPO\s+https://example\.invalid/WinUITheme\.git" -Message "Provisioning logs should include the theme source."
-      Assert-GpMatch -Actual $logText -Pattern 'BUILD\s+make clean; make; make install GNUSTEP_INSTALLATION_DOMAIN=USER GNUSTEP_HOME="\$GNUSTEP_HOME"' -Message "Provisioning logs should include the default build/install command."
+      Assert-GpMatch -Actual $logText -Pattern 'BUILD\s+make clean; make; make install GNUSTEP_INSTALLATION_DOMAIN=USER GNUSTEP_HOME=''[^'']*WinUITheme' -Message "Provisioning logs should include the default build/install command."
     } finally {
       if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
         Remove-Item -Force $manifestPath
@@ -613,6 +613,31 @@ Describe "Theme input contract" {
     }
   }
 
+  It "installs a theme to the literal home even when the shell loses GNUSTEP_HOME" {
+    if ($IsWindows) {
+      Set-ItResult -Skipped -Because "This runs the install command in bash and sh."
+      return
+    }
+
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-home-" + [guid]::NewGuid().ToString("N"))
+    try {
+      $binRoot = New-Item -ItemType Directory -Force -Path (Join-Path $tempRoot "bin")
+      $fakeMake = Join-Path $binRoot "make"
+      Set-Content -Path $fakeMake -Value "#!/bin/sh`nfor arg in `"`$@`"; do case `"`$arg`" in GNUSTEP_HOME=*) printf '%s\n' `"`$arg`" ;; esac; done"
+      chmod +x $fakeMake
+      $themeInput = [pscustomobject]@{ BuildCommand = $null; InstallCommand = $null }
+      $installHome = "/tmp/it's a theme home"
+      $command = Get-GpThemeBuildCommand -Theme $themeInput -ShellKind "bash" -InstallHome (Convert-GpNativePathToPosix -Path $installHome)
+
+      $output = & bash -c ("export PATH='{0}':`$PATH; unset GNUSTEP_HOME; {1}" -f $binRoot, $command)
+      Assert-GpEqual -Actual ([string]$output) -Expected "GNUSTEP_HOME=$installHome" -Message "The install should keep its home after GNUstep.sh unsets the variable."
+    } finally {
+      if (Test-Path $tempRoot) {
+        Remove-Item -Recurse -Force $tempRoot
+      }
+    }
+  }
+
   It "plans AppImage theme input provisioning" {
     $manifestPath = $null
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-appimage-" + [guid]::NewGuid().ToString("N"))
@@ -640,7 +665,7 @@ Describe "Theme input contract" {
       $context = Get-GpManifestContext -Path $manifestPath -Backend "appimage"
       $result = Invoke-GpThemeProvisioning -Context $context -Backend "appimage" -DryRun
       Assert-GpEqual -Actual @($result.Themes.Name) -Expected @("Adwaita") -Message "A required Linux theme input should be planned for the AppImage."
-      Assert-GpMatch -Actual (Get-Content -Raw -Path $result.LogPath) -Pattern 'BUILD\s+make clean; make; make install GNUSTEP_INSTALLATION_DOMAIN=USER GNUSTEP_HOME="\$env:GNUSTEP_HOME"' -Message "The build should install into the provisioning home, named for the pipeline's pwsh shell."
+      Assert-GpMatch -Actual (Get-Content -Raw -Path $result.LogPath) -Pattern 'BUILD\s+make clean; make; make install GNUSTEP_INSTALLATION_DOMAIN=USER GNUSTEP_HOME=''[^'']*Adwaita' -Message "The build should install into the provisioning home."
     } finally {
       if ($null -ne $manifestPath -and (Test-Path $manifestPath)) {
         Remove-Item -Force $manifestPath

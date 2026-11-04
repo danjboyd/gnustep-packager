@@ -23,6 +23,8 @@ Contents:
 - `manifest-gnustep-linux-appimage.template.json`
   Linux-oriented manifest starting point for AppImage packaging, including
   AppImage-native update metadata settings
+- `theme-demos/`
+  Theme demo app packaged with its theme bundled through `themeInputs`
 - `gnustep-apps/`
   Gorm, ProjectCenter and GWorkspace as AppImages, built from upstream tags
   without changing the upstream repos
