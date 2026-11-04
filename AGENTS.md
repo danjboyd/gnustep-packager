@@ -82,6 +82,10 @@ item, not an incidental convenience change.
 - Prefer a small working reference app fixture for backend tests over purely
   synthetic unit coverage.
 
+## Testing GUI Apps
+GNUstep ignores `HOME`, so a private `HOME` doesn't protect the user's real
+defaults. Launch GUI apps by hand only through `scripts/run-gui-isolated.sh`.
+
 ## Quality Gates
 Do not consider a backend ready until it can:
 - Build from a documented local entry point
