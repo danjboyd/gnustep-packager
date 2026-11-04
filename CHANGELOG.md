@@ -3,9 +3,9 @@
 ## Unreleased
 
 ### Added
-- `examples/downstream/theme-demos`: an example that packages the Adwaita
-  theme's demo app as an AppImage, with the theme bundled through
-  `themeInputs`.
+- `examples/downstream/theme-demos`: examples that package the theme demo apps
+  with the theme bundled through `themeInputs`: Adwaita as an AppImage and
+  WinUITheme as an MSI.
 
 ## v0.1.7
 
