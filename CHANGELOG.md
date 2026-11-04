@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- AppImage backend: strict runtime-closure validation fails when a Swift runtime
+  library isn't bundled, even if the build host has a copy, unless
+  `backends.appimage.validation.swiftFlavor` declares the flavor the target must
+  have.
+
 ## v0.1.7
 
 ### Changed

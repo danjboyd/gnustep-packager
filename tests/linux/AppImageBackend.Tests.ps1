@@ -974,6 +974,7 @@ Describe "AppImage backend" {
           RuntimeClosure = "strict"
           AllowedSystemLibraries = @("libc.so.6")
           AllowedExternalRunpaths = @()
+          SwiftFlavor = $null
         }
       }
 
@@ -993,6 +994,110 @@ Describe "AppImage backend" {
           Remove-Item -Recurse -Force $tempRoot
         }
       }
+    }
+  }
+
+  Context "Swift runtime closure" {
+    BeforeAll {
+      $script:ccPath = (Get-Command cc -ErrorAction SilentlyContinue)?.Source
+
+      # An AppDir with one program that links a stand-in libswiftCore.so. Only
+      # the name matters to the check. Returns where to put or find the library.
+      function New-GpSwiftFixture {
+        param([string]$Root, [string]$Library = "swiftCore")
+
+        $hostRoot = Join-Path $Root "host"
+        $binRoot = Join-Path $Root "squashfs-root/usr/bin"
+        New-Item -ItemType Directory -Force -Path $hostRoot, $binRoot | Out-Null
+        $sourcePath = Join-Path $Root "stub.c"
+        Set-Content -Path $sourcePath -Value "int gp_swift_stub(void) { return 0; }"
+        $libraryPath = Join-Path $hostRoot ("lib{0}.so" -f $Library)
+        & $script:ccPath -shared -fPIC -o $libraryPath $sourcePath
+        $mainPath = Join-Path $Root "main.c"
+        Set-Content -Path $mainPath -Value "int gp_swift_stub(void); int main(void) { return gp_swift_stub(); }"
+        & $script:ccPath -o (Join-Path $binRoot "fixture-swift") $mainPath "-L$hostRoot" "-l$Library"
+        return [pscustomobject]@{ ExpandedRoot = (Join-Path $Root "squashfs-root"); HostRoot = $hostRoot; LibraryPath = $libraryPath; LibRoot = (Join-Path $Root "squashfs-root/usr/lib"); LogPath = (Join-Path $Root "runtime-closure.log") }
+      }
+
+      function New-GpSwiftConfig {
+        param([string]$SwiftFlavor = $null)
+        return [pscustomobject]@{
+          Validation = [pscustomobject]@{
+            RuntimeClosure = "strict"
+            AllowedSystemLibraries = @()
+            AllowedExternalRunpaths = @()
+            SwiftFlavor = $SwiftFlavor
+          }
+        }
+      }
+    }
+
+    BeforeEach {
+      $script:swiftRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-swift-" + [guid]::NewGuid().ToString("N"))
+    }
+
+    AfterEach {
+      Remove-Item -Recurse -Force $script:swiftRoot -ErrorAction SilentlyContinue
+    }
+
+    It "fails when the Swift runtime isn't bundled and no flavor is declared" {
+      if (-not $script:ccPath) { Set-ItResult -Skipped -Because "cc isn't installed"; return }
+      $fixture = New-GpSwiftFixture -Root $script:swiftRoot
+
+      { Invoke-GpAppImageRuntimeClosureValidation -Config (New-GpSwiftConfig) -ExpandedRoot $fixture.ExpandedRoot -LogPath $fixture.LogPath } | Should -Throw "*runtime-closure validation failed*"
+      Assert-GpMatch -Actual (Get-Content -Raw -Path $fixture.LogPath) -Pattern "Swift runtime library isn't bundled.*libswiftCore\.so.*swiftFlavor" -Message "The log should name the library and the way out."
+    }
+
+    It "fails when the Swift runtime resolves only on the build host, for libswiftCore and overlays alike" {
+      if (-not $script:ccPath) { Set-ItResult -Skipped -Because "cc isn't installed"; return }
+      foreach ($name in @("libswiftCore.so", "libswiftObjectiveC.so")) {
+        $fixture = New-GpSwiftFixture -Root (Join-Path $script:swiftRoot $name)
+        # A real run would need the library in the system's search path, so ldd's
+        # answer stands in: found, but outside the AppDir.
+        Mock Get-GpAppImageLddDependencies {
+          [pscustomobject]@{
+            IsDynamic = $true
+            RawOutput = ""
+            Dependencies = @([pscustomobject]@{ Name = $name; Path = "/opt/swift/lib/$name"; Status = "external" })
+          }
+        }.GetNewClosure()
+
+        { Invoke-GpAppImageRuntimeClosureValidation -Config (New-GpSwiftConfig) -ExpandedRoot $fixture.ExpandedRoot -LogPath $fixture.LogPath } | Should -Throw "*runtime-closure validation failed*"
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $fixture.LogPath) -Pattern ("Swift runtime library isn't bundled.*" + [regex]::Escape($name)) -Message "A host copy shouldn't count."
+      }
+    }
+
+    It "leaves other host-resolved libraries to the allowlist rules" {
+      if (-not $script:ccPath) { Set-ItResult -Skipped -Because "cc isn't installed"; return }
+      $fixture = New-GpSwiftFixture -Root $script:swiftRoot
+      Mock Get-GpAppImageLddDependencies {
+        [pscustomobject]@{
+          IsDynamic = $true
+          RawOutput = ""
+          Dependencies = @([pscustomobject]@{ Name = "libdispatch.so"; Path = "/usr/lib/libdispatch.so"; Status = "external" })
+        }
+      }
+
+      $null = Invoke-GpAppImageRuntimeClosureValidation -Config (New-GpSwiftConfig) -ExpandedRoot $fixture.ExpandedRoot -LogPath $fixture.LogPath
+      Assert-GpMatch -Actual (Get-Content -Raw -Path $fixture.LogPath) -Pattern "host-resolved dependency" -Message "libdispatch isn't treated as Swift-only."
+    }
+
+    It "passes when the Swift runtime is bundled" {
+      if (-not $script:ccPath) { Set-ItResult -Skipped -Because "cc isn't installed"; return }
+      $fixture = New-GpSwiftFixture -Root $script:swiftRoot
+      New-Item -ItemType Directory -Force -Path $fixture.LibRoot | Out-Null
+      Copy-Item -Path $fixture.LibraryPath -Destination $fixture.LibRoot
+
+      $result = Invoke-GpAppImageRuntimeClosureValidation -Config (New-GpSwiftConfig) -ExpandedRoot $fixture.ExpandedRoot -LogPath $fixture.LogPath
+      Assert-GpEqual -Actual $result.Mode -Expected "strict" -Message "Bundled Swift runtime should pass."
+    }
+
+    It "passes without the runtime when the target's flavor is declared, and says so" {
+      if (-not $script:ccPath) { Set-ItResult -Skipped -Because "cc isn't installed"; return }
+      $fixture = New-GpSwiftFixture -Root $script:swiftRoot
+
+      $null = Invoke-GpAppImageRuntimeClosureValidation -Config (New-GpSwiftConfig -SwiftFlavor "linux-amd64-clang-swift") -ExpandedRoot $fixture.ExpandedRoot -LogPath $fixture.LogPath
+      Assert-GpMatch -Actual (Get-Content -Raw -Path $fixture.LogPath) -Pattern "libswiftCore\.so.*linux-amd64-clang-swift" -Message "The log should record that the flavor provides the library."
     }
   }
 
