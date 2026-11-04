@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- The test suite now validates every manifest under `examples/` against the
+  schema and the validator.
+
 ## v0.1.7
 
 ### Changed
