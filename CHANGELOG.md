@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+- AppImage backend: the smoke launch refuses to run if `smoke.environment` points
+  `GNUSTEP_HOME` at the real home or clears it.
+
+### Added
+- `scripts/run-gui-isolated.sh` runs a GUI app with a private display and
+  session bus and a scratch directory bound over the real home.
+
 ### Fixed
 - Theme inputs: the default install command now names its install root in full.
   A manifest whose `bootstrapCommands` source `GNUstep.sh`, which unsets

@@ -33,6 +33,22 @@ It drives the same sequence in both local and CI contexts:
   -RunSmoke
 ```
 
+## Running GUI Apps By Hand
+Don't launch a GNUstep app with only a private `HOME`. gnustep-base takes the
+home directory from the passwd database, so the app still reads and rewrites the
+real `~/GNUstep/Defaults`, and it opens whatever the user's saved state points
+to. `xvfb-run` hides the windows but not those writes.
+
+Use the sandbox, which binds a scratch directory over the real home:
+
+```sh
+scripts/run-gui-isolated.sh --seconds 15 --screenshot /tmp/app.png -- ./App.AppImage
+```
+
+The program and the screenshot path must be outside the home directory. The
+packaging pipeline's own smoke launch sets a private `GNUSTEP_HOME` and refuses
+to run with the real one.
+
 ## CI Usage
 The reusable GitHub Actions workflow calls the same wrapper rather than
 re-encoding packaging logic in YAML.
