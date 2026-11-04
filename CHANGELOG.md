@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `scripts/run-gui-isolated.sh` runs a GUI app with a private display and
+  session bus and a scratch directory bound over the real home.
+
+### Changed
+- AppImage backend: the smoke launch refuses to run if `smoke.environment` points
+  `GNUSTEP_HOME` at the real home or clears it.
+
 ## v0.1.7
 
 ### Changed
