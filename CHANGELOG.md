@@ -9,9 +9,9 @@
 ### Added
 - `scripts/run-gui-isolated.sh` runs a GUI app with a private display and
   session bus and a scratch directory bound over the real home.
-- `examples/downstream/theme-demos`: an example that packages the Adwaita
-  theme's demo app as an AppImage, with the theme bundled through
-  `themeInputs`.
+- `examples/downstream/theme-demos`: examples that package the theme demo apps
+  with the theme bundled through `themeInputs`: Adwaita as an AppImage and
+  WinUITheme as an MSI.
 
 ### Fixed
 - Theme inputs: the default install command now names its install root in full.

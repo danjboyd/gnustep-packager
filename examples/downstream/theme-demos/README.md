@@ -38,3 +38,17 @@ manifest's `bootstrapCommands` source `GNUstep.sh`. `GNUstep.sh` also unsets
 `GNUSTEP_HOME`, which the packager uses to choose where the theme installs, so
 the commands save the value and restore it. Without that, the install tries to
 write to `/GNUstep`.
+
+## WinUITheme (MSI)
+
+Copy `winuitheme/` to `packaging/` in the plugins-themes-winuitheme repo. It uses
+`package-msi.yml` the same way. `upgradeCode` in the manifest belongs to this
+example package, so keep it stable once you have shipped an MSI. The theme builds
+from the checkout, as above; a release should use `repo` and `ref` instead.
+
+Tested once on a `windows-latest` GitHub runner with the reusable workflow and
+the `gnustep-cli-new` toolchain, from a copy of the theme repo at `48d21f0`. The
+run built the MSI and portable ZIP, installed the MSI, and confirmed the installed
+`WinUITheme.theme` and the default theme setting. Nobody has looked at the running
+app, so its rendering is unchecked. `package-msi.yml` itself wasn't used: that
+test called the workflow from this repo with the same settings.

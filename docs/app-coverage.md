@@ -28,7 +28,7 @@ Legend:
 | PerformanceDashboard | packager (v0.1.3) | configured (manifest only) | none | pinned checkout | Release gate uses `--require-backend appimage`; the Windows CI job is skipped because the Linux job fails on `main` |
 | SpreadsheetApp | configured | configured (`release-msi.yml`) | none | reusable workflow `@main` (unpinned) | No release yet |
 | Adwaita ThemeDemo | example (`theme-demos/adwaita`) | none | n/a | none | `Examples/ThemeDemo` in plugins-themes-Adwaita |
-| WinUITheme ThemeDemo | n/a | none | n/a | none | `Examples/ThemeDemo` in plugins-themes-winuitheme |
+| WinUITheme ThemeDemo | n/a | example (`theme-demos/winuitheme`) | n/a | none | `Examples/ThemeDemo` in plugins-themes-winuitheme |
 
 ## Command-arrow word moves (PR #83)
 
@@ -68,9 +68,9 @@ No app sets the remap for MSI, so Windows is left out for now.
 2. **PerformanceDashboard has no MSI.** This is on the app side: its Linux CI
    is red, so the Windows job never runs, and its release gate requires only
    AppImage.
-3. **The WinUITheme demo has no packaging.** The Adwaita demo now has a tested
-   example in `examples/downstream/theme-demos`; the Adwaita repo still has to
-   adopt it.
+3. **The theme repos don't use the demo examples yet.** Both setups are tested
+   in `examples/downstream/theme-demos`, and each theme repo still has to adopt
+   its own.
 4. **SpreadsheetApp tracks `@main`.** Any packager change can break its
    release. It should pin a tag.
 5. **Arlen and the Swift apps** wait on decisions (PR #77, the archive
