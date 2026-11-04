@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Theme inputs: the default install command now names its install root in full.
+  A manifest whose `bootstrapCommands` source `GNUstep.sh`, which unsets
+  `GNUSTEP_HOME`, no longer sends the theme install to `/GNUstep`.
+
 ## v0.1.7
 
 ### Changed
