@@ -1752,7 +1752,9 @@ function Test-GpManifest {
         Add-Issue "updates.startupDelaySeconds must be an integer greater than or equal to 0."
       }
 
-      if ($updates.Contains("publicEDKey") -and ($updates["publicEDKey"] -ne $null)) {
+      if (($updates.Contains("enabled") -and $updates["enabled"] -eq $true) -and (-not $updates.Contains("publicEDKey") -or -not (Test-StringValue $updates["publicEDKey"]))) {
+        Add-Issue "updates.publicEDKey is required when updates.enabled is true: the updater refuses any update it can't verify. Generate an Ed25519 key pair, put the base64 public key here, and sign each release's assets (see docs/update-feed-contract.md)."
+      } elseif ($updates.Contains("publicEDKey") -and ($updates["publicEDKey"] -ne $null)) {
         $publicKeyBytes = $null
         if ($updates["publicEDKey"] -is [string]) {
           try { $publicKeyBytes = [Convert]::FromBase64String([string]$updates["publicEDKey"]) } catch { $publicKeyBytes = $null }

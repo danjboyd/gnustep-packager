@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Breaking:** updates now require an Ed25519 signature. A manifest with
+  `updates.enabled: true` must set `updates.publicEDKey`, or validation fails.
+  `gp-update-helper` refuses any update without a signing key or a valid
+  `edSignature`, and always downloads and verifies AppImages itself instead of
+  using `appimageupdatetool`. To adopt this release, add a key and sign your
+  release assets; see `docs/update-feed-contract.md`.
+
 ## v0.1.7
 
 ### Changed

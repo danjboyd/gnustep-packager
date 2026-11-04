@@ -50,6 +50,9 @@ Recommended adoption order:
    contracts.
 6. Replace the placeholder `updates.github.*` and backend `updates.feedUrl`
    values with your real repo and feed URLs.
+   Replace the template's `updates.publicEDKey` with your own Ed25519 public key
+   and sign each release's assets. Nobody holds the private half of the template
+   key, so an app that keeps it can't install any update.
 7. Keep the default `gnustep-cli-new` workflow bootstrap unless you are using a
    self-hosted runner with an explicit preflight.
 8. Add real `compliance.runtimeNotices` entries for shipped runtime contents.

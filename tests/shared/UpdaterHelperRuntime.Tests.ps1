@@ -222,6 +222,54 @@ Describe "Updater helper runtime" {
     }
 
     $script:buildRoot = Get-GpTestBuildRoot
+    # A key made for these tests; its private half was discarded. The signatures
+    # are of the two payload strings the tests write.
+    $script:testPublicEDKey = "x+f7aDQnw8pdiEeMTF7t0mwSPExqX0/bEXVOqJfkfL4="
+    $script:msiPayload = "not really an installer"
+    $script:msiEdSignature = "HghrtAV2nkDXuZsFTaehVVKQ1cURc+3P7yINCN3Pqv3+Pmc+jUVSMnxkAFksR2lt1ZbdWdNsgdTPVD9IHGoRDg=="
+    $script:appImagePayload = "not really an AppImage"
+    $script:appImageEdSignature = "lCEV/sTg3ySWLfv3XtkioALgTWsq3RiVpUU5jX+Hd8b0c2b7BjAt8rbn8imRDBwaaoqzaLsRxR+bpcTN3bvLDQ=="
+
+    # Runs the prepare phase on an MSI plan with the given key and signature,
+    # and returns the state the helper wrote and its exit code.
+    function Invoke-GpTestPrepare {
+      param(
+        [string]$PublicEDKey,
+        [string]$EdSignature,
+        [string]$Payload = $script:msiPayload
+      )
+
+      $root = New-GpTestRoot
+      try {
+        $workingRoot = Join-Path $root "work"
+        Ensure-GpDirectory -Path $workingRoot | Out-Null
+        $assetPath = Join-Path $root "MyGNUstepApp-1.2.3.msi"
+        [System.IO.File]::WriteAllText($assetPath, $Payload)
+        $package = [ordered]@{ id = "com.example.MyGNUstepApp"; name = "MyGNUstepApp"; displayName = "My GNUstep App"; currentVersion = "1.2.2"; backend = "msi" }
+        if ($PublicEDKey) { $package["publicEDKey"] = $PublicEDKey }
+        $asset = [ordered]@{
+          backend = "msi"
+          kind = "msi"
+          name = "MyGNUstepApp-1.2.3.msi"
+          url = ([System.Uri]::new($assetPath)).AbsoluteUri
+          sha256 = (Get-FileHash -Algorithm SHA256 -Path $assetPath).Hash.ToLowerInvariant()
+        }
+        if ($EdSignature) { $asset["edSignature"] = $EdSignature }
+        $planPath = Join-Path $root "plan.json"
+        $statePath = Join-Path $root "update-state.json"
+        [System.IO.File]::WriteAllText($planPath, ([ordered]@{
+          formatVersion = 1
+          package = $package
+          asset = $asset
+          execution = [ordered]@{ stateFile = $statePath; workingRoot = $workingRoot }
+        } | ConvertTo-Json -Depth 8))
+        $result = Invoke-GpTestTool -FilePath $script:helperPath -ArgumentList @("--mode", "prepare", "--plan", $planPath, "--state-file", $statePath)
+        return [pscustomobject]@{ State = (Get-GpJsonFile -Path $statePath); ExitCode = $result.ExitCode; Downloaded = (Test-Path (Join-Path $workingRoot "downloads/MyGNUstepApp-1.2.3.msi")) }
+      } finally {
+        Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+      }
+    }
+
     $script:helperPath = Get-GpTestHelperPath
     $script:probePath = Get-GpTestProbePath
     $script:libraryPath = Get-GpTestLibraryPath
@@ -241,7 +289,7 @@ Describe "Updater helper runtime" {
 
     try {
       $assetPath = Join-Path $root "MyGNUstepApp-1.2.3.msi"
-      [System.IO.File]::WriteAllText($assetPath, "not really an installer")
+      [System.IO.File]::WriteAllText($assetPath, $script:msiPayload)
       $sha256 = (Get-FileHash -Algorithm SHA256 -Path $assetPath).Hash.ToLowerInvariant()
 
       $planPath = Join-Path $root "plan.json"
@@ -254,6 +302,7 @@ Describe "Updater helper runtime" {
           displayName = "My GNUstep App"
           currentVersion = "1.2.2"
           backend = "msi"
+          publicEDKey = $script:testPublicEDKey
         }
         asset = [ordered]@{
           backend = "msi"
@@ -261,6 +310,7 @@ Describe "Updater helper runtime" {
           name = "MyGNUstepApp-1.2.3.msi"
           url = ([System.Uri]::new($assetPath)).AbsoluteUri
           sha256 = $sha256
+          edSignature = $script:msiEdSignature
         }
         execution = [ordered]@{
           stateFile = $statePath
@@ -284,6 +334,42 @@ Describe "Updater helper runtime" {
     } finally {
       Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
     }
+  }
+
+  It "refuses an update when the app has no signing key" {
+    if ($null -eq $script:helperPath) {
+      Set-ItResult -Skipped -Because "GP_UPDATE_HELPER_PATH is not set and the helper can't be built here"
+      return
+    }
+
+    $result = Invoke-GpTestPrepare -PublicEDKey $null -EdSignature $script:msiEdSignature
+    Assert-GpEqual -Actual $result.State["status"] -Expected "failed" -Message "With no public key the helper must refuse the update."
+    Assert-GpMatch -Actual (Get-GpTestStateError -State $result.State) -Pattern "signing key" -Message "The refusal should name the missing key."
+    Assert-GpTrue -Condition (-not $result.Downloaded) -Message "The helper should refuse before downloading."
+    Assert-GpTrue -Condition ($result.ExitCode -ne 0) -Message "The helper should exit with an error."
+  }
+
+  It "refuses an update whose feed entry has no signature" {
+    if ($null -eq $script:helperPath) {
+      Set-ItResult -Skipped -Because "GP_UPDATE_HELPER_PATH is not set and the helper can't be built here"
+      return
+    }
+
+    $result = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $null
+    Assert-GpEqual -Actual $result.State["status"] -Expected "failed" -Message "With no signature the helper must refuse the update."
+    Assert-GpMatch -Actual (Get-GpTestStateError -State $result.State) -Pattern "not signed" -Message "The refusal should say the update isn't signed."
+  }
+
+  It "refuses and deletes a download whose signature doesn't match" {
+    if ($null -eq $script:helperPath) {
+      Set-ItResult -Skipped -Because "GP_UPDATE_HELPER_PATH is not set and the helper can't be built here"
+      return
+    }
+
+    $result = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $script:msiEdSignature -Payload "a tampered installer"
+    Assert-GpEqual -Actual $result.State["status"] -Expected "failed" -Message "A wrong signature must be refused."
+    Assert-GpMatch -Actual (Get-GpTestStateError -State $result.State) -Pattern "does not match" -Message "The refusal should say the signature doesn't match."
+    Assert-GpTrue -Condition (-not $result.Downloaded) -Message "The refused download should be deleted."
   }
 
   It "reports a failed MSI install, with msiexec's exit code, at the next launch" {
@@ -388,7 +474,7 @@ Describe "Updater helper runtime" {
     $root = New-GpTestRoot
     try {
       $assetPath = Join-Path $root "MyGNUstepApp-1.2.3-x86_64.AppImage"
-      [System.IO.File]::WriteAllText($assetPath, "not really an AppImage")
+      [System.IO.File]::WriteAllText($assetPath, $script:appImagePayload)
       $applications = Ensure-GpDirectory -Path (Join-Path $root "Applications")
       $currentPath = Join-Path $applications "MyGNUstepApp.AppImage"
       [System.IO.File]::WriteAllText($currentPath, "the current AppImage")
@@ -397,13 +483,14 @@ Describe "Updater helper runtime" {
       $statePath = Join-Path $workingRoot "update-state.json"
       [System.IO.File]::WriteAllText($planPath, ([ordered]@{
         formatVersion = 1
-        package = [ordered]@{ id = "com.example.MyGNUstepApp"; backend = "appimage" }
+        package = [ordered]@{ id = "com.example.MyGNUstepApp"; backend = "appimage"; publicEDKey = $script:testPublicEDKey }
         asset = [ordered]@{
           backend = "appimage"
           kind = "appimage"
           name = "MyGNUstepApp-1.2.3-x86_64.AppImage"
           url = ([System.Uri]::new($assetPath)).AbsoluteUri
           sha256 = (Get-FileHash -Algorithm SHA256 -Path $assetPath).Hash.ToLowerInvariant()
+          edSignature = $script:appImageEdSignature
         }
         execution = [ordered]@{
           stateFile = $statePath
@@ -412,7 +499,6 @@ Describe "Updater helper runtime" {
         }
       } | ConvertTo-Json -Depth 8))
 
-      # A PATH without appimageupdatetool, so the helper downloads and replaces.
       $prepare = Invoke-GpTestTool -FilePath $script:helperPath -ArgumentList @("--mode", "prepare", "--plan", $planPath, "--state-file", $statePath) -Environment @{ PATH = "/usr/bin:/bin" }
       $state = Get-GpJsonFile -Path $statePath
       Assert-GpEqual -Actual $state["status"] -Expected "readyToApply" -Message "Prepare should succeed ($($state["message"]) $(Get-GpTestStateError -State $state))."

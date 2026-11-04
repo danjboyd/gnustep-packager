@@ -656,6 +656,7 @@ Describe "AppImage backend" {
         param($manifest)
         $manifest["updates"] = @{
           enabled = $true
+          publicEDKey = "zhJy7ojERZsU55cvzuifdKiIIR2u3KeSp5M8GRFJrhM="
           provider = "github-release-feed"
           channel = "stable"
           github = @{
