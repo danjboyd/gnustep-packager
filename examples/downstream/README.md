@@ -23,6 +23,8 @@ Contents:
 - `manifest-gnustep-linux-appimage.template.json`
   Linux-oriented manifest starting point for AppImage packaging, including
   AppImage-native update metadata settings
+- `theme-demos/`
+  Theme demo app packaged with its theme bundled through `themeInputs`
 - `package-release-with-updates.yml`
   End-to-end downstream GitHub Actions example that packages Windows and Linux,
   publishes release assets, and deploys stable update feeds to GitHub Pages

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `examples/downstream/theme-demos`: an example that packages the Adwaita
+  theme's demo app as an AppImage, with the theme bundled through
+  `themeInputs`.
+
 ## v0.1.7
 
 ### Changed
