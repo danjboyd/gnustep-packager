@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- `examples/downstream/gnustep-apps`: a SystemPreferences AppImage setup.
+
 ## v0.1.8
 
 ### Changed
@@ -17,7 +20,7 @@
   with the theme bundled through `themeInputs`: Adwaita as an AppImage and
   WinUITheme as an MSI.
 - `examples/downstream/gnustep-apps`: example AppImage setups for Gorm,
-  ProjectCenter, GWorkspace and SystemPreferences, built from upstream tags.
+  ProjectCenter and GWorkspace, built from upstream tags.
 - The test suite now validates every manifest under `examples/` against the
   schema and the validator.
 
