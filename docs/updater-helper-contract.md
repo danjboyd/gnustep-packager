@@ -23,7 +23,7 @@ Example document:
     "currentVersion": "1.2.2",
     "backend": "appimage",
     "channel": "stable",
-    "publicEDKey": "base64 Ed25519 public key (optional; when present the helper requires asset.edSignature)"
+    "publicEDKey": "base64 Ed25519 public key (required; without it the helper refuses the update)"
   },
   "release": {
     "version": "1.2.3",
@@ -37,7 +37,7 @@ Example document:
     "name": "MyGNUstepApp-1.2.3-x86_64.AppImage",
     "url": "https://github.com/example-org/my-gnustep-app/releases/download/v1.2.3/MyGNUstepApp-1.2.3-x86_64.AppImage",
     "sha256": "abc123...",
-    "edSignature": "base64 Ed25519 signature of the file (when the package has a publicEDKey)",
+    "edSignature": "base64 Ed25519 signature of the file (required)",
     "sizeBytes": 12345678,
     "updateInformation": "gh-releases-zsync|example-org|my-gnustep-app|latest|MyGNUstepApp-*x86_64.AppImage.zsync",
     "zsync": {
@@ -134,7 +134,8 @@ reported again.
 
 ## Supported Apply Modes
 - `msi-install`
-- `appimage-update`
+- `appimage-update` (no longer produced: AppImages are downloaded and verified
+  by the helper, and the apply step keeps this mode only for older state files)
 - `appimage-replace`
 - `manual-download`
 
