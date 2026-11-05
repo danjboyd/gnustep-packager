@@ -67,6 +67,23 @@ jobs:
         run: |
           ./scripts/gnustep-packager.ps1 -Command describe -Manifest examples/sample-gui/package.manifest.json
 
+      # Apps build gp-update-helper with this toolchain, so a change that
+      # doesn't compile or link on Windows should fail here. Built in the
+      # toolchain's own MSYS2 root, where GNUstep.sh finds /clang64. The
+      # helper runtime tests then run against it (GP_UPDATE_HELPER_PATH).
+      - name: Build gp-update-helper
+        run: |
+          $root = $env:GP_GNUSTEP_CLI_ROOT
+          $envExe = Join-Path $root "usr\bin\env.exe"
+          if (-not (Test-Path $envExe)) { throw "No env.exe in the toolchain root $root" }
+          $repo = (Resolve-Path .).Path
+          $bootstrap = "if [ -f /etc/profile ]; then source /etc/profile; fi; source /clang64/share/GNUstep/Makefiles/GNUstep.sh; cd `"`$(cygpath -u '$repo')`" && make -C updater/objc/gp-update-helper"
+          & $envExe MSYSTEM=CLANG64 CHERE_INVOKING=1 /usr/bin/bash -lc $bootstrap
+          if ($LASTEXITCODE -ne 0) { throw "gp-update-helper did not build (exit $LASTEXITCODE)" }
+          $helper = Get-ChildItem updater/objc/gp-update-helper -Filter "gp-update-helper*.exe" | Select-Object -First 1
+          if (-not $helper) { throw "gp-update-helper.exe was not built" }
+          "GP_UPDATE_HELPER_PATH=$($helper.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Run Pester Regression Tests
         run: |
           ./scripts/test-repo.ps1 -CI
