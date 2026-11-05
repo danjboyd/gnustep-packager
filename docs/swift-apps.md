@@ -1,7 +1,7 @@
 # Packaging Swift GNUstep Apps (Design Note)
 
-Status: proposal only. Nothing in this note is implemented. Swift apps fall
-outside the support boundary in `AGENTS.md`, so any implementation needs a
+Status: proposal. Only the runtime closure check below is implemented. Swift
+apps fall outside the support boundary in `AGENTS.md`, so the rest needs a
 Roadmap entry that Dan approves first.
 
 The facts about the toolchain come from the gnustep-swift stack note
@@ -29,9 +29,9 @@ tree next to the GNUstep runtime. The AppImage is then self-contained, which
 is the AppImage contract anyway.
 
 What gnustep-packager already provides for this:
-- `backends.appimage.validation.runtimeClosure` fails the package when a
-  staged ELF file has a dependency that resolves outside the payload. That
-  catches a forgotten `libswiftCore.so`.
+- `backends.appimage.validation.runtimeClosure` fails the package when a Swift
+  runtime library (`libswiftCore`, the overlays, Foundation) isn't in the payload,
+  even if the build host has a copy. That catches a forgotten `libswiftCore.so`.
 - `toolchain.provenanceFile` with `toolchain.lockFile` ties the staged
   GNUstep libraries to the pinned stack by ELF build ID. If the Swift flavor
   writes the same `gnustep-toolchain-provenance.json` (to be confirmed), a
@@ -63,7 +63,9 @@ installed on the target, for example through `gnustep` cli.
 - This is not an AppImage in any useful sense. The clean-container smoke test
   would fail by design. It suits developer previews and machines that already
   run the flavor, not end users.
-- It would need a new "requires flavor" launch-time check rather than a
+- `backends.appimage.validation.swiftFlavor` records the flavor at validation
+  time and lets the Swift libraries stay out of the package. Nothing checks for
+  the flavor on the target yet: that would need a launch-time check rather than a
   packaging feature. That is closer to Phase 19's headless runtime delivery
   (PR #77) than to the desktop backends.
 - Every target needs the full toolchain, so this path does depend on where the

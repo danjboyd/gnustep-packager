@@ -1858,6 +1858,9 @@ function Test-GpManifest {
                 Add-Issue "backends.appimage.validation.runtimeClosure must be one of: strict, off."
               }
             }
+            if ($appimageValidation.Contains("swiftFlavor") -and -not (Test-StringValue $appimageValidation["swiftFlavor"])) {
+              Add-Issue "backends.appimage.validation.swiftFlavor must be a non-empty string when present."
+            }
           }
         }
 

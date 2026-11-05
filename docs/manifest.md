@@ -561,6 +561,11 @@ AppImage runtime-closure validation modes:
   `RUNPATH` or `RPATH` entries, and fail on unresolved dependencies under the
   packaged library search path. If `validation.allowedSystemLibraries` is set,
   host-resolved libraries outside the AppDir must appear in that allowlist.
+  A Swift runtime library (`libswift*`, `libFoundation*`, `lib_Foundation*`) must
+  resolve inside the AppImage, even when no allowlist is set and the build host
+  has a copy. Setting `validation.swiftFlavor` to the flavor the target must have
+  installed, such as `linux-amd64-clang-swift`, leaves those libraries to the
+  target instead. See [swift-apps.md](swift-apps.md).
 - `off`
   Skip backend ELF closure checks.
 

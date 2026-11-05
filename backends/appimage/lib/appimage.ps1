@@ -543,6 +543,7 @@ function Get-GpAppImageConfig {
       RuntimeClosure = [string]$validation["runtimeClosure"]
       AllowedSystemLibraries = [string[]]@($validation["allowedSystemLibraries"])
       AllowedExternalRunpaths = [string[]]@($validation["allowedExternalRunpaths"])
+      SwiftFlavor = $(if ($validation.Contains("swiftFlavor")) { [string]$validation["swiftFlavor"] } else { $null })
     }
     Updates = [pscustomobject]@{
       Enabled = [bool]$updateSettings.Enabled
@@ -2273,6 +2274,7 @@ function Write-GpAppImageArtifactMetadata {
         mode = $Config.Validation.RuntimeClosure
         allowedSystemLibraries = [string[]]@($Config.Validation.AllowedSystemLibraries)
         allowedExternalRunpaths = [string[]]@($Config.Validation.AllowedExternalRunpaths)
+        swiftFlavor = $Config.Validation.SwiftFlavor
       }
     }
     compliance = [ordered]@{
@@ -2830,6 +2832,17 @@ function Test-GpAppImageAllowedSystemLibrary {
   return $false
 }
 
+# The Swift runtime: libswiftCore, its siblings and overlays, and Foundation.
+# libdispatch and libBlocksRuntime aren't listed: GNUstep builds use them too.
+function Test-GpAppImageSwiftRuntimeLibrary {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Name
+  )
+
+  return ($Name -match '^(libswift|libFoundation|lib_Foundation)')
+}
+
 function Invoke-GpAppImageRuntimeClosureValidation {
   param(
     [Parameter(Mandatory = $true)]
@@ -2897,6 +2910,17 @@ function Invoke-GpAppImageRuntimeClosureValidation {
     }
 
     foreach ($dependency in @($lddInfo.Dependencies)) {
+      # A host copy would pass the checks below and then be missing on the
+      # user's machine, so the Swift runtime must be in the AppDir or declared.
+      if ((Test-GpAppImageSwiftRuntimeLibrary -Name $dependency.Name) -and $dependency.Status -ne "bundled") {
+        if ([string]::IsNullOrWhiteSpace([string]$Config.Validation.SwiftFlavor)) {
+          $issues.Add(("Swift runtime library isn't bundled: {0} -> {1}. Stage it in the payload, or declare the flavor the target must have in backends.appimage.validation.swiftFlavor (see docs/swift-apps.md)." -f $file, $dependency.Name)) | Out-Null
+        } else {
+          Write-GpAppImageLogLine -LogPath $LogPath -Message ("Swift runtime library left to the target's flavor: {0} -> {1} (swiftFlavor {2})" -f $file, $dependency.Name, $Config.Validation.SwiftFlavor)
+        }
+        continue
+      }
+
       switch ($dependency.Status) {
         "not-found" {
           $issues.Add(("Packaged ELF has unresolved dependency under packaged LD_LIBRARY_PATH: {0} -> {1}" -f $file, $dependency.Name)) | Out-Null

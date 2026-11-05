@@ -1263,6 +1263,11 @@
                     "off"
                   ]
                 },
+                "swiftFlavor": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The toolchain flavor the target must have installed, such as linux-amd64-clang-swift. Without it, a Swift app's runtime libraries must be bundled."
+                },
                 "allowedSystemLibraries": {
                   "type": "array",
                   "items": {
