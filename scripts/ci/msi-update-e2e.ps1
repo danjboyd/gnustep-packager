@@ -124,8 +124,18 @@ if ($p.ExitCode -ne 0) { throw "installing 0.1.0 failed: msiexec $($p.ExitCode),
 $installed = Get-GpInstalledSample
 if ($null -eq $installed) { throw "0.1.0 installed but not found in Uninstall" }
 Write-Host "installed: $($installed.DisplayName) $($installed.DisplayVersion) at $($installed.InstallLocation)"
-$launcher = Get-ChildItem -Path $installed.InstallLocation -Recurse -Filter "SampleGNUstepApp.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-$relaunchPath = if ($launcher) { $launcher.FullName } else { Join-Path $installed.InstallLocation "SampleGNUstepApp.exe" }
+# The relaunch path the way the app's updater computes it: the install root
+# (the folder holding metadata\updates) plus the packaged config's
+# package.launcherRelativePath. The Uninstall entry has no InstallLocation.
+$installedConfig = Get-ChildItem -Path @($env:LOCALAPPDATA, $env:ProgramFiles) -Recurse -Filter "gnustep-packager-update.json" -ErrorAction SilentlyContinue |
+  Where-Object { $_.FullName -like "*SampleGNUstepApp*\metadata\updates\*" } | Select-Object -First 1
+if ($null -eq $installedConfig) { throw "the installed updater config was not found" }
+$installRoot = $installedConfig.Directory.Parent.Parent.FullName
+$installedPackage = (Get-Content -Raw $installedConfig.FullName | ConvertFrom-Json -AsHashtable)["package"]
+if (-not $installedPackage.Contains("launcherRelativePath")) { throw "the installed config has no package.launcherRelativePath" }
+$relaunchPath = Join-Path $installRoot ([string]$installedPackage["launcherRelativePath"])
+if (-not (Test-Path $relaunchPath)) { throw "the relaunch path $relaunchPath does not exist" }
+Write-Host "install root: $installRoot; relaunch path: $relaunchPath"
 
 $results = [System.Collections.Generic.List[object]]::new()
 $failures = 0
@@ -166,7 +176,10 @@ foreach ($case in @(
   $prepareCode = $LASTEXITCODE
   $state = Get-Content -Raw $statePath | ConvertFrom-Json -AsHashtable
   $detail = if ($state.Contains("error")) { [string]$state["error"]["message"] } else { [string]$state["message"] }
+  $relaunched = "n/a"
   if ($state["status"] -eq "readyToApply") {
+    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue
+    $applyStart = Get-Date
     & $HelperPath --mode apply --plan $planPath --state-file $statePath | Out-Null
     $deadline = (Get-Date).AddMinutes(5)
     do {
@@ -174,14 +187,25 @@ foreach ($case in @(
       $state = Get-Content -Raw $statePath | ConvertFrom-Json -AsHashtable
     } while ($state["status"] -notin @("completed", "failed") -and (Get-Date) -lt $deadline)
     $detail = "apply: $($state["status"]): $($state["message"])"
-    Get-Process -Name "SampleGNUstepApp" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    # apply-msi.cmd starts the launcher once msiexec finishes; the fixture
+    # app then stays up for 30 seconds.
+    $relaunched = "no"
+    $waitUntil = (Get-Date).AddSeconds(30)
+    do {
+      $started = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.Path -and $_.Path.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase) -and $_.StartTime -ge $applyStart })
+      if ($started.Count -gt 0) { $relaunched = "yes: " + (($started | ForEach-Object { Split-Path -Leaf $_.Path }) -join ", "); break }
+      Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $waitUntil)
+    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue
   }
   $now = Get-GpInstalledSample
   $nowVersion = if ($now) { [string]$now.DisplayVersion } else { "none" }
   $outcome = if ($nowVersion -like "0.1.1*") { "installed" } elseif ($state["status"] -eq "failed" -and $nowVersion -like "0.1.0*") { "refused" } else { "unexpected" }
   $ok = $outcome -eq $case.Expect
+  if ($case.Expect -eq "installed" -and -not $relaunched.StartsWith("yes")) { $ok = $false }
   if (-not $ok) { $failures++ }
-  $results.Add([pscustomobject]@{ Case = $case.Name; Expected = $case.Expect; Outcome = $outcome; Installed = $nowVersion; PrepareExit = $prepareCode; Detail = $detail; Pass = $ok }) | Out-Null
+  $results.Add([pscustomobject]@{ Case = $case.Name; Expected = $case.Expect; Outcome = $outcome; Installed = $nowVersion; Relaunched = $relaunched; PrepareExit = $prepareCode; Detail = $detail; Pass = $ok }) | Out-Null
 }
 
 $results | Format-Table -AutoSize -Wrap | Out-String -Width 220 | Write-Host
