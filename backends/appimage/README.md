@@ -111,7 +111,9 @@ fonts, under a GNOME and a non-GNOME `XDG_CURRENT_DESKTOP`. Fedora matters
 here: it has no DejaVu, which `gnustep-back` falls back to.
 
 ## Command-Line Arguments
-`AppRun` runs the app in `launch.workingDirectory`, inside the mounted AppImage.
+`AppRun` runs the app in `launch.workingDirectory`, inside the mounted AppImage,
+unless that is `{@callerDirectory}`: then the app starts in the directory it was
+launched from.
 Before changing into that directory, it makes relative path arguments absolute
 against the directory the AppImage was started from. As a result,
 `./MyApp.AppImage Pictures/x.png` opens `Pictures/x.png` relative to the

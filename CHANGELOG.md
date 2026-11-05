@@ -16,6 +16,11 @@
   `docs/update-feed-contract.md`, which includes a test vector.
 
 ### Added
+- `launch.workingDirectory` accepts `{@callerDirectory}` on Linux: `AppRun`
+  then starts the app in the directory it was launched from instead of a
+  directory inside the AppImage, so the programs it starts (a terminal's
+  shell, a file manager's apps) start there too. Other platforms refuse it;
+  set it under `platformOverrides.linux.launch`.
 - `scripts/merge-update-feeds.ps1` merges per-artifact update feeds into one
   feed for several architectures. It puts x64 assets first, and refuses
   duplicate backend and platform pairs.
