@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Upgrading
+An app with `updates.enabled: true` needs a signing key before it can be built
+with this release. Do these together, in the release that moves to it:
+
+1. Make an Ed25519 key pair. Sparkle's `generate_keys` works, or
+   `openssl genpkey -algorithm ed25519`. Keep the private seed as a secret of
+   the release job only.
+2. Put the base64 public key in `updates.publicEDKey`. Validation fails without
+   one, and refuses the test key published in the docs.
+3. In the release job, after packaging and before publishing the feed, give
+   every asset an `edSignature` and a `versionSignature`. Use a signer checked
+   against the test vector in `docs/update-feed-contract.md`; ObjcMarkdown's
+   `sign-update-feed.py` with the versionSignature change is one.
+4. Keep each asset's `platform`, which the packager writes. To publish several
+   architectures in one feed, merge them with `scripts/merge-update-feeds.ps1`,
+   which keeps x64 first.
+
+What changes for users:
+- Copies built with v0.1.8 or earlier keep updating as before: they ignore the
+  new fields and take the first asset for their backend. So the first v0.1.9
+  build reaches them through the old updater, as long as the x64 asset comes
+  first.
+- Copies built with this release refuse an update whose asset lacks either
+  signature or doesn't match it, isn't newer than the installed version, or
+  has no build for the machine. The update error says which.
+- An app with updates turned on and no key can't be packaged with this release
+  until it has one. Turning updates off (`updates.enabled: false`) needs no key.
+
 ### Changed
 - **Breaking:** updates now require an Ed25519 signature. A manifest with
   `updates.enabled: true` must set `updates.publicEDKey`, or validation fails.
