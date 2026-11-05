@@ -9,7 +9,8 @@ typedef NS_ENUM(NSInteger, GPUpdaterErrorCode) {
   GPUpdaterErrorInvalidConfiguration = 1,
   GPUpdaterErrorConfigurationNotFound = 2,
   GPUpdaterErrorFeedLoadFailed = 3,
-  GPUpdaterErrorFeedParseFailed = 4
+  GPUpdaterErrorFeedParseFailed = 4,
+  GPUpdaterErrorNoAssetForPlatform = 5
 };
 
 @interface GPUpdateAsset ()
@@ -25,6 +26,7 @@ typedef NS_ENUM(NSInteger, GPUpdaterErrorCode) {
 @property (nonatomic, readwrite, copy) NSString *updateInformation;
 @property (nonatomic, readwrite, retain) NSURL *zsyncURL;
 @property (nonatomic, readwrite, copy) NSString *edSignature;
+@property (nonatomic, readwrite, copy) NSString *versionSignature;
 @end
 
 @interface GPUpdateRelease ()
@@ -222,6 +224,64 @@ static NSComparisonResult GPCompareVersions(NSString *leftVersion, NSString *rig
   return NSOrderedSame;
 }
 
+NSString *GPUpdaterCurrentPlatform(void) {
+#if defined(__APPLE__)
+  return @"macos";
+#else
+#if defined(_WIN32)
+  NSString *system = @"windows";
+#else
+  NSString *system = @"linux";
+#endif
+#if defined(__x86_64__) || defined(_M_X64)
+  NSString *architecture = @"x64";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  NSString *architecture = @"arm64";
+#else
+  NSString *architecture = @"unknown";
+#endif
+  return [NSString stringWithFormat:@"%@-%@", system, architecture];
+#endif
+}
+
+GPUpdateAsset *GPUpdaterPreferredAsset(NSArray *assets, NSString *backend, NSString *platform) {
+  BOOL x64 = [platform hasSuffix:@"-x64"];
+  NSEnumerator *assetEnumerator = [assets objectEnumerator];
+  GPUpdateAsset *asset = nil;
+  while ((asset = [assetEnumerator nextObject]) != nil) {
+    if (![[asset backend] isEqualToString:backend]) {
+      continue;
+    }
+    if ([[asset platform] length] == 0 ? x64 : [[asset platform] isEqualToString:platform]) {
+      return asset;
+    }
+  }
+  return nil;
+}
+
+NSComparisonResult GPUpdaterCompareVersions(NSString *leftVersion, NSString *rightVersion) {
+  return GPCompareVersions(leftVersion, rightVersion);
+}
+
+NSData *GPUpdaterVersionSignatureMessage(NSString *packageIdentifier, NSString *version, NSString *channel, NSString *platform, NSString *SHA256) {
+  NSArray *parts = [NSArray arrayWithObjects:@"gnustep-packager-update-v1",
+                                             packageIdentifier ? packageIdentifier : @"",
+                                             version ? version : @"",
+                                             channel ? channel : @"",
+                                             platform ? platform : @"",
+                                             SHA256 ? [SHA256 lowercaseString] : @"",
+                                             nil];
+  NSCharacterSet *lineBreaks = [NSCharacterSet newlineCharacterSet];
+  NSUInteger index = 0;
+  for (index = 0; index < [parts count]; index++) {
+    NSString *part = [parts objectAtIndex:index];
+    if ([part length] == 0 || [part rangeOfCharacterFromSet:lineBreaks].location != NSNotFound) {
+      return nil;
+    }
+  }
+  return [[parts componentsJoinedByString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 static GPUpdateAsset *GPUpdateAssetFromDictionary(NSDictionary *dictionary) {
   if (dictionary == nil) {
     return nil;
@@ -238,6 +298,7 @@ static GPUpdateAsset *GPUpdateAssetFromDictionary(NSDictionary *dictionary) {
   asset.installerVersion = GPStringValue([dictionary objectForKey:@"msiVersion"]);
   asset.updateInformation = GPStringValue([dictionary objectForKey:@"updateInformation"]);
   asset.edSignature = GPStringValue([dictionary objectForKey:@"edSignature"]);
+  asset.versionSignature = GPStringValue([dictionary objectForKey:@"versionSignature"]);
 
   NSNumber *sizeValue = GPNumberValue([dictionary objectForKey:@"sizeBytes"]);
   asset.sizeBytes = sizeValue != nil ? [sizeValue unsignedLongLongValue] : 0ULL;
@@ -283,6 +344,10 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
   return release;
 }
 
+GPUpdateRelease *GPUpdaterReleaseFromDictionary(NSDictionary *dictionary) {
+  return GPUpdateReleaseFromDictionary([dictionary isKindOfClass:[NSDictionary class]] ? dictionary : nil);
+}
+
 @implementation GPUpdateAsset
 
 @synthesize backend = _backend;
@@ -297,6 +362,7 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
 @synthesize updateInformation = _updateInformation;
 @synthesize zsyncURL = _zsyncURL;
 @synthesize edSignature = _edSignature;
+@synthesize versionSignature = _versionSignature;
 
 - (void)dealloc {
   [_backend release];
@@ -310,6 +376,7 @@ static GPUpdateRelease *GPUpdateReleaseFromDictionary(NSDictionary *dictionary) 
   [_updateInformation release];
   [_zsyncURL release];
   [_edSignature release];
+  [_versionSignature release];
   [super dealloc];
 }
 
@@ -773,15 +840,7 @@ static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
 }
 
 - (GPUpdateAsset *)_preferredAssetForRelease:(GPUpdateRelease *)release {
-  NSEnumerator *assetEnumerator = [[release assets] objectEnumerator];
-  GPUpdateAsset *asset = nil;
-  while ((asset = [assetEnumerator nextObject]) != nil) {
-    if ([[asset backend] isEqualToString:[[self configuration] backend]]) {
-      return asset;
-    }
-  }
-
-  return nil;
+  return GPUpdaterPreferredAsset([release assets], [[self configuration] backend], GPUpdaterCurrentPlatform());
 }
 
 - (GPUpdateCheckResult *)checkForUpdatesSynchronously:(NSError **)error {
@@ -820,6 +879,8 @@ static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
   NSArray *releaseDictionaries = GPArrayValue([feed objectForKey:@"releases"]);
   GPUpdateRelease *bestRelease = nil;
   GPUpdateAsset *bestAsset = nil;
+  // The newest release that has this backend only for other platforms.
+  GPUpdateRelease *otherPlatformRelease = nil;
   NSEnumerator *releaseEnumerator = [releaseDictionaries objectEnumerator];
   NSDictionary *releaseDictionary = nil;
   while ((releaseDictionary = [releaseEnumerator nextObject]) != nil) {
@@ -830,6 +891,19 @@ static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
 
     GPUpdateAsset *asset = [self _preferredAssetForRelease:release];
     if (asset == nil) {
+      BOOL hasBackend = NO;
+      NSEnumerator *assetEnumerator = [[release assets] objectEnumerator];
+      GPUpdateAsset *candidate = nil;
+      while ((candidate = [assetEnumerator nextObject]) != nil) {
+        if ([[candidate backend] isEqualToString:[[self configuration] backend]]) {
+          hasBackend = YES;
+        }
+      }
+      if (hasBackend &&
+          GPCompareVersions([release version], [[self configuration] currentVersion]) == NSOrderedDescending &&
+          (otherPlatformRelease == nil || GPCompareVersions([release version], [otherPlatformRelease version]) == NSOrderedDescending)) {
+        otherPlatformRelease = release;
+      }
       continue;
     }
 
@@ -847,6 +921,17 @@ static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
 
   GPUpdateCheckResult *result = [[[GPUpdateCheckResult alloc] init] autorelease];
   result.currentVersion = [[self configuration] currentVersion];
+
+  if ((bestRelease == nil || bestAsset == nil) && otherPlatformRelease != nil) {
+    // A newer version exists, but not for this computer: say so rather than
+    // report the app as up to date or install another platform's build.
+    if (error != NULL) {
+      *error = GPMakeUpdaterError(GPUpdaterErrorNoAssetForPlatform,
+        [NSString stringWithFormat:@"Version %@ is available, but has no download for this computer (%@).",
+          [otherPlatformRelease version], GPUpdaterCurrentPlatform()]);
+    }
+    return nil;
+  }
 
   if (bestRelease == nil || bestAsset == nil) {
     result.status = GPUpdateCheckStatusUpToDate;

@@ -174,6 +174,7 @@ Describe "Platform overrides and DMG manifest contract" {
   It "requires an update feed URL only for backends that emit updater output" {
     $updatesOn = @{
       enabled = $true
+      publicEDKey = "zhJy7ojERZsU55cvzuifdKiIIR2u3KeSp5M8GRFJrhM="
       github = @{ owner = "example"; repo = "sample"; tagPattern = "v{version}" }
     }
     $dmgOnlyPath = New-GpSiblingManifest -BaseManifestPath $script:macosManifestPath -Customize {

@@ -2058,7 +2058,7 @@ function Build-GpAppImageArtifact {
   }
 
   $toolEnvironment = @{
-    ARCH = "x86_64"
+    ARCH = Get-GpBackendArchitecture -Backend "appimage"
     VERSION = $Config.Version
   }
   if ($ToolPath.EndsWith(".AppImage", [System.StringComparison]::OrdinalIgnoreCase)) {
