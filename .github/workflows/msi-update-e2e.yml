@@ -61,19 +61,16 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Build gp-update-helper
-        shell: msys2 {0}
+        # In the toolchain's own MSYS2 root, where GNUstep.sh finds /clang64,
+        # as ObjcMarkdown's scripts/windows/build-from-powershell.ps1 does.
         run: |
-          set -euo pipefail
-          root="$(cygpath -u "$GP_GNUSTEP_CLI_ROOT")"
-          export PATH="$root/System/Tools:$root/Tools:$root/bin:$root/clang64/bin:$PATH"
-          # gnustep-config needs the GNUstep environment for its flags.
-          gnustep_sh="$(find "$root" -path '*/Makefiles/GNUstep.sh' -print -quit)"
-          echo "GNUstep.sh: $gnustep_sh"
-          set +u; . "$gnustep_sh"; set -u
-          command -v gnustep-config
-          echo "objc-flags: $(gnustep-config --objc-flags)"
-          make -C updater/objc/gp-update-helper
-          ls -l updater/objc/gp-update-helper/
+          $root = $env:GP_GNUSTEP_CLI_ROOT
+          $envExe = Join-Path $root "usr\bin\env.exe"
+          if (-not (Test-Path $envExe)) { throw "No env.exe in the toolchain root $root" }
+          $repo = (Resolve-Path .).Path
+          $bootstrap = "if [ -f /etc/profile ]; then source /etc/profile; fi; source /clang64/share/GNUstep/Makefiles/GNUstep.sh; cd `"`$(cygpath -u '$repo')`" && gnustep-config --objc-flags && make -C updater/objc/gp-update-helper && ls -l updater/objc/gp-update-helper"
+          & $envExe MSYSTEM=CLANG64 CHERE_INVOKING=1 /usr/bin/bash -lc $bootstrap
+          if ($LASTEXITCODE -ne 0) { throw "gp-update-helper did not build (exit $LASTEXITCODE)" }
 
       - name: Run MSI update end to end
         run: |
