@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- AppImage and MSI validation warn when an app that fetches https has no CA
+  bundle in the package and no `GS_TLS_CA_FILE`, `SSL_CERT_FILE` or `GSTLSCAFile`
+  setting. `validation.fetchesHttps` declares whether an app does; it defaults
+  to `updates.enabled`.
+
 ## v0.1.8
 
 ### Changed
@@ -20,10 +26,6 @@
   ProjectCenter and GWorkspace, built from upstream tags.
 - The test suite now validates every manifest under `examples/` against the
   schema and the validator.
-- AppImage and MSI validation warn when an app that fetches https has no CA
-  bundle in the package and no `GS_TLS_CA_FILE`, `SSL_CERT_FILE` or `GSTLSCAFile`
-  setting. `validation.fetchesHttps` declares whether an app does; it defaults
-  to `updates.enabled`.
 
 ### Fixed
 - Theme inputs: the default install command now names its install root in full.
