@@ -1761,6 +1761,9 @@ function Test-GpManifest {
         }
         if ($null -eq $publicKeyBytes -or $publicKeyBytes.Length -ne 32) {
           Add-Issue "updates.publicEDKey must be a base64 Ed25519 public key (32 bytes) when present."
+        } elseif ([string]$updates["publicEDKey"] -eq "Ll6BcPIwCiJWeu8fUhAG52rU62luKpZdTNsdJBfgxIs=") {
+          # Its private seed is published in docs/update-feed-contract.md.
+          Add-Issue "updates.publicEDKey is gnustep-packager's published test key, whose private half anyone can read. Generate a key pair of your own."
         }
       }
 

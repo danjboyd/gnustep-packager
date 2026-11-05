@@ -83,6 +83,25 @@ Describe "Updater contract" {
     }
   }
 
+  It "refuses the published test signing key" {
+    $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:linuxManifestPath -Customize {
+      param($manifest)
+      $manifest["updates"] = @{
+        enabled = $true
+        provider = "github-release-feed"
+        github = @{ owner = "example"; repo = "app" }
+        publicEDKey = "Ll6BcPIwCiJWeu8fUhAG52rU62luKpZdTNsdJBfgxIs="
+      }
+    }
+    try {
+      $context = Get-GpManifestContext -Path $manifestPath
+      $issues = @(Test-GpManifest -Manifest $context.Manifest)
+      Assert-GpTrue -Condition (@($issues | Where-Object { $_ -like "*published test key*" }).Count -eq 1) -Message "The published test key should be refused. Issues: $($issues -join '; ')"
+    } finally {
+      Remove-Item -Force $manifestPath -ErrorAction SilentlyContinue
+    }
+  }
+
   It "lets a manifest with updates turned off leave the signing key out" {
     $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:linuxManifestPath -Customize {
       param($manifest)

@@ -318,6 +318,9 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
   if ([asset edSignature] != nil) {
     [assetDictionary setObject:[asset edSignature] forKey:@"edSignature"];
   }
+  if ([asset versionSignature] != nil) {
+    [assetDictionary setObject:[asset versionSignature] forKey:@"versionSignature"];
+  }
   if ([asset zsyncURL] != nil) {
     NSDictionary *zsync = [NSDictionary dictionaryWithObject:[[asset zsyncURL] absoluteString] forKey:@"url"];
     [assetDictionary setObject:zsync forKey:@"zsync"];
