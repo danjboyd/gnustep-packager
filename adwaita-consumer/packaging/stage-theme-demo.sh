@@ -68,5 +68,16 @@ find "$app_stage" "$runtime_root/System/Library/Bundles" "$runtime_root/System/T
     cp -L "$library" "$runtime_root/lib/"
   done
 
-cp packaging/ThemeDemo.png "$stage_root/metadata/icons/ThemeDemo.png"
+# ThemeDemo has no icon of its own: use packaging/ThemeDemo.png when the repo
+# has one, otherwise GNUstep's own icon from the staged runtime.
+if [ -f packaging/ThemeDemo.png ]; then
+  cp packaging/ThemeDemo.png "$stage_root/metadata/icons/ThemeDemo.png"
+else
+  gnustep_icon=$(find "$runtime_root/System/Library/Images" -name 'GNUstep.tiff' | head -n 1)
+  if [ -z "$gnustep_icon" ]; then
+    printf 'No packaging/ThemeDemo.png and no GNUstep.tiff to make an icon from\n' >&2
+    exit 1
+  fi
+  convert "$gnustep_icon" -resize 256x256 "$stage_root/metadata/icons/ThemeDemo.png"
+fi
 cp COPYING.LIB "$stage_root/metadata/licenses/gnustep-runtime.txt"
