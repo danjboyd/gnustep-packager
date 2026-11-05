@@ -3,12 +3,21 @@
 ## Unreleased
 
 ### Changed
-- **Breaking:** updates now require an Ed25519 signature. A manifest with
-  `updates.enabled: true` must set `updates.publicEDKey`, or validation fails.
-  `gp-update-helper` refuses any update without a signing key or a valid
-  `edSignature`, and always downloads and verifies AppImages itself instead of
-  using `appimageupdatetool`. To adopt this release, add a key and sign your
-  release assets; see `docs/update-feed-contract.md`.
+### Added
+- `scripts/run-gui-isolated.sh` runs a GUI app with a private display and
+  session bus and a scratch directory bound over the real home.
+- `examples/downstream/theme-demos`: examples that package the theme demo apps
+  with the theme bundled through `themeInputs`: Adwaita as an AppImage and
+  WinUITheme as an MSI.
+- `examples/downstream/gnustep-apps`: example AppImage setups for Gorm,
+  ProjectCenter and GWorkspace, built from upstream tags.
+- The test suite now validates every manifest under `examples/` against the
+  schema and the validator.
+
+### Fixed
+- Theme inputs: the default install command now names its install root in full.
+  A manifest whose `bootstrapCommands` source `GNUstep.sh`, which unsets
+  `GNUSTEP_HOME`, no longer sends the theme install to `/GNUstep`.
 
 ## v0.1.7
 

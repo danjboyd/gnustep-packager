@@ -225,6 +225,9 @@ line: gnustep-make sets `GNUSTEP_HOME = $(HOME)` in its own configuration, so
 an exported `GNUSTEP_HOME` alone would install the theme into the build user's
 real `~/GNUstep/Library/Themes`, where it would later shadow the bundled copy
 of any app on that machine. A custom `build.installCommand` should do the same.
+The default command writes the path out in full because `GNUstep.sh` unsets
+`GNUSTEP_HOME`, so a `bootstrapCommands` entry that sources it can't redirect the
+install. A custom command that reads `$GNUSTEP_HOME` needs to allow for that.
 
 ## `hostDependencies`
 Declares app-specific host/build prerequisites that the shared tooling may

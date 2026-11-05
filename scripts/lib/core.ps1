@@ -4781,9 +4781,12 @@ function Get-GpThemeBuildCommand {
   param(
     [Parameter(Mandatory = $true)]
     [psobject]$Theme,
-    # The build shell's kind, for how the default install command names
+    # The build shell's kind, for how the default install command quotes
     # GNUSTEP_HOME.
-    [string]$ShellKind = "bash"
+    [string]$ShellKind = "bash",
+    # Where the theme installs, as the build shell writes the path.
+    [Parameter(Mandatory = $true)]
+    [string]$InstallHome
   )
 
   if (-not [string]::IsNullOrWhiteSpace([string]$Theme.BuildCommand)) {
@@ -4795,9 +4798,11 @@ function Get-GpThemeBuildCommand {
   } else {
     # On the command line, since gnustep-make sets GNUSTEP_HOME = $(HOME) in
     # its own configuration and so ignores the environment's: the theme then
-    # lands in the build user's real ~/GNUstep/Library/Themes.
-    $homeReference = if ($ShellKind -in @("pwsh", "powershell")) { '$env:GNUSTEP_HOME' } else { '$GNUSTEP_HOME' }
-    ('make install GNUSTEP_INSTALLATION_DOMAIN=USER GNUSTEP_HOME="{0}"' -f $homeReference)
+    # lands in the build user's real ~/GNUstep/Library/Themes. The path is
+    # literal because GNUstep.sh unsets GNUSTEP_HOME, and a manifest's
+    # bootstrapCommands may source it after the shell's environment is set.
+    $quotedHome = if ($ShellKind -in @("pwsh", "powershell")) { Escape-GpPwshLiteral -Value $InstallHome } else { Escape-GpBashLiteral -Value $InstallHome }
+    ("make install GNUSTEP_INSTALLATION_DOMAIN=USER GNUSTEP_HOME='{0}'" -f $quotedHome)
   }
 
   return ("make clean; make; {0}" -f $installCommand)
@@ -5080,7 +5085,7 @@ function Invoke-GpThemeProvisioning {
       $installRoot = Join-Path $installBaseRoot $theme.Name
       $resolvedCommit = if ($DryRun) { $null } else { Get-GpGitResolvedCommit -Path $sourcePath }
       $shellConfig = Get-GpThemeBuildShellConfig -Context $Context -Theme $theme -InstallRoot $installRoot -Backend $Backend
-      $buildCommand = Get-GpThemeBuildCommand -Theme $theme -ShellKind ([string]$shellConfig["kind"])
+      $buildCommand = Get-GpThemeBuildCommand -Theme $theme -ShellKind ([string]$shellConfig["kind"]) -InstallHome ([string]$shellConfig["environment"]["GNUSTEP_HOME"])
       $lines.Add(("SOURCE  {0}" -f $sourcePath)) | Out-Null
       if (-not [string]::IsNullOrWhiteSpace([string]$theme.Repo)) { $lines.Add(("REPO    {0}" -f $theme.Repo)) | Out-Null }
       if (-not [string]::IsNullOrWhiteSpace([string]$theme.Ref)) { $lines.Add(("REF     {0}" -f $theme.Ref)) | Out-Null }
