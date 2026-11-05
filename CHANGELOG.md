@@ -23,6 +23,17 @@
 - The test suite checks every example workflow that calls a reusable workflow:
   it may pass only inputs and secrets the workflow declares, must pass the
   required ones, and all examples must pin the same release.
+- `scripts/merge-update-feeds.ps1` merges per-artifact update feeds into one
+  feed for several architectures. It puts x64 assets first, and refuses
+  duplicate backend and platform pairs.
+
+### Fixed
+- Updater: a feed with assets for several architectures could install the
+  wrong one, because the first asset whose backend matched was taken. The
+  updater now takes the asset whose `platform` matches the running machine.
+  An asset with no platform counts as x64 only. When the newest version has
+  no build for the machine, the check says so instead of reporting the app
+  as up to date.
 
 ## v0.1.8
 
