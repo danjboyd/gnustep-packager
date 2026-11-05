@@ -110,7 +110,7 @@ Describe "AppImage backend" {
       $config = Get-GpAppImageConfig -Context $context
 
       Assert-GpEqual -Actual @(Get-GpEnabledBackends -Manifest $context.Manifest) -Expected @("appimage") -Message "Linux fixture should only enable the AppImage backend."
-      Assert-GpEqual -Actual $config.ArtifactPlan.ArtifactName -Expected "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage" -Message "AppImage artifact name should use the default naming pattern."
+      Assert-GpEqual -Actual $config.ArtifactPlan.ArtifactName -Expected "SampleGNUstepLinuxApp-0.1.0-$(Get-GpHostArchitecture).AppImage" -Message "AppImage artifact name should use the default naming pattern."
       Assert-GpEqual -Actual $config.DesktopEntryName -Expected "sample-gnustep-linux.desktop" -Message "AppImage desktop entry name should come from the manifest."
       Assert-GpEqual -Actual $config.Smoke.Mode -Expected "launch-only" -Message "Linux fixture should default to launch-only AppImage smoke validation."
     }
@@ -181,11 +181,11 @@ Describe "AppImage backend" {
     It "writes a provenance record that is safe to publish" {
       $provenancePath = $script:packageResult.ProvenancePath
       Assert-GpTrue -Condition (Test-Path $provenancePath) -Message "A provenance sidecar should be written beside the AppImage."
-      Assert-GpMatch -Actual $provenancePath -Pattern "SampleGNUstepLinuxApp-0\.1\.0-x86_64\.provenance\.json$" -Message "The provenance sidecar should be named after the artifact."
+      Assert-GpMatch -Actual $provenancePath -Pattern "SampleGNUstepLinuxApp-0\.1\.0-$(Get-GpHostArchitecture)\.provenance\.json$" -Message "The provenance sidecar should be named after the artifact."
 
       $text = Get-Content -Raw -Path $provenancePath
       $provenance = Get-GpJsonFile -Path $provenancePath
-      Assert-GpEqual -Actual $provenance["artifact"]["name"] -Expected "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage" -Message "The provenance should name the artifact, not its path."
+      Assert-GpEqual -Actual $provenance["artifact"]["name"] -Expected "SampleGNUstepLinuxApp-0.1.0-$(Get-GpHostArchitecture).AppImage" -Message "The provenance should name the artifact, not its path."
       Assert-GpEqual -Actual $provenance["artifact"]["sha256"] -Expected (Get-GpFileSha256 -Path $script:packageResult.ArtifactPath) -Message "The provenance should carry the artifact's SHA-256."
       Assert-GpEqual -Actual $provenance["package"]["version"] -Expected "0.1.0" -Message "The provenance should carry the package version."
       $entry = @($provenance["files"] | Where-Object { $_["role"] -eq "entry" })
@@ -754,7 +754,7 @@ Describe "AppImage backend" {
         Assert-GpTrue -Condition (Test-Path $result.UpdateFeedPath) -Message "Update-enabled AppImage packaging should emit an update feed sidecar."
         Assert-GpMatch -Actual $metadata["updates"]["appimage"]["updateInformation"] -Pattern "^gh-releases-zsync\|" -Message "AppImage metadata should record the embedded AppImage update information."
         Assert-GpEqual -Actual $metadata["updates"]["feedUrl"] -Expected "https://example.invalid/updates/linux/stable.json" -Message "AppImage metadata should record the resolved feed URL."
-        Assert-GpEqual -Actual $metadata["updates"]["appimage"]["zsyncArtifactName"] -Expected "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage.zsync" -Message "AppImage metadata should preserve the configured zsync artifact name even when the active appimagetool build omits the sidecar."
+        Assert-GpEqual -Actual $metadata["updates"]["appimage"]["zsyncArtifactName"] -Expected "SampleGNUstepLinuxApp-0.1.0-$(Get-GpHostArchitecture).AppImage.zsync" -Message "AppImage metadata should preserve the configured zsync artifact name even when the active appimagetool build omits the sidecar."
       } finally {
         if (Test-Path $manifestPath) {
           Remove-Item -Force $manifestPath
