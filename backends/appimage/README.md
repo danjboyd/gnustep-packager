@@ -6,7 +6,8 @@ AppImage using the shared stage-first packaging model.
 
 ## Supported Target
 - clang-based GNUstep builds on Linux
-- x86_64 AppImage artifacts
+- x86_64 and aarch64 AppImage artifacts, each built on a host of the same
+  architecture (`backends.appimage.architecture`, defaulting to the host's)
 - PowerShell 7+ orchestration on Linux hosts
 
 ## Shared Inputs
@@ -128,7 +129,8 @@ and desktop launchers pass absolute paths or `file://` URLs, so those launches
 are unaffected.
 
 ## Known Limitations
-- current artifact generation targets x86_64 only
+- an AppImage is built on a host of its own architecture: there is no cross
+  build or emulation
 - the staged Linux payload must still include its runtime closure; the backend validates that closure but does not harvest missing libraries for you
 - the backend does not currently drive `linuxdeploy` or distro-specific helpers
 

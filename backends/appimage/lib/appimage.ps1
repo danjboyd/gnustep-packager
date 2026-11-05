@@ -260,7 +260,8 @@ function Resolve-GpAppImageArtifactNamePattern {
     [Parameter(Mandatory = $true)]
     [System.Collections.IDictionary]$Package,
     [Parameter(Mandatory = $true)]
-    [string]$VersionToken
+    [string]$VersionToken,
+    [string]$Architecture = "x86_64"
   )
 
   return (Resolve-GpPatternTokens -Pattern $Pattern -Tokens @{
@@ -268,6 +269,7 @@ function Resolve-GpAppImageArtifactNamePattern {
     version = $VersionToken
     packageId = [string]$Package["id"]
     backend = "appimage"
+    arch = $Architecture
   })
 }
 
@@ -466,10 +468,11 @@ function Get-GpAppImageConfig {
     )
   }
 
-  $downloadUrl = [string]$backend["downloadUrl"]
+  $architecture = Get-GpBackendArchitecture -Backend "appimage" -Manifest $Context.Manifest
+  $downloadUrl = Resolve-GpPatternTokens -Pattern ([string]$backend["downloadUrl"]) -Tokens @{ arch = $architecture }
   $downloadLeaf = Split-Path -Leaf $downloadUrl
   if ([string]::IsNullOrWhiteSpace($downloadLeaf)) {
-    $downloadLeaf = "appimagetool-x86_64.AppImage"
+    $downloadLeaf = "appimagetool-$architecture.AppImage"
   }
   $appDirName = Resolve-GpPatternTokens -Pattern ([string]$backend["appDirName"]) -Tokens @{
     name = $package["name"]
@@ -480,10 +483,10 @@ function Get-GpAppImageConfig {
   $zsyncArtifactPattern = if ($backendUpdates.Contains("zsyncArtifactNamePattern") -and -not [string]::IsNullOrWhiteSpace([string]$backendUpdates["zsyncArtifactNamePattern"])) {
     [string]$backendUpdates["zsyncArtifactNamePattern"]
   } else {
-    "{name}-{version}-x86_64.AppImage.zsync"
+    "{name}-{version}-{arch}.AppImage.zsync"
   }
-  $zsyncArtifactName = Resolve-GpAppImageArtifactNamePattern -Pattern $zsyncArtifactPattern -Package $package -VersionToken ([string]$package["version"])
-  $zsyncLookupPattern = Resolve-GpAppImageArtifactNamePattern -Pattern $zsyncArtifactPattern -Package $package -VersionToken "*"
+  $zsyncArtifactName = Resolve-GpAppImageArtifactNamePattern -Pattern $zsyncArtifactPattern -Package $package -VersionToken ([string]$package["version"]) -Architecture $architecture
+  $zsyncLookupPattern = Resolve-GpAppImageArtifactNamePattern -Pattern $zsyncArtifactPattern -Package $package -VersionToken "*" -Architecture $architecture
   $releaseSelector = if ($backendUpdates.Contains("releaseSelector") -and -not [string]::IsNullOrWhiteSpace([string]$backendUpdates["releaseSelector"])) {
     [string]$backendUpdates["releaseSelector"]
   } else {
@@ -527,6 +530,7 @@ function Get-GpAppImageConfig {
     IconName = $desktopEntryBaseName
     IconExtension = ([System.IO.Path]::GetExtension([string]$backend["iconRelativePath"]).TrimStart(".").ToLowerInvariant())
     AppImageToolRoot = Resolve-GpPathRelativeToBase -BasePath $Context.ToolRoot -Path ([string]$backend["toolRoot"])
+    Architecture = $architecture
     AppImageToolDownloadUrl = $downloadUrl
     AppImageToolFileName = $downloadLeaf
     SkipAppStreamValidation = [bool]$backend["skipAppStreamValidation"]
@@ -939,6 +943,13 @@ function Ensure-GpAppImageTool {
     [string]$LogPath
   )
 
+  # appimagetool, and the runtime taken from it, run only on their own CPU, so
+  # the build host must match the target architecture.
+  $hostArchitecture = Get-GpHostArchitecture
+  if ($Config.Architecture -ne $hostArchitecture) {
+    throw "backends.appimage.architecture is $($Config.Architecture), but this host is $hostArchitecture. Build $($Config.Architecture) AppImages on a $($Config.Architecture) host (for aarch64, a runner such as ubuntu-24.04-arm)."
+  }
+
   $command = Get-Command appimagetool -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($command) {
     return $command.Source
@@ -975,7 +986,9 @@ function Ensure-GpAppImageRuntimeFile {
   }
 
   Ensure-GpDirectory -Path $WorkPaths.DownloadRoot | Out-Null
-  $runtimePath = Join-Path $WorkPaths.DownloadRoot "runtime-x86_64"
+  # Named after the tool it comes from, so an x86_64 and an aarch64 runtime
+  # never share a cached file.
+  $runtimePath = Join-Path $WorkPaths.DownloadRoot ("runtime-" + [System.IO.Path]::GetFileNameWithoutExtension((Split-Path -Leaf $ToolPath)))
   if (Test-Path $runtimePath) {
     Set-GpUnixExecutable -Path $runtimePath
     return $runtimePath
@@ -2058,7 +2071,7 @@ function Build-GpAppImageArtifact {
   }
 
   $toolEnvironment = @{
-    ARCH = Get-GpBackendArchitecture -Backend "appimage"
+    ARCH = $Config.Architecture
     VERSION = $Config.Version
   }
   if ($ToolPath.EndsWith(".AppImage", [System.StringComparison]::OrdinalIgnoreCase)) {

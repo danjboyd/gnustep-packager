@@ -16,6 +16,12 @@
   `docs/update-feed-contract.md`, which includes a test vector.
 
 ### Added
+- AppImage backend: aarch64 AppImages. `backends.appimage.architecture`
+  (`x86_64` or `aarch64`, defaulting to the build host's) picks the
+  appimagetool and runtime, `ARCH`, the `{arch}` token in the artifact, zsync
+  and download names, and the update feed's platform (`linux-arm64`). Build an
+  aarch64 AppImage on an aarch64 host, such as `ubuntu-24.04-arm`; a mismatch
+  stops packaging. CI builds and checks one there.
 - `examples/downstream/gnustep-apps`: SystemPreferences and Terminal AppImage
   setups. Terminal comes from `gnustep/gap` at a fixed commit, since that repo
   has no tags: `build-app.sh` now takes a tag or a commit, and optionally the
