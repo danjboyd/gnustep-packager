@@ -2,7 +2,17 @@
 
 ## Unreleased
 
+### Added
+- `examples/downstream/gnustep-apps`: SystemPreferences and Terminal AppImage
+  setups. Terminal comes from `gnustep/gap` at a fixed commit, since that repo
+  has no tags: `build-app.sh` now takes a tag or a commit, and optionally the
+  app's subdirectory.
+
+## v0.1.8
+
 ### Changed
+- The docs and `examples/downstream/` workflows pin `@v0.1.8`, and the
+  downstream example manifests point `$schema` at the v0.1.8 schema.
 - AppImage backend: the smoke launch refuses to run if `smoke.environment` points
   `GNUSTEP_HOME` at the real home or clears it.
 
@@ -13,8 +23,7 @@
   with the theme bundled through `themeInputs`: Adwaita as an AppImage and
   WinUITheme as an MSI.
 - `examples/downstream/gnustep-apps`: example AppImage setups for Gorm,
-  ProjectCenter, GWorkspace, SystemPreferences and Terminal, built from a fixed
-  upstream tag or commit.
+  ProjectCenter and GWorkspace, built from upstream tags.
 - The test suite now validates every manifest under `examples/` against the
   schema and the validator.
 
@@ -22,6 +31,16 @@
 - Theme inputs: the default install command now names its install root in full.
   A manifest whose `bootstrapCommands` source `GNUstep.sh`, which unsets
   `GNUSTEP_HOME`, no longer sends the theme install to `/GNUstep`.
+- Updater: automatic checks could stop west of UTC. gnustep-base reads a plist
+  date back shifted by the zone's offset, so the stored last check time moved on
+  every read and write of the defaults, into the future, where no check was due
+  until real time passed it. It's now stored as seconds since 1970, under
+  `lastCheckTime`, and a time in the future counts as due. The old
+  `lastCheckDate` is ignored and removed, so one automatic check runs after
+  updating.
+- Updater: a second, identical update offer could appear over the download after
+  a check by hand and Install Update. The pending launch check fired when the
+  alert closed. Any check now cancels it.
 
 ## v0.1.7
 
