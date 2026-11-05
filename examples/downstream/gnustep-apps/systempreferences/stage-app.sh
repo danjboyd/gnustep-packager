@@ -33,11 +33,24 @@ rm -rf "$runtime_root/System/Library/Makefiles" \
   "$runtime_root/System/Library/Themes" \
   "$runtime_root/System/Library/Documentation"
 
+# A GNUstep tool from the system domain, or from PATH when the toolchain keeps
+# it elsewhere (gnustep-cli-new does not put gdnc and its peers in
+# GNUSTEP_SYSTEM_TOOLS).
+system_tool() {
+  if [ -x "$system_tools/$1" ]; then
+    printf '%s\n' "$system_tools/$1"
+  elif command -v "$1" >/dev/null 2>&1; then
+    command -v "$1"
+  else
+    printf 'GNUstep tool %s not found in %s or on PATH\n' "$1" "$system_tools" >&2
+    return 1
+  fi
+}
 for tool in gdnc gpbs make_services; do
-  cp -a "$system_tools/$tool" "$runtime_root/System/Tools/"
+  cp -L "$(system_tool "$tool")" "$runtime_root/System/Tools/$tool"
 done
 # Seeding packaged defaults runs the bundled defaults tool from here.
-cp -a "$system_tools/defaults" "$runtime_root/bin/"
+cp -L "$(system_tool defaults)" "$runtime_root/bin/defaults"
 
 # Every shared library the staged programs and bundles need, except the host's
 # C runtime and what is already staged.
