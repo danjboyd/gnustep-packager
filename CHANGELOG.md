@@ -2,7 +2,11 @@
 
 ## Unreleased
 
+## v0.1.8
+
 ### Changed
+- The docs and `examples/downstream/` workflows pin `@v0.1.8`, and the
+  downstream example manifests point `$schema` at the v0.1.8 schema.
 - AppImage backend: the smoke launch refuses to run if `smoke.environment` points
   `GNUSTEP_HOME` at the real home or clears it.
 
