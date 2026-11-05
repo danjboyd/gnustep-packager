@@ -57,7 +57,7 @@ find "$stage_root/app" "$runtime_root/System" "$runtime_root/bin" -type f \
     cp -L "$library" "$runtime_root/lib/"
   done
 
-cp out/source/COPYING "$stage_root/metadata/licenses/$app_name.txt"
+cp out/COPYING "$stage_root/metadata/licenses/$app_name.txt"
 
 # The icon: the app's own, converted when it is a TIFF.
 icon=$(find "$stage_root/app/$app_name.app" -type f \( -iname "$app_name*.png" -o -iname "$app_name*.tif*" \) | head -n 1)
