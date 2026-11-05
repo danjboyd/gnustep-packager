@@ -38,7 +38,7 @@ jobs:
           chmod +x "$appimage"
           for image in ubuntu:24.04 fedora:42; do
             echo "::group::${{ matrix.app }} on $image"
-            case "$image" in ubuntu*) pkgs="libdbus-1-3" ;; fedora*) pkgs="dbus-libs" ;; esac
+            case "$image" in ubuntu*) pkgs="libdbus-1-3 libcairo2" ;; fedora*) pkgs="dbus-libs cairo" ;; esac
             GP_CLEAN_SMOKE_PACKAGES="$pkgs" GP_CLEAN_SMOKE_SECONDS=10 ./scripts/ci/appimage-clean-smoke.sh "$appimage" "$image" 2>&1 | tee "result-$(echo $image | tr ':/' '__').txt"
             echo "exit=${PIPESTATUS[0]}" | tee -a "result-$(echo $image | tr ':/' '__').txt"
             echo "::endgroup::"
