@@ -38,6 +38,7 @@ Example document:
     "url": "https://github.com/example-org/my-gnustep-app/releases/download/v1.2.3/MyGNUstepApp-1.2.3-x86_64.AppImage",
     "sha256": "abc123...",
     "edSignature": "base64 Ed25519 signature of the file (required)",
+    "versionSignature": "base64 Ed25519 signature of the version message for this package, version, channel, platform and sha256 (required; see update-feed-contract.md)",
     "sizeBytes": 12345678,
     "updateInformation": "gh-releases-zsync|example-org|my-gnustep-app|latest|MyGNUstepApp-*x86_64.AppImage.zsync",
     "zsync": {

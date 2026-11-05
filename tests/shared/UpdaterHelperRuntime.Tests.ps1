@@ -222,13 +222,28 @@ Describe "Updater helper runtime" {
     }
 
     $script:buildRoot = Get-GpTestBuildRoot
-    # A key made for these tests; its private half was discarded. The signatures
-    # are of the two payload strings the tests write.
-    $script:testPublicEDKey = "x+f7aDQnw8pdiEeMTF7t0mwSPExqX0/bEXVOqJfkfL4="
+    # The published test key (docs/update-feed-contract.md, "Test vector"): its
+    # seed is the 32 ASCII bytes "gnustep-packager test key, never". Validation
+    # refuses it as an app's updates.publicEDKey. edSignature values sign the
+    # payload strings; versionSignature values sign the canonical message for
+    # com.example.MyGNUstepApp with the version, channel and platform named
+    # (windows-x64 for the installers, linux-x64 for the AppImage).
+    $script:testPublicEDKey = "Ll6BcPIwCiJWeu8fUhAG52rU62luKpZdTNsdJBfgxIs="
     $script:msiPayload = "not really an installer"
-    $script:msiEdSignature = "HghrtAV2nkDXuZsFTaehVVKQ1cURc+3P7yINCN3Pqv3+Pmc+jUVSMnxkAFksR2lt1ZbdWdNsgdTPVD9IHGoRDg=="
+    $script:msiEdSignature = "OontQOUseqhwI8bs9WutMZpDP8CsAJ7VAmIO0CC3B40C29NAXAk7mHaLJVtbDOQxK+tUxuneXomb1b8VAoQ7Bw=="
+    $script:msiVersionSignature = "OznddanxdN2fuBl7/hJlwqj+rFthQ+ItcaDcH25RKtjymCuDudMpn+23Ynocc+6d8im05LYjMhCWnaGyK39+BA=="
+    $script:msiArm64VersionSignature = "2/pWnAvBIQYEr9lOxCNtmRyH9M4UD6BfFj6K3nwPXPCOY4QEFwprlDNPUoc/kdysYe7CwxZWsCoWTpwlLCKpDg=="
+    $script:msiBetaVersionSignature = "na8eZrDRfQDf71hUzIzBgx0gOjqvtHAFZDBygD8JVKHVJrccKR8qCrsnG/2Kp3jC4mfMyJ20IGO8nRi7P+z/DA=="
     $script:appImagePayload = "not really an AppImage"
-    $script:appImageEdSignature = "lCEV/sTg3ySWLfv3XtkioALgTWsq3RiVpUU5jX+Hd8b0c2b7BjAt8rbn8imRDBwaaoqzaLsRxR+bpcTN3bvLDQ=="
+    $script:appImageEdSignature = "xVwngNmacGV+JzBgtD6p5yPZDKpP0Zzp0fNjld0zH5mI+yD9rbWFk4vpb2oL/YSEOsM2LRoGO5fqQUBJpPkiCQ=="
+    $script:appImageVersionSignature = "mn/JSwKs5F0JsC7gKXM/r79HOKGmC8Ppa/C1EnnrfK+M4Xjgyqlk3vrenmUZAky6/C37HV0zKPF62OOlB956Bg=="
+    # A genuinely signed older release (1.2.1) and the installed one (1.2.2).
+    $script:olderPayload = "an older installer"
+    $script:olderEdSignature = "Sy88eRhNkHiN6wWkcsjwm673DHg9YPLFOQf+/W9xlQoPPZ3hoVD8GRoDeD3tqDUQtR6WO7o2q0QRtexoX9HOCw=="
+    $script:olderVersionSignature = "45AqH9kY/tfKrycQeZr8HEo4yWq71s7pqvTQgorem2IKmFNiRu6NC7wnXaxaqPfw5kFwysK9DqIXNM80AeQdDA=="
+    $script:installedPayload = "the installed installer"
+    $script:installedEdSignature = "jt7bX6Ugp0CiEHgECdT2BRdie5/Wi4HX9rnM5KQH8yuxC02A4HUat3Bu4Xul3mvxpft4Hnr6fK7EOuWLdm9NDA=="
+    $script:installedVersionSignature = "WPnt33rw95HCZduZ/hjD3/U5Zff/eUUxRxgjHVpPDW8dOtsm1Az/Z+uL0VASjeK1hjCKNEKSzo8KcvKVUOurBw=="
 
     # Runs the prepare phase on an MSI plan with the given key and signature,
     # and returns the state the helper wrote and its exit code.
@@ -236,7 +251,12 @@ Describe "Updater helper runtime" {
       param(
         [string]$PublicEDKey,
         [string]$EdSignature,
-        [string]$Payload = $script:msiPayload
+        [string]$Payload = $script:msiPayload,
+        [string]$VersionSignature = $script:msiVersionSignature,
+        [string]$ReleaseVersion = "1.2.3",
+        [string]$CurrentVersion = "1.2.2",
+        [string]$Channel = "stable",
+        [string]$Platform = "windows-x64"
       )
 
       $root = New-GpTestRoot
@@ -245,21 +265,24 @@ Describe "Updater helper runtime" {
         Ensure-GpDirectory -Path $workingRoot | Out-Null
         $assetPath = Join-Path $root "MyGNUstepApp-1.2.3.msi"
         [System.IO.File]::WriteAllText($assetPath, $Payload)
-        $package = [ordered]@{ id = "com.example.MyGNUstepApp"; name = "MyGNUstepApp"; displayName = "My GNUstep App"; currentVersion = "1.2.2"; backend = "msi" }
+        $package = [ordered]@{ id = "com.example.MyGNUstepApp"; name = "MyGNUstepApp"; displayName = "My GNUstep App"; currentVersion = $CurrentVersion; backend = "msi"; channel = $Channel }
         if ($PublicEDKey) { $package["publicEDKey"] = $PublicEDKey }
         $asset = [ordered]@{
           backend = "msi"
+          platform = $Platform
           kind = "msi"
           name = "MyGNUstepApp-1.2.3.msi"
           url = ([System.Uri]::new($assetPath)).AbsoluteUri
           sha256 = (Get-FileHash -Algorithm SHA256 -Path $assetPath).Hash.ToLowerInvariant()
         }
         if ($EdSignature) { $asset["edSignature"] = $EdSignature }
+        if ($VersionSignature) { $asset["versionSignature"] = $VersionSignature }
         $planPath = Join-Path $root "plan.json"
         $statePath = Join-Path $root "update-state.json"
         [System.IO.File]::WriteAllText($planPath, ([ordered]@{
           formatVersion = 1
           package = $package
+          release = [ordered]@{ version = $ReleaseVersion }
           asset = $asset
           execution = [ordered]@{ stateFile = $statePath; workingRoot = $workingRoot }
         } | ConvertTo-Json -Depth 8))
@@ -302,15 +325,19 @@ Describe "Updater helper runtime" {
           displayName = "My GNUstep App"
           currentVersion = "1.2.2"
           backend = "msi"
+          channel = "stable"
           publicEDKey = $script:testPublicEDKey
         }
+        release = [ordered]@{ version = "1.2.3" }
         asset = [ordered]@{
           backend = "msi"
+          platform = "windows-x64"
           kind = "msi"
           name = "MyGNUstepApp-1.2.3.msi"
           url = ([System.Uri]::new($assetPath)).AbsoluteUri
           sha256 = $sha256
           edSignature = $script:msiEdSignature
+          versionSignature = $script:msiVersionSignature
         }
         execution = [ordered]@{
           stateFile = $statePath
@@ -370,6 +397,101 @@ Describe "Updater helper runtime" {
     Assert-GpEqual -Actual $result.State["status"] -Expected "failed" -Message "A wrong signature must be refused."
     Assert-GpMatch -Actual (Get-GpTestStateError -State $result.State) -Pattern "does not match" -Message "The refusal should say the signature doesn't match."
     Assert-GpTrue -Condition (-not $result.Downloaded) -Message "The refused download should be deleted."
+  }
+
+  It "accepts a newer release whose version signature matches" {
+    if ($null -eq $script:helperPath) {
+      Set-ItResult -Skipped -Because "GP_UPDATE_HELPER_PATH is not set and the helper can't be built here"
+      return
+    }
+
+    $result = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $script:msiEdSignature
+    Assert-GpEqual -Actual $result.State["status"] -Expected "readyToApply" -Message "A correctly signed newer release should be prepared ($(Get-GpTestStateError -State $result.State))."
+  }
+
+  It "refuses a validly signed older payload offered as a newer version (rollback)" {
+    if ($null -eq $script:helperPath) {
+      Set-ItResult -Skipped -Because "GP_UPDATE_HELPER_PATH is not set and the helper can't be built here"
+      return
+    }
+
+    # The feed claims 1.2.3 but serves the publisher's real, signed 1.2.1.
+    $result = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -Payload $script:olderPayload -EdSignature $script:olderEdSignature -VersionSignature $script:olderVersionSignature -ReleaseVersion "1.2.3"
+    Assert-GpEqual -Actual $result.State["status"] -Expected "failed" -Message "A signed older payload under a newer version must be refused."
+    Assert-GpMatch -Actual (Get-GpTestStateError -State $result.State) -Pattern "version signature does not match" -Message "The refusal should name the version signature."
+    Assert-GpTrue -Condition (-not $result.Downloaded) -Message "The helper should refuse before downloading."
+  }
+
+  It "refuses a metadata-only version bump of the installed payload" {
+    if ($null -eq $script:helperPath) {
+      Set-ItResult -Skipped -Because "GP_UPDATE_HELPER_PATH is not set and the helper can't be built here"
+      return
+    }
+
+    $result = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -Payload $script:installedPayload -EdSignature $script:installedEdSignature -VersionSignature $script:installedVersionSignature -ReleaseVersion "1.2.3"
+    Assert-GpEqual -Actual $result.State["status"] -Expected "failed" -Message "The installed payload relabelled as 1.2.3 must be refused."
+    Assert-GpMatch -Actual (Get-GpTestStateError -State $result.State) -Pattern "version signature does not match" -Message "The refusal should name the version signature."
+  }
+
+  It "refuses a correctly signed release that is not newer than the installed version" {
+    if ($null -eq $script:helperPath) {
+      Set-ItResult -Skipped -Because "GP_UPDATE_HELPER_PATH is not set and the helper can't be built here"
+      return
+    }
+
+    # The publisher's real 1.2.1 entry, replayed to an app at 1.2.2.
+    $older = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -Payload $script:olderPayload -EdSignature $script:olderEdSignature -VersionSignature $script:olderVersionSignature -ReleaseVersion "1.2.1"
+    Assert-GpEqual -Actual $older.State["status"] -Expected "failed" -Message "An older release must be refused."
+    Assert-GpMatch -Actual (Get-GpTestStateError -State $older.State) -Pattern "not newer than the installed version \(1\.2\.2\)" -Message "The refusal should say it isn't newer."
+
+    $same = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -Payload $script:installedPayload -EdSignature $script:installedEdSignature -VersionSignature $script:installedVersionSignature -ReleaseVersion "1.2.2"
+    Assert-GpEqual -Actual $same.State["status"] -Expected "failed" -Message "The installed version must not be reinstalled as an update."
+  }
+
+  It "refuses a release signed for another channel" {
+    if ($null -eq $script:helperPath) {
+      Set-ItResult -Skipped -Because "GP_UPDATE_HELPER_PATH is not set and the helper can't be built here"
+      return
+    }
+
+    $result = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $script:msiEdSignature -VersionSignature $script:msiBetaVersionSignature -Channel "stable"
+    Assert-GpEqual -Actual $result.State["status"] -Expected "failed" -Message "A beta-signed release must not install on stable."
+    Assert-GpMatch -Actual (Get-GpTestStateError -State $result.State) -Pattern "version signature does not match" -Message "The refusal should name the version signature."
+  }
+
+  It "refuses a release signed for another platform" {
+    if ($null -eq $script:helperPath) {
+      Set-ItResult -Skipped -Because "GP_UPDATE_HELPER_PATH is not set and the helper can't be built here"
+      return
+    }
+
+    # A genuine windows-x64 installer relabelled as windows-arm64, and the reverse.
+    $relabelled = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $script:msiEdSignature -Platform "windows-arm64"
+    Assert-GpEqual -Actual $relabelled.State["status"] -Expected "failed" -Message "An x64 file labelled arm64 must be refused."
+    Assert-GpMatch -Actual (Get-GpTestStateError -State $relabelled.State) -Pattern "version signature does not match" -Message "The refusal should name the version signature."
+
+    $armSigned = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $script:msiEdSignature -VersionSignature $script:msiArm64VersionSignature -Platform "windows-x64"
+    Assert-GpEqual -Actual $armSigned.State["status"] -Expected "failed" -Message "A file signed as arm64 must not install as x64."
+
+    $noPlatform = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $script:msiEdSignature -Platform ""
+    Assert-GpEqual -Actual $noPlatform.State["status"] -Expected "failed" -Message "A plan with no platform can't be checked and must be refused."
+  }
+
+  It "refuses a release whose version signature is missing or altered" {
+    if ($null -eq $script:helperPath) {
+      Set-ItResult -Skipped -Because "GP_UPDATE_HELPER_PATH is not set and the helper can't be built here"
+      return
+    }
+
+    $missing = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $script:msiEdSignature -VersionSignature ""
+    Assert-GpEqual -Actual $missing.State["status"] -Expected "failed" -Message "A release without a version signature must be refused."
+    Assert-GpMatch -Actual (Get-GpTestStateError -State $missing.State) -Pattern "version is not signed" -Message "The refusal should say the version isn't signed."
+
+    $bytes = [System.Convert]::FromBase64String($script:msiVersionSignature)
+    $bytes[10] = $bytes[10] -bxor 0x01
+    $altered = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $script:msiEdSignature -VersionSignature ([System.Convert]::ToBase64String($bytes))
+    Assert-GpEqual -Actual $altered.State["status"] -Expected "failed" -Message "An altered version signature must be refused."
+    Assert-GpMatch -Actual (Get-GpTestStateError -State $altered.State) -Pattern "version signature does not match" -Message "The refusal should name the version signature."
   }
 
   It "reports a failed MSI install, with msiexec's exit code, at the next launch" {
@@ -483,14 +605,17 @@ Describe "Updater helper runtime" {
       $statePath = Join-Path $workingRoot "update-state.json"
       [System.IO.File]::WriteAllText($planPath, ([ordered]@{
         formatVersion = 1
-        package = [ordered]@{ id = "com.example.MyGNUstepApp"; backend = "appimage"; publicEDKey = $script:testPublicEDKey }
+        package = [ordered]@{ id = "com.example.MyGNUstepApp"; backend = "appimage"; currentVersion = "1.2.2"; channel = "stable"; publicEDKey = $script:testPublicEDKey }
+        release = [ordered]@{ version = "1.2.3" }
         asset = [ordered]@{
           backend = "appimage"
+          platform = "linux-x64"
           kind = "appimage"
           name = "MyGNUstepApp-1.2.3-x86_64.AppImage"
           url = ([System.Uri]::new($assetPath)).AbsoluteUri
           sha256 = (Get-FileHash -Algorithm SHA256 -Path $assetPath).Hash.ToLowerInvariant()
           edSignature = $script:appImageEdSignature
+          versionSignature = $script:appImageVersionSignature
         }
         execution = [ordered]@{
           stateFile = $statePath
