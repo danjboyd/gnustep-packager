@@ -226,22 +226,24 @@ Describe "Updater helper runtime" {
     # seed is the 32 ASCII bytes "gnustep-packager test key, never". Validation
     # refuses it as an app's updates.publicEDKey. edSignature values sign the
     # payload strings; versionSignature values sign the canonical message for
-    # com.example.MyGNUstepApp with the version and channel named.
+    # com.example.MyGNUstepApp with the version, channel and platform named
+    # (windows-x64 for the installers, linux-x64 for the AppImage).
     $script:testPublicEDKey = "Ll6BcPIwCiJWeu8fUhAG52rU62luKpZdTNsdJBfgxIs="
     $script:msiPayload = "not really an installer"
     $script:msiEdSignature = "OontQOUseqhwI8bs9WutMZpDP8CsAJ7VAmIO0CC3B40C29NAXAk7mHaLJVtbDOQxK+tUxuneXomb1b8VAoQ7Bw=="
-    $script:msiVersionSignature = "rqYUwN/yEVHlQp4XuaCWvOtm07SXTp27vCZFpiiplARtA6T7/im74l7WGP0LMA6qjm0YEDw4oa3Cti8xBOMWCw=="
-    $script:msiBetaVersionSignature = "nck/b6BDzCUTabW3b5mxY3K9qVj6rw9pWrzIeydqvKbX+OIeDAz+xMVFEs43jTCoOlUMy9a/GwFJJiILBXBPAA=="
+    $script:msiVersionSignature = "OznddanxdN2fuBl7/hJlwqj+rFthQ+ItcaDcH25RKtjymCuDudMpn+23Ynocc+6d8im05LYjMhCWnaGyK39+BA=="
+    $script:msiArm64VersionSignature = "2/pWnAvBIQYEr9lOxCNtmRyH9M4UD6BfFj6K3nwPXPCOY4QEFwprlDNPUoc/kdysYe7CwxZWsCoWTpwlLCKpDg=="
+    $script:msiBetaVersionSignature = "na8eZrDRfQDf71hUzIzBgx0gOjqvtHAFZDBygD8JVKHVJrccKR8qCrsnG/2Kp3jC4mfMyJ20IGO8nRi7P+z/DA=="
     $script:appImagePayload = "not really an AppImage"
     $script:appImageEdSignature = "xVwngNmacGV+JzBgtD6p5yPZDKpP0Zzp0fNjld0zH5mI+yD9rbWFk4vpb2oL/YSEOsM2LRoGO5fqQUBJpPkiCQ=="
-    $script:appImageVersionSignature = "ypaaVcaopQ3cOAv4KPkyZWG3KcbFT5tv0qYyfihzedtb8UroESZkwOZy0vI7P41CMiy2i6Iy1NXTm2JnrwrFBw=="
+    $script:appImageVersionSignature = "mn/JSwKs5F0JsC7gKXM/r79HOKGmC8Ppa/C1EnnrfK+M4Xjgyqlk3vrenmUZAky6/C37HV0zKPF62OOlB956Bg=="
     # A genuinely signed older release (1.2.1) and the installed one (1.2.2).
     $script:olderPayload = "an older installer"
     $script:olderEdSignature = "Sy88eRhNkHiN6wWkcsjwm673DHg9YPLFOQf+/W9xlQoPPZ3hoVD8GRoDeD3tqDUQtR6WO7o2q0QRtexoX9HOCw=="
-    $script:olderVersionSignature = "H9NtsUV6rmpKDEAHjLXWSsozRxaIa0H05D54u6VbkEK9q2hDbKTKBoY/d/RJAPtiZHWwc4yvIVUTFirYoxORAg=="
+    $script:olderVersionSignature = "45AqH9kY/tfKrycQeZr8HEo4yWq71s7pqvTQgorem2IKmFNiRu6NC7wnXaxaqPfw5kFwysK9DqIXNM80AeQdDA=="
     $script:installedPayload = "the installed installer"
     $script:installedEdSignature = "jt7bX6Ugp0CiEHgECdT2BRdie5/Wi4HX9rnM5KQH8yuxC02A4HUat3Bu4Xul3mvxpft4Hnr6fK7EOuWLdm9NDA=="
-    $script:installedVersionSignature = "+w2i484Uf474MgkliOu7iy2wMeLYiKHSPFAFORJ6JswqVzYQbDhj+LSEZNYCph6t5xZejAyTL9s4V1JhD+mtDQ=="
+    $script:installedVersionSignature = "WPnt33rw95HCZduZ/hjD3/U5Zff/eUUxRxgjHVpPDW8dOtsm1Az/Z+uL0VASjeK1hjCKNEKSzo8KcvKVUOurBw=="
 
     # Runs the prepare phase on an MSI plan with the given key and signature,
     # and returns the state the helper wrote and its exit code.
@@ -253,7 +255,8 @@ Describe "Updater helper runtime" {
         [string]$VersionSignature = $script:msiVersionSignature,
         [string]$ReleaseVersion = "1.2.3",
         [string]$CurrentVersion = "1.2.2",
-        [string]$Channel = "stable"
+        [string]$Channel = "stable",
+        [string]$Platform = "windows-x64"
       )
 
       $root = New-GpTestRoot
@@ -266,6 +269,7 @@ Describe "Updater helper runtime" {
         if ($PublicEDKey) { $package["publicEDKey"] = $PublicEDKey }
         $asset = [ordered]@{
           backend = "msi"
+          platform = $Platform
           kind = "msi"
           name = "MyGNUstepApp-1.2.3.msi"
           url = ([System.Uri]::new($assetPath)).AbsoluteUri
@@ -327,6 +331,7 @@ Describe "Updater helper runtime" {
         release = [ordered]@{ version = "1.2.3" }
         asset = [ordered]@{
           backend = "msi"
+          platform = "windows-x64"
           kind = "msi"
           name = "MyGNUstepApp-1.2.3.msi"
           url = ([System.Uri]::new($assetPath)).AbsoluteUri
@@ -452,6 +457,24 @@ Describe "Updater helper runtime" {
     $result = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $script:msiEdSignature -VersionSignature $script:msiBetaVersionSignature -Channel "stable"
     Assert-GpEqual -Actual $result.State["status"] -Expected "failed" -Message "A beta-signed release must not install on stable."
     Assert-GpMatch -Actual (Get-GpTestStateError -State $result.State) -Pattern "version signature does not match" -Message "The refusal should name the version signature."
+  }
+
+  It "refuses a release signed for another platform" {
+    if ($null -eq $script:helperPath) {
+      Set-ItResult -Skipped -Because "GP_UPDATE_HELPER_PATH is not set and the helper can't be built here"
+      return
+    }
+
+    # A genuine windows-x64 installer relabelled as windows-arm64, and the reverse.
+    $relabelled = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $script:msiEdSignature -Platform "windows-arm64"
+    Assert-GpEqual -Actual $relabelled.State["status"] -Expected "failed" -Message "An x64 file labelled arm64 must be refused."
+    Assert-GpMatch -Actual (Get-GpTestStateError -State $relabelled.State) -Pattern "version signature does not match" -Message "The refusal should name the version signature."
+
+    $armSigned = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $script:msiEdSignature -VersionSignature $script:msiArm64VersionSignature -Platform "windows-x64"
+    Assert-GpEqual -Actual $armSigned.State["status"] -Expected "failed" -Message "A file signed as arm64 must not install as x64."
+
+    $noPlatform = Invoke-GpTestPrepare -PublicEDKey $script:testPublicEDKey -EdSignature $script:msiEdSignature -Platform ""
+    Assert-GpEqual -Actual $noPlatform.State["status"] -Expected "failed" -Message "A plan with no platform can't be checked and must be refused."
   }
 
   It "refuses a release whose version signature is missing or altered" {
@@ -586,6 +609,7 @@ Describe "Updater helper runtime" {
         release = [ordered]@{ version = "1.2.3" }
         asset = [ordered]@{
           backend = "appimage"
+          platform = "linux-x64"
           kind = "appimage"
           name = "MyGNUstepApp-1.2.3-x86_64.AppImage"
           url = ([System.Uri]::new($assetPath)).AbsoluteUri

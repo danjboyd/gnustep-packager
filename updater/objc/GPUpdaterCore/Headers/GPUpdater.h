@@ -35,8 +35,8 @@ typedef NS_ENUM(NSInteger, GPUpdateCheckStatus) {
 @property (nonatomic, readonly, copy) NSString *edSignature;
 // The Ed25519 signature, base64, of GPUpdaterVersionSignatureMessage() for
 // this asset (the feed's "versionSignature"). It ties the asset's SHA-256 to
-// the package, release version and channel, so a feed can't offer an older
-// signed payload as a newer version.
+// the package, release version, channel and platform, so a feed can't offer
+// an older signed payload as a newer version, or one platform's as another's.
 @property (nonatomic, readonly, copy) NSString *versionSignature;
 @end
 
@@ -111,6 +111,7 @@ FOUNDATION_EXPORT NSComparisonResult GPUpdaterCompareVersions(NSString *leftVers
 //   <package id>
 //   <release version>
 //   <channel>
+//   <asset platform, such as linux-x64>
 //   <asset SHA-256, lowercase hex>
 // Returns nil when any part is empty or contains a line break.
-FOUNDATION_EXPORT NSData *GPUpdaterVersionSignatureMessage(NSString *packageIdentifier, NSString *version, NSString *channel, NSString *SHA256);
+FOUNDATION_EXPORT NSData *GPUpdaterVersionSignatureMessage(NSString *packageIdentifier, NSString *version, NSString *channel, NSString *platform, NSString *SHA256);

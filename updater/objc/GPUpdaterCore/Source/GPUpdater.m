@@ -227,11 +227,12 @@ NSComparisonResult GPUpdaterCompareVersions(NSString *leftVersion, NSString *rig
   return GPCompareVersions(leftVersion, rightVersion);
 }
 
-NSData *GPUpdaterVersionSignatureMessage(NSString *packageIdentifier, NSString *version, NSString *channel, NSString *SHA256) {
+NSData *GPUpdaterVersionSignatureMessage(NSString *packageIdentifier, NSString *version, NSString *channel, NSString *platform, NSString *SHA256) {
   NSArray *parts = [NSArray arrayWithObjects:@"gnustep-packager-update-v1",
                                              packageIdentifier ? packageIdentifier : @"",
                                              version ? version : @"",
                                              channel ? channel : @"",
+                                             platform ? platform : @"",
                                              SHA256 ? [SHA256 lowercaseString] : @"",
                                              nil];
   NSCharacterSet *lineBreaks = [NSCharacterSet newlineCharacterSet];

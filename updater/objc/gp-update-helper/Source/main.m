@@ -767,14 +767,14 @@ static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun)
 
   {
     NSString *refusal = nil;
-    NSData *versionMessage = GPUpdaterVersionSignatureMessage(packageIdentifier, releaseVersion, channel, sha256);
+    NSData *versionMessage = GPUpdaterVersionSignatureMessage(packageIdentifier, releaseVersion, channel, GPHelperStringValue([asset objectForKey:@"platform"]), sha256);
     NSError *versionError = nil;
     if ([versionSignature length] == 0) {
       refusal = @"The update's version is not signed.";
     } else if (versionMessage == nil) {
-      refusal = @"The update plan is missing the package id, version, channel or SHA-256 that the version signature covers.";
+      refusal = @"The update plan is missing the package id, version, channel, platform or SHA-256 that the version signature covers.";
     } else if (!GPHelperVerifyEdSignatureOfData(versionMessage, versionSignature, publicEDKey,
-                                               @"The update's version signature does not match: the feed's version, channel or file is not the one the publisher signed.",
+                                               @"The update's version signature does not match: the feed's version, channel, platform or file is not the one the publisher signed.",
                                                &versionError)) {
       refusal = [versionError localizedDescription];
     } else if ([currentVersion length] == 0 || GPUpdaterCompareVersions(releaseVersion, currentVersion) != NSOrderedDescending) {
