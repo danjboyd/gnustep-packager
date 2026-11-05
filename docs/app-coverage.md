@@ -33,6 +33,7 @@ Legend:
 | ProjectCenter | example (`gnustep-apps/projectcenter`) | none | none | none | Upstream GNUstep app, tag `projectcenter-0_7_0` |
 | GWorkspace | example (`gnustep-apps/gworkspace`) | none | none | none | Upstream GNUstep app, tag `gworkspace-1_0_0` |
 | SystemPreferences | example (`gnustep-apps/systempreferences`) | none | none | none | Upstream GNUstep app, tag `systempreferences-1_2_1` |
+| Terminal | example (`gnustep-apps/terminal`) | none | none | none | GAP app, `gnustep/gap` commit `220860a` (the repo has no tags) |
 
 ## Command-arrow word moves (PR #83)
 

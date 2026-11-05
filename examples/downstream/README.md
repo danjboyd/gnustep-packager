@@ -26,8 +26,8 @@ Contents:
 - `theme-demos/`
   Theme demo app packaged with its theme bundled through `themeInputs`
 - `gnustep-apps/`
-  Gorm, ProjectCenter, GWorkspace and SystemPreferences as AppImages, built from upstream tags
-  without changing the upstream repos
+  Gorm, ProjectCenter, GWorkspace, SystemPreferences and Terminal as AppImages,
+  built from a fixed upstream tag or commit without changing the upstream repos
 - `package-release-with-updates.yml`
   End-to-end downstream GitHub Actions example that packages Windows and Linux,
   publishes release assets, and deploys stable update feeds to GitHub Pages

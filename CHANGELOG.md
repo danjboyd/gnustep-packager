@@ -3,7 +3,10 @@
 ## Unreleased
 
 ### Added
-- `examples/downstream/gnustep-apps`: a SystemPreferences AppImage setup.
+- `examples/downstream/gnustep-apps`: SystemPreferences and Terminal AppImage
+  setups. Terminal comes from `gnustep/gap` at a fixed commit, since that repo
+  has no tags: `build-app.sh` now takes a tag or a commit, and optionally the
+  app's subdirectory.
 
 ## v0.1.8
 
