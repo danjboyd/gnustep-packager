@@ -187,6 +187,33 @@ AppImage feeds add AppImage-native fields:
 - `updateInformation`
 - nested `zsync`
 
+### Platforms
+
+Each asset's `platform` names the machines it runs on: `linux-x64`,
+`linux-arm64`, `windows-x64`, `windows-arm64`, or `macos` for DMG. The
+packager sets it from the architecture the backend builds for. Both the
+AppImage and MSI backends build x64 only so far.
+
+The updater takes the asset whose backend and platform match the running
+machine exactly, wherever it is in the release. An asset with no `platform`,
+as feeds before v0.1.9 had, counts as x64 only, so an arm64 machine never
+installs it. If the newest release has no asset for the machine, the check
+fails with "Version X is available, but has no download for this computer
+(platform)" instead of reporting the app as up to date. An older release that
+does have one is still offered.
+
+To publish one feed for several architectures, merge the per-artifact feeds:
+
+```sh
+pwsh scripts/merge-update-feeds.ps1 -Output stable.json \
+  x64/MyApp-1.2.3-x86_64.update-feed.json arm64/MyApp-1.2.3-aarch64.update-feed.json
+```
+
+It combines releases with the same version, puts x64 assets first, and
+refuses duplicate backend and platform pairs, or feeds for another package or
+channel. Keep x64 first in a feed you assemble yourself, too: updaters before
+v0.1.9 install the first asset whose backend matches, whatever its platform.
+
 ## Current Publishing Model
 The downstream repo is expected to publish the generated feed file at the
 configured feed URL.
