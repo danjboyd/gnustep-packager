@@ -16,6 +16,9 @@
   ProjectCenter and GWorkspace, built from upstream tags.
 - The test suite now validates every manifest under `examples/` against the
   schema and the validator.
+- The test suite checks every example workflow that calls a reusable workflow:
+  it may pass only inputs and secrets the workflow declares, must pass the
+  required ones, and all examples must pin the same release.
 
 ### Fixed
 - Theme inputs: the default install command now names its install root in full.
