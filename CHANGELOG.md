@@ -18,6 +18,11 @@
   schema and the validator.
 
 ### Fixed
+- AppImage backend: opening a URL or file from an app no longer starts the
+  host's browser or viewer with the bundled libraries. `AppRun` saves the
+  caller's environment as `GP_HOST_*` before changing it, and a bundled
+  `gp-bin/xdg-open` restores it, along with the caller's directory, before
+  running the host's `xdg-open`.
 - Theme inputs: the default install command now names its install root in full.
   A manifest whose `bootstrapCommands` source `GNUstep.sh`, which unsets
   `GNUSTEP_HOME`, no longer sends the theme install to `/GNUstep`.
