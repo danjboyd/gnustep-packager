@@ -143,6 +143,37 @@ is enabled. For self-hosted runners with `skip-default-host-setup: true`, make
 the caller preflight run `gnustep --version` and `gnustep doctor --json` against
 the expected toolchain before packaging.
 
+## Strict TLS (gnustep-cli v0.1.5 and later)
+
+From v0.1.5, gnustep-cli builds gnustep-base with strict host verification on
+by default. An app that fetches https through GNUstep (`NSURLSession`,
+`NSURLConnection`, `NSStream` with TLS, or the updater) refuses the connection
+when it can't read any trusted certificate authorities. gnustep-base looks for
+them in this order, and uses the first one that is set:
+
+1. the `GSTLSCAFile` user default
+2. the `GS_TLS_CA_FILE` environment variable
+3. the `SSL_CERT_FILE` environment variable
+4. the system trust store, through the bundled libgnutls
+5. only if that fails, `GSTLS/ca-certificates.crt` in gnustep-base's resources
+
+In a package, step 4 is the trust-store path compiled into the libgnutls you
+bundle. A library built on Debian or Ubuntu reads
+`/etc/ssl/certs/ca-certificates.crt`. A target that keeps its bundle elsewhere
+falls through to step 5, so the package needs that file. On Windows, libgnutls
+reads the Windows certificate store.
+
+To keep step 5 working, stage gnustep-base's `Resources/GSTLS` folder with
+the rest of its resources. A stage script that copies the whole system
+`Library`, as `examples/downstream/gnustep-apps/stage-app.sh` does, already
+includes it. To use a bundle of your own, ship it and set `GS_TLS_CA_FILE` to
+it under `launch.env`.
+
+Set `validation.fetchesHttps: true` for an app that does this without
+`updates.enabled`. AppImage and MSI validation then warn when the package has
+neither `GSTLS/ca-certificates.crt` nor one of the settings above. It's a
+warning, not an error, because the target's system store may be enough.
+
 ## Release Baseline
 
 Release notes should identify the known-good `gnustep-cli-new` release manifest
