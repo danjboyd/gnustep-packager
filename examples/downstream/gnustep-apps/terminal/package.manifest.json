@@ -8,7 +8,8 @@
     "linux": {
       "aptPackages": [
         "imagemagick",
-        "file"
+        "file",
+        "fonts-dejavu-core"
       ]
     }
   },
@@ -107,6 +108,22 @@
       },
       "smoke": {
         "mode": "launch-only"
+      },
+      "fonts": {
+        "bundle": [
+          {
+            "name": "DejaVu",
+            "files": [
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+            ],
+            "licenseFile": "/usr/share/doc/fonts-dejavu-core/copyright",
+            "license": "Bitstream-Vera AND LicenseRef-DejaVu-public-domain",
+            "homepage": "https://dejavu-fonts.github.io/"
+          }
+        ]
       }
     }
   }
