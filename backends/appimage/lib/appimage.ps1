@@ -3068,6 +3068,29 @@ function Get-GpAppImageSmokeProcessIds {
 
 # Ends a smoke launch and everything it started: TERM, a short wait, then
 # KILL. Returns the processes still alive afterwards.
+# A process counts as running while /proc has it and it isn't a zombie. In a
+# container with no init to reap them, killed orphans stay as zombies, which
+# are already dead.
+function Test-GpProcessAlive {
+  param(
+    [Parameter(Mandatory = $true)]
+    [int]$ProcessId
+  )
+
+  $statPath = "/proc/{0}/stat" -f $ProcessId
+  if (-not (Test-Path $statPath)) {
+    return $false
+  }
+  try {
+    $stat = Get-Content -Raw -Path $statPath -ErrorAction Stop
+  } catch {
+    return $false
+  }
+  # The state follows the command name, which is in parentheses and may hold spaces.
+  $afterName = $stat.Substring($stat.LastIndexOf(")") + 1).TrimStart()
+  return -not $afterName.StartsWith("Z")
+}
+
 function Stop-GpAppImageSmokeProcess {
   param(
     [AllowNull()]
@@ -3082,13 +3105,13 @@ function Stop-GpAppImageSmokeProcess {
   }
 
   foreach ($signal in @("TERM", "KILL")) {
-    $alive = @($targets | Where-Object { Test-Path ("/proc/{0}" -f $_) })
+    $alive = @($targets | Where-Object { (Test-GpProcessAlive -ProcessId $_) })
     if ($alive.Count -eq 0) {
       break
     }
     & env kill ("-" + $signal) @($alive | ForEach-Object { [string]$_ }) 2>$null
     $deadline = (Get-Date).AddSeconds(3)
-    while ((Get-Date) -lt $deadline -and @($alive | Where-Object { Test-Path ("/proc/{0}" -f $_) }).Count -gt 0) {
+    while ((Get-Date) -lt $deadline -and @($alive | Where-Object { (Test-GpProcessAlive -ProcessId $_) }).Count -gt 0) {
       Start-Sleep -Milliseconds 100
     }
     # Pick up anything started while the first ones were stopping.
@@ -3102,7 +3125,7 @@ function Stop-GpAppImageSmokeProcess {
     }
   }
 
-  return [int[]]@($targets | Where-Object { Test-Path ("/proc/{0}" -f $_) })
+  return [int[]]@($targets | Where-Object { (Test-GpProcessAlive -ProcessId $_) })
 }
 
 function Complete-GpAppImageSmokeProcess {

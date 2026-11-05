@@ -1003,10 +1003,10 @@ Describe "AppImage backend" {
         $survivors = @(Stop-GpAppImageSmokeProcess -Process $tree -GnustepHome $gnustepHome)
         Assert-GpEqual -Actual $survivors.Count -Expected 0 -Message "Nothing from the smoke launch should survive."
         foreach ($id in $treeIds) {
-          Assert-GpTrue -Condition (-not (Test-Path "/proc/$id")) -Message "Process $id from the smoke tree should be gone."
+          Assert-GpTrue -Condition (-not (Test-GpProcessAlive -ProcessId $id)) -Message "Process $id from the smoke tree should be gone."
         }
-        Assert-GpTrue -Condition (-not (Test-Path "/proc/$($detached.Id)")) -Message "A detached process with the smoke's GNUstep home should be gone."
-        Assert-GpTrue -Condition (Test-Path "/proc/$($other.Id)") -Message "A process with a different GNUstep home should be left alone."
+        Assert-GpTrue -Condition (-not (Test-GpProcessAlive -ProcessId $detached.Id)) -Message "A detached process with the smoke's GNUstep home should be gone."
+        Assert-GpTrue -Condition (Test-GpProcessAlive -ProcessId $other.Id) -Message "A process with a different GNUstep home should be left alone."
       } finally {
         foreach ($process in @($tree, $detached, $other)) {
           Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
