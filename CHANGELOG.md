@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- `launch.workingDirectory` accepts `{@callerDirectory}` on Linux: `AppRun`
+  then starts the app in the directory it was launched from instead of a
+  directory inside the AppImage, so the programs it starts (a terminal's
+  shell, a file manager's apps) start there too. Other platforms refuse it;
+  set it under `platformOverrides.linux.launch`.
+
 ## v0.1.8
 
 ### Changed
@@ -20,11 +27,6 @@
   ProjectCenter and GWorkspace, built from upstream tags.
 - The test suite now validates every manifest under `examples/` against the
   schema and the validator.
-- `launch.workingDirectory` accepts `{@callerDirectory}` on Linux: `AppRun`
-  then starts the app in the directory it was launched from instead of a
-  directory inside the AppImage, so the programs it starts (a terminal's
-  shell, a file manager's apps) start there too. Other platforms refuse it;
-  set it under `platformOverrides.linux.launch`.
 
 ### Fixed
 - Theme inputs: the default install command now names its install root in full.
