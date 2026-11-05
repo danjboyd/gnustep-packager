@@ -1,0 +1,88 @@
+name: msi-update-e2e
+
+# End-to-end MSI update test of the signed-update helper (v0.1.9 candidate).
+# Runs on this branch only, or by hand.
+on:
+  push:
+    branches:
+      - msi-update-e2e
+  workflow_dispatch:
+
+jobs:
+  msi-update:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MSYS2 CLANG64 Prerequisites
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            curl
+            tar
+            gzip
+            make
+            openssl
+            mingw-w64-clang-x86_64-clang
+
+      - name: Expose MSYS2 Toolchain
+        run: |
+          "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          (Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'clang64\bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          (Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'usr\bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Bootstrap gnustep-cli-new
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          export GP_GNUSTEP_CLI_ROOT="$(cygpath -u '${{ runner.temp }}')/gnustep-cli-new"
+          export GP_GNUSTEP_CLI_LOG_ROOT="$(cygpath -u '${{ github.workspace }}')/dist/logs/gnustep-cli-new"
+          export GP_GNUSTEP_CLI_SMOKE_ROOT="$(cygpath -u '${{ runner.temp }}')/gnustep-cli-new-smoke"
+          export GP_GNUSTEP_CLI_HOST_KIND="windows-msys2-clang64"
+          ./scripts/ci/gnustep-cli-new-bootstrap-smoke.sh
+          {
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/bin"
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/Tools"
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/System/Tools"
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/usr/bin"
+            cygpath -w "${GP_GNUSTEP_CLI_ROOT}/clang64/bin"
+          } >> "$GITHUB_PATH"
+          {
+            echo "GP_GNUSTEP_CLI_ROOT=$(cygpath -w "${GP_GNUSTEP_CLI_ROOT}")"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json}"
+          } >> "$GITHUB_ENV"
+
+      - name: Build gp-update-helper
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          root="$(cygpath -u "$GP_GNUSTEP_CLI_ROOT")"
+          export PATH="$root/System/Tools:$root/Tools:$root/bin:$root/clang64/bin:$PATH"
+          command -v gnustep-config
+          make -C updater/objc/gp-update-helper
+          ls -l updater/objc/gp-update-helper/
+
+      - name: Run MSI update end to end
+        run: |
+          $helper = Get-ChildItem updater/objc/gp-update-helper -Filter "gp-update-helper*.exe" | Select-Object -First 1
+          if (-not $helper) { throw "gp-update-helper.exe was not built" }
+          ./scripts/ci/msi-update-e2e.ps1 -HelperPath $helper.FullName -WorkRoot (Join-Path $env:RUNNER_TEMP "gp-msi-e2e")
+
+      - name: Upload logs and results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-update-e2e
+          path: |
+            ${{ runner.temp }}/gp-msi-e2e/**/*.json
+            ${{ runner.temp }}/gp-msi-e2e/**/*.log
+            examples/sample-gui/dist/logs/**
+          if-no-files-found: ignore
