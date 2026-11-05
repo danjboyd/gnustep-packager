@@ -20,6 +20,16 @@ cp -a "$local_apps/$app_name.app" "$stage_root/app/"
 
 # The system domain, without the build-time parts and the toolchain's themes.
 cp -a "$system_library" "$runtime_root/System/Library"
+# gnustep-cli-new installs gnustep-base, -gui and -back in the local domain
+# and keeps only gnustep-make in the system domain, so stage the local
+# domain's Library too when GNUstep itself lives there. (On a /usr/GNUstep
+# install, base is in the system domain and the local one holds only
+# unrelated extras, which stay out.)
+toolchain_local_library=$(gnustep-config --variable=GNUSTEP_LOCAL_LIBRARY)
+if [ "$toolchain_local_library" != "$system_library" ] &&
+   ls "$toolchain_local_library"/Libraries/libgnustep-base.so* >/dev/null 2>&1; then
+  cp -a "$toolchain_local_library/." "$runtime_root/System/Library/"
+fi
 
 # What the app installed besides itself: its frameworks, bundles and tools.
 if [ -d "$local_library" ]; then
