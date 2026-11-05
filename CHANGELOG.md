@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- **Breaking:** updates now require an Ed25519 signature. A manifest with
+  `updates.enabled: true` must set `updates.publicEDKey`, or validation fails.
+  `gp-update-helper` refuses any update without a signing key or a valid
+  `edSignature`, and always downloads and verifies AppImages itself instead of
+  using `appimageupdatetool`. To adopt this release, add a key and sign your
+  release assets; see `docs/update-feed-contract.md`.
+- AppImage backend: the smoke launch refuses to run if `smoke.environment` points
+  `GNUSTEP_HOME` at the real home or clears it.
+
 ### Added
 - `scripts/run-gui-isolated.sh` runs a GUI app with a private display and
   session bus and a scratch directory bound over the real home.
