@@ -2,7 +2,27 @@
 
 ## Unreleased
 
+### Changed
+- **Breaking:** updates now require an Ed25519 signature. A manifest with
+  `updates.enabled: true` must set `updates.publicEDKey`, or validation fails.
+  `gp-update-helper` refuses any update without a signing key or a valid
+  `edSignature`, and always downloads and verifies AppImages itself instead of
+  using `appimageupdatetool`. Each asset also needs `versionSignature`, which
+  signs the package id, version, channel, platform and SHA-256 together. The
+  helper refuses a release that isn't newer than the installed version, so a feed
+  can't roll an app back to an older signed release, relabel the installed one,
+  or offer one platform's file as another's. To adopt this release, add a key
+  and sign your release assets (both signatures); see
+  `docs/update-feed-contract.md`, which includes a test vector.
+
 ### Added
+- `examples/downstream/gnustep-apps`: SystemPreferences and Terminal AppImage
+  setups. Terminal comes from `gnustep/gap` at a fixed commit, since that repo
+  has no tags: `build-app.sh` now takes a tag or a commit, and optionally the
+  app's subdirectory.
+- The test suite checks every example workflow that calls a reusable workflow:
+  it may pass only inputs and secrets the workflow declares, must pass the
+  required ones, and all examples must pin the same release.
 - `scripts/merge-update-feeds.ps1` merges per-artifact update feeds into one
   feed for several architectures. It puts x64 assets first, and refuses
   duplicate backend and platform pairs.

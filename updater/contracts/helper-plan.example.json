@@ -20,6 +20,8 @@
     "name": "MyGNUstepApp-1.2.3-x86_64.AppImage",
     "url": "https://github.com/example-org/my-gnustep-app/releases/download/v1.2.3/MyGNUstepApp-1.2.3-x86_64.AppImage",
     "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "edSignature": "base64 Ed25519 signature of the file",
+    "versionSignature": "base64 Ed25519 signature of the version message",
     "sizeBytes": 12345678,
     "updateInformation": "gh-releases-zsync|example-org|my-gnustep-app|latest|MyGNUstepApp-*x86_64.AppImage.zsync",
     "zsync": {

@@ -26,6 +26,7 @@ typedef NS_ENUM(NSInteger, GPUpdaterErrorCode) {
 @property (nonatomic, readwrite, copy) NSString *updateInformation;
 @property (nonatomic, readwrite, retain) NSURL *zsyncURL;
 @property (nonatomic, readwrite, copy) NSString *edSignature;
+@property (nonatomic, readwrite, copy) NSString *versionSignature;
 @end
 
 @interface GPUpdateRelease ()
@@ -258,6 +259,29 @@ GPUpdateAsset *GPUpdaterPreferredAsset(NSArray *assets, NSString *backend, NSStr
   return nil;
 }
 
+NSComparisonResult GPUpdaterCompareVersions(NSString *leftVersion, NSString *rightVersion) {
+  return GPCompareVersions(leftVersion, rightVersion);
+}
+
+NSData *GPUpdaterVersionSignatureMessage(NSString *packageIdentifier, NSString *version, NSString *channel, NSString *platform, NSString *SHA256) {
+  NSArray *parts = [NSArray arrayWithObjects:@"gnustep-packager-update-v1",
+                                             packageIdentifier ? packageIdentifier : @"",
+                                             version ? version : @"",
+                                             channel ? channel : @"",
+                                             platform ? platform : @"",
+                                             SHA256 ? [SHA256 lowercaseString] : @"",
+                                             nil];
+  NSCharacterSet *lineBreaks = [NSCharacterSet newlineCharacterSet];
+  NSUInteger index = 0;
+  for (index = 0; index < [parts count]; index++) {
+    NSString *part = [parts objectAtIndex:index];
+    if ([part length] == 0 || [part rangeOfCharacterFromSet:lineBreaks].location != NSNotFound) {
+      return nil;
+    }
+  }
+  return [[parts componentsJoinedByString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 static GPUpdateAsset *GPUpdateAssetFromDictionary(NSDictionary *dictionary) {
   if (dictionary == nil) {
     return nil;
@@ -274,6 +298,7 @@ static GPUpdateAsset *GPUpdateAssetFromDictionary(NSDictionary *dictionary) {
   asset.installerVersion = GPStringValue([dictionary objectForKey:@"msiVersion"]);
   asset.updateInformation = GPStringValue([dictionary objectForKey:@"updateInformation"]);
   asset.edSignature = GPStringValue([dictionary objectForKey:@"edSignature"]);
+  asset.versionSignature = GPStringValue([dictionary objectForKey:@"versionSignature"]);
 
   NSNumber *sizeValue = GPNumberValue([dictionary objectForKey:@"sizeBytes"]);
   asset.sizeBytes = sizeValue != nil ? [sizeValue unsignedLongLongValue] : 0ULL;
@@ -337,6 +362,7 @@ GPUpdateRelease *GPUpdaterReleaseFromDictionary(NSDictionary *dictionary) {
 @synthesize updateInformation = _updateInformation;
 @synthesize zsyncURL = _zsyncURL;
 @synthesize edSignature = _edSignature;
+@synthesize versionSignature = _versionSignature;
 
 - (void)dealloc {
   [_backend release];
@@ -350,6 +376,7 @@ GPUpdateRelease *GPUpdaterReleaseFromDictionary(NSDictionary *dictionary) {
   [_updateInformation release];
   [_zsyncURL release];
   [_edSignature release];
+  [_versionSignature release];
   [super dealloc];
 }
 

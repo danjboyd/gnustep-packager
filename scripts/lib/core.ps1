@@ -1752,13 +1752,18 @@ function Test-GpManifest {
         Add-Issue "updates.startupDelaySeconds must be an integer greater than or equal to 0."
       }
 
-      if ($updates.Contains("publicEDKey") -and ($updates["publicEDKey"] -ne $null)) {
+      if (($updates.Contains("enabled") -and $updates["enabled"] -eq $true) -and (-not $updates.Contains("publicEDKey") -or -not (Test-StringValue $updates["publicEDKey"]))) {
+        Add-Issue "updates.publicEDKey is required when updates.enabled is true: the updater refuses any update it can't verify. Generate an Ed25519 key pair, put the base64 public key here, and sign each release's assets (see docs/update-feed-contract.md)."
+      } elseif ($updates.Contains("publicEDKey") -and ($updates["publicEDKey"] -ne $null)) {
         $publicKeyBytes = $null
         if ($updates["publicEDKey"] -is [string]) {
           try { $publicKeyBytes = [Convert]::FromBase64String([string]$updates["publicEDKey"]) } catch { $publicKeyBytes = $null }
         }
         if ($null -eq $publicKeyBytes -or $publicKeyBytes.Length -ne 32) {
           Add-Issue "updates.publicEDKey must be a base64 Ed25519 public key (32 bytes) when present."
+        } elseif ([string]$updates["publicEDKey"] -eq "Ll6BcPIwCiJWeu8fUhAG52rU62luKpZdTNsdJBfgxIs=") {
+          # Its private seed is published in docs/update-feed-contract.md.
+          Add-Issue "updates.publicEDKey is gnustep-packager's published test key, whose private half anyone can read. Generate a key pair of your own."
         }
       }
 
