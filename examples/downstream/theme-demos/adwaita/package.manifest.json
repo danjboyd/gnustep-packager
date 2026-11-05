@@ -1,0 +1,118 @@
+{
+  "$schema": "https://raw.githubusercontent.com/danjboyd/gnustep-packager/v0.1.7/schemas/gnustep-packager.schema.json",
+  "schemaVersion": 1,
+  "profiles": [
+    "gnustep-gui"
+  ],
+  "package": {
+    "id": "io.github.danjboyd.AdwaitaThemeDemo",
+    "name": "AdwaitaThemeDemo",
+    "displayName": "Adwaita Theme Demo",
+    "version": "0.1.0",
+    "manufacturer": "Daniel Boyd",
+    "summary": "Review app for the GNUstep Adwaita theme.",
+    "license": "LGPL-2.1-or-later",
+    "homepage": "https://github.com/danjboyd/plugins-themes-Adwaita"
+  },
+  "pipeline": {
+    "workingDirectory": "..",
+    "shell": {
+      "kind": "bash",
+      "bootstrapCommands": [
+        "gp_theme_home=\"${GNUSTEP_HOME:-}\"",
+        ". \"${GP_GNUSTEP_CLI_ROOT:-/usr/GNUstep}/System/Library/Makefiles/GNUstep.sh\"",
+        "if [ -n \"$gp_theme_home\" ]; then export GNUSTEP_HOME=\"$gp_theme_home\"; fi"
+      ],
+      "environment": {}
+    },
+    "build": {
+      "command": "./packaging/build-theme-demo.sh"
+    },
+    "stage": {
+      "command": "./packaging/stage-theme-demo.sh dist/stage",
+      "outputRoot": "../dist/stage"
+    }
+  },
+  "payload": {
+    "layoutVersion": 1,
+    "stageRoot": "../dist/stage",
+    "appRoot": "app",
+    "runtimeRoot": "runtime",
+    "metadataRoot": "metadata"
+  },
+  "launch": {
+    "entryRelativePath": "app/ThemeDemo.app/ThemeDemo",
+    "workingDirectory": "app/ThemeDemo.app",
+    "arguments": [],
+    "pathPrepend": [
+      "runtime/bin",
+      "runtime/System/Tools"
+    ],
+    "env": {
+      "LD_LIBRARY_PATH": {
+        "value": "{@runtimeRoot}/lib:{@runtimeRoot}/System/Library/Libraries",
+        "policy": "prepend"
+      }
+    }
+  },
+  "themeInputs": [
+    {
+      "name": "Adwaita",
+      "workspacePath": "..",
+      "platforms": [
+        "appimage"
+      ],
+      "required": true,
+      "default": true
+    }
+  ],
+  "outputs": {
+    "root": "../dist",
+    "packageRoot": "../dist/packages",
+    "logRoot": "../dist/logs",
+    "tempRoot": "../dist/tmp",
+    "validationRoot": "../dist/validation"
+  },
+  "validation": {
+    "smoke": {
+      "enabled": true,
+      "kind": "staged-layout",
+      "requiredPaths": [
+        "metadata/icons/ThemeDemo.png"
+      ],
+      "timeoutSeconds": 30
+    },
+    "logs": {
+      "retainOnSuccess": true
+    }
+  },
+  "integrations": {
+    "shortcutName": "Adwaita Theme Demo",
+    "fileAssociations": []
+  },
+  "compliance": {
+    "runtimeNotices": [
+      {
+        "name": "GNUstep Runtime",
+        "license": "LGPL-2.1-or-later",
+        "stageRelativePath": "metadata/licenses/gnustep-runtime.txt"
+      }
+    ]
+  },
+  "backends": {
+    "msi": {
+      "enabled": false
+    },
+    "appimage": {
+      "enabled": true,
+      "desktopEntryName": "io.github.danjboyd.AdwaitaThemeDemo.desktop",
+      "iconRelativePath": "metadata/icons/ThemeDemo.png",
+      "gnustepConfig": {
+        "systemRoot": "runtime/System"
+      },
+      "smoke": {
+        "mode": "launch-only"
+      }
+    }
+  }
+}

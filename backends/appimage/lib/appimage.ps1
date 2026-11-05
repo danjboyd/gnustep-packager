@@ -685,6 +685,34 @@ $script:GpAppImageSmokeFailurePatterns = @(
 # Only the display variables are passed through, and WAYLAND_DISPLAY only
 # when there is no DISPLAY: with an X display (often a private Xvfb), it
 # would let GTK reach the user's desktop session.
+# Stops a smoke launch that would run with the user's real GNUstep home, where
+# the app reads and rewrites their real ~/GNUstep/Defaults. smoke.environment can
+# override the private home that Get-GpAppImageSmokeBaseEnvironment sets, and
+# only GNUSTEP_HOME counts: gnustep-base doesn't take its home from HOME.
+function Assert-GpAppImageSmokeHomeIsolated {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Environment,
+    # The home the passwd database gives this user.
+    [string]$RealHome = $(
+      $entry = & getent passwd (& id -u) 2>$null
+      if ($entry) { ([string]$entry -split ':')[5] } else { $null }
+    )
+  )
+
+  $gnustepHome = if ($Environment.Contains("GNUSTEP_HOME")) { [string]$Environment["GNUSTEP_HOME"] } else { $null }
+  if ([string]::IsNullOrWhiteSpace($gnustepHome)) {
+    throw "Refusing to run the AppImage smoke launch without GNUSTEP_HOME: the app would use the real ~/GNUstep."
+  }
+  if ([string]::IsNullOrWhiteSpace($RealHome)) {
+    return
+  }
+  $normalizedHome = [System.IO.Path]::GetFullPath($gnustepHome).TrimEnd('/')
+  if ($normalizedHome -eq [System.IO.Path]::GetFullPath($RealHome).TrimEnd('/')) {
+    throw ("Refusing to run the AppImage smoke launch with GNUSTEP_HOME set to the real home, {0}. Remove it from smoke.environment." -f $RealHome)
+  }
+}
+
 function Get-GpAppImageSmokeBaseEnvironment {
   param(
     [Parameter(Mandatory = $true)]
@@ -3135,6 +3163,7 @@ function Invoke-GpAppImageSmoke {
   if ($smokePlan.Environment.ContainsKey("HOME") -and -not $smokePlan.Environment.ContainsKey("GNUSTEP_HOME")) {
     $smokeEnvironment["GNUSTEP_HOME"] = $smokePlan.Environment["HOME"]
   }
+  Assert-GpAppImageSmokeHomeIsolated -Environment $smokeEnvironment
   $smokeEnvironment["APPIMAGE_EXTRACT_AND_RUN"] = "1"
   $stdoutPath = Join-Path $ValidationRoot "smoke.stdout.txt"
   $stderrPath = Join-Path $ValidationRoot "smoke.stderr.txt"
