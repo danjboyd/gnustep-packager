@@ -103,7 +103,7 @@ typedef NS_ENUM(NSInteger, GPUpdateCheckStatus) {
 
 // Orders two version strings the way the updater decides what is newer:
 // numeric dotted base versions, then pre-release identifiers (1.2.3-beta.1).
-FOUNDATION_EXPORT NSComparisonResult GPUpdaterCompareVersions(NSString *leftVersion, NSString *rightVersion);
+extern NSComparisonResult GPUpdaterCompareVersions(NSString *leftVersion, NSString *rightVersion);
 
 // The UTF-8 message a feed's versionSignature signs, with lines joined by
 // "\n" and no trailing newline:
@@ -114,4 +114,4 @@ FOUNDATION_EXPORT NSComparisonResult GPUpdaterCompareVersions(NSString *leftVers
 //   <asset platform, such as linux-x64>
 //   <asset SHA-256, lowercase hex>
 // Returns nil when any part is empty or contains a line break.
-FOUNDATION_EXPORT NSData *GPUpdaterVersionSignatureMessage(NSString *packageIdentifier, NSString *version, NSString *channel, NSString *platform, NSString *SHA256);
+extern NSData *GPUpdaterVersionSignatureMessage(NSString *packageIdentifier, NSString *version, NSString *channel, NSString *platform, NSString *SHA256);
