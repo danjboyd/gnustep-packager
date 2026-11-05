@@ -1,6 +1,6 @@
 # GNUstep App Examples
 
-AppImage setups for three GNUstep apps that have no packaging of their own. The
+AppImage setups for four GNUstep apps that have no packaging of their own. The
 source comes from an upstream tag, so nothing changes in the upstream repo.
 
 | App | Upstream tag | License |
@@ -8,6 +8,7 @@ source comes from an upstream tag, so nothing changes in the upstream repo.
 | Gorm | `gorm-1_5_0` | GPL-3.0-or-later |
 | ProjectCenter | `projectcenter-0_7_0` | GPL-2.0-or-later |
 | GWorkspace | `gworkspace-1_0_0` | GPL-2.0-or-later |
+| SystemPreferences | `systempreferences-1_2_1` | GPL-2.0-or-later |
 
 ## Setting one up
 
@@ -29,10 +30,11 @@ To package another GNUstep app the same way, copy a manifest and change the
 
 ## What was tested
 
-Built with `/usr/GNUstep`. All three passed package validation and the smoke run,
-both from a local checkout at the tag above and from a fresh clone through
-`build-app.sh`, with the pipeline run under `scripts/run-gui-isolated.sh`. Each
-opened its main window from the package in the sandbox.
+Built with `/usr/GNUstep`. All four passed package validation and the smoke run
+from a fresh clone through `build-app.sh`, with the pipeline run under
+`scripts/run-gui-isolated.sh`. Gorm, ProjectCenter and GWorkspace also passed
+from a local checkout at the tag above. Each opened its main window from the
+package in the sandbox, and System Preferences loaded all eight of its panes.
 
 Not tested yet:
 

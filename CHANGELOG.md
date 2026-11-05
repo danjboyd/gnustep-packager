@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- `examples/downstream/gnustep-apps`: a SystemPreferences AppImage setup.
+
 ## v0.1.8
 
 ### Changed
