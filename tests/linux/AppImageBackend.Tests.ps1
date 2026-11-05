@@ -454,6 +454,79 @@ Describe "AppImage backend" {
       }
     }
 
+    It "starts xdg-open children with the host's environment and directory" {
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-host-env-" + [guid]::NewGuid().ToString("N"))
+      try {
+        # Like a real app: the bundled library directory goes first on LD_LIBRARY_PATH.
+        $manifestPath = New-GpSiblingManifest -Customize {
+          param($manifest)
+          $manifest["launch"]["env"]["LD_LIBRARY_PATH"] = [ordered]@{ value = "{@runtimeRoot}/lib"; policy = "prepend" }
+        }
+        $context = Get-GpManifestContext -Path $manifestPath
+        $config = Get-GpAppImageConfig -Context $context
+        $appDir = Join-Path $tempRoot "AppDir"
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        & cp -a $script:packageResult.AppDirRoot $appDir
+        $appRun = Write-GpAppImageAppRun -Context $context -Config $config -AppDirRoot $appDir -LogPath (Join-Path $tempRoot "apprun.log")
+        Assert-GpTrue -Condition (Test-Path (Join-Path $appDir "gp-bin/xdg-open")) -Message "The AppDir should ship gp-bin/xdg-open."
+
+        # The app opens a URL the way NSWorkspace falls back to: xdg-open on PATH.
+        $entryPath = Join-Path $appDir "usr/app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp"
+        Set-Content -Path $entryPath -Value @(
+          '#!/bin/sh'
+          'printf ''app_ld=%s\n'' "${LD_LIBRARY_PATH:-}"'
+          'exec xdg-open "https://example.invalid/page"'
+        )
+        Set-GpUnixExecutable -Path $entryPath
+
+        # The host's xdg-open reports what it was started with.
+        $hostBin = Join-Path $tempRoot "hostbin"
+        New-Item -ItemType Directory -Force -Path $hostBin | Out-Null
+        $hostTool = Join-Path $hostBin "xdg-open"
+        Set-Content -Path $hostTool -Value @(
+          '#!/bin/sh'
+          'printf ''host_cwd=%s\n'' "$(pwd)"'
+          'printf ''host_ld=%s\n'' "${LD_LIBRARY_PATH-<unset>}"'
+          'printf ''host_path=%s\n'' "$PATH"'
+          'printf ''host_gnustep_conf=%s\n'' "${GNUSTEP_CONFIG_FILE-<unset>}"'
+          'printf ''host_appdir=%s\n'' "${APPDIR-<unset>}"'
+          'printf ''host_gp_vars=%s\n'' "$(env | grep -c ''^GP_HOST_'')"'
+          'printf ''host_arg=%s\n'' "$1"'
+        )
+        Set-GpUnixExecutable -Path $hostTool
+
+        $callerDir = Join-Path $tempRoot "home"
+        New-Item -ItemType Directory -Force -Path $callerDir | Out-Null
+        $hostPath = "${hostBin}:/usr/bin:/bin"
+
+        foreach ($case in @(
+          @{ Name = "host LD_LIBRARY_PATH set"; Env = @("LD_LIBRARY_PATH=/host/lib"); ExpectedLd = "/host/lib" },
+          @{ Name = "host LD_LIBRARY_PATH unset"; Env = @(); ExpectedLd = "<unset>" }
+        )) {
+          $envArgs = @("-i", "HOME=$tempRoot", "PATH=$hostPath") + $case.Env
+          $output = @(& env @envArgs sh -c 'cd "$1" && shift && exec "$@"' sh $callerDir $appRun 2>&1 | ForEach-Object { [string]$_ })
+          Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message ("AppRun should succeed ($($case.Name)). Output: " + [string]::Join("`n", $output))
+          $appLd = @($output | Where-Object { $_ -like 'app_ld=*' })[0]
+          Assert-GpTrue -Condition ($appLd -like "*$appDir*") -Message "The app itself should still get the bundled LD_LIBRARY_PATH ($($case.Name)). Got: $appLd"
+          $hostLines = @($output | Where-Object { $_ -like 'host_*' })
+          Assert-GpEqual -Actual $hostLines -Expected @(
+            "host_cwd=$callerDir"
+            "host_ld=$($case.ExpectedLd)"
+            "host_path=$hostPath"
+            "host_gnustep_conf=<unset>"
+            "host_appdir=<unset>"
+            "host_gp_vars=0"
+            "host_arg=https://example.invalid/page"
+          ) -Message "xdg-open's child should get the host's environment and the caller's directory ($($case.Name))."
+        }
+      } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue $manifestPath
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
+        }
+      }
+    }
+
     It "resolves relative path arguments against the caller's directory, not the working directory" {
       $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-relative-args-" + [guid]::NewGuid().ToString("N"))
       try {
