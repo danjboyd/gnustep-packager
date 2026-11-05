@@ -3643,7 +3643,16 @@ function Get-GpLaunchContract {
   }
 
   $entryPath = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $launch["entryRelativePath"]
-  $workingDirectoryPath = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $launch["workingDirectory"]
+  # {@callerDirectory}: start the app in the directory it was launched from
+  # instead of a directory in the package. Only AppRun supports it.
+  if ([string]$launch["workingDirectory"] -eq "{@callerDirectory}") {
+    if ($Context.TargetPlatform -ne "linux") {
+      throw ("launch.workingDirectory {{@callerDirectory}} is supported for Linux (AppImage) only. Set it under platformOverrides.linux.launch.workingDirectory and keep a package directory for {0}." -f $Context.TargetPlatform)
+    }
+    $workingDirectoryPath = $null
+  } else {
+    $workingDirectoryPath = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $launch["workingDirectory"]
+  }
 
   return [pscustomobject]@{
     StageRoot             = $stageRoot

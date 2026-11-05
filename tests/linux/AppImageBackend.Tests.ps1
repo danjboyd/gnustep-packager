@@ -405,6 +405,55 @@ Describe "AppImage backend" {
       }
     }
 
+    It "stays in the caller's directory when launch.workingDirectory is {@callerDirectory}" {
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-caller-dir-" + [guid]::NewGuid().ToString("N"))
+      $manifestPath = New-GpSiblingManifest -Customize {
+        param($manifest)
+        $manifest["launch"]["workingDirectory"] = "{@callerDirectory}"
+      }
+      try {
+        Assert-GpEqual -Actual @(Test-GpManifestSchema -Path $manifestPath).Count -Expected 0 -Message "The schema should accept {@callerDirectory}."
+        $context = Get-GpManifestContext -Path $manifestPath
+        Assert-GpEqual -Actual @(Test-GpManifest -Manifest $context.Manifest).Count -Expected 0 -Message "The validator should accept {@callerDirectory}."
+        $config = Get-GpAppImageConfig -Context $context
+        Assert-GpEqual -Actual (Get-GpLaunchContract -Context $context).WorkingDirectoryPath -Expected $null -Message "{@callerDirectory} has no path in the package."
+
+        $appDir = Join-Path $tempRoot "AppDir"
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        & cp -a $script:packageResult.AppDirRoot $appDir
+        $appRun = Write-GpAppImageAppRun -Context $context -Config $config -AppDirRoot $appDir -LogPath (Join-Path $tempRoot "apprun.log")
+        $entryPath = Join-Path $appDir "usr/app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp"
+        Set-Content -Path $entryPath -Value @(
+          '#!/bin/sh'
+          'printf ''cwd=%s\n'' "$(pwd)"'
+          'for a do printf ''arg=[%s]\n'' "$a"; done'
+        )
+        Set-GpUnixExecutable -Path $entryPath
+
+        $callerDir = Join-Path $tempRoot "home"
+        New-Item -ItemType Directory -Force -Path (Join-Path $callerDir "Pictures") | Out-Null
+        Set-Content -Path (Join-Path $callerDir "Pictures/x.png") -Value ""
+        $output = @(& env "HOME=$tempRoot" sh -c 'cd "$1" && shift && exec "$@"' sh $callerDir $appRun "Pictures/x.png" 2>&1)
+        Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message ("AppRun should succeed. Output: " + [string]::Join("`n", $output))
+        $lines = @($output | ForEach-Object { [string]$_ } | Where-Object { $_ -match '^(cwd=|arg=\[)' })
+        Assert-GpEqual -Actual $lines -Expected @(
+          "cwd=$callerDir"
+          "arg=[$callerDir/Pictures/x.png]"
+        ) -Message "The app should start in the caller's directory, with relative arguments still made absolute."
+
+        $windowsContext = $context.PSObject.Copy()
+        $windowsContext.TargetPlatform = "windows"
+        $threw = $false
+        try { Get-GpLaunchContract -Context $windowsContext | Out-Null } catch { $threw = $_.Exception.Message -match 'platformOverrides\.linux' }
+        Assert-GpTrue -Condition $threw -Message "{@callerDirectory} should be refused outside Linux, pointing at platformOverrides.linux."
+      } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue $manifestPath
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
+        }
+      }
+    }
+
     It "resolves relative path arguments against the caller's directory, not the working directory" {
       $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-relative-args-" + [guid]::NewGuid().ToString("N"))
       try {
