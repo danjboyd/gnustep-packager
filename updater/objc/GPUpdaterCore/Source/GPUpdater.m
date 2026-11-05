@@ -581,15 +581,25 @@ static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
   return [NSString stringWithFormat:@"%@%@", _prefix, suffix];
 }
 
+// Seconds since 1970, not an NSDate: gnustep-base reads a plist date back shifted by the zone's
+// offset, so one stored as a date moved on every read and write of the defaults. The old
+// "lastCheckDate" key can't be trusted, so it's ignored, which makes one check due, and goes with
+// the next time stored.
 - (NSDate *)lastCheckDate {
-  return [_defaults objectForKey:[self _key:@"lastCheckDate"]];
+  id time = [_defaults objectForKey:[self _key:@"lastCheckTime"]];
+  if (![time isKindOfClass:[NSNumber class]]) {
+    return nil;
+  }
+  return [NSDate dateWithTimeIntervalSince1970:[time doubleValue]];
 }
 
 - (void)setLastCheckDate:(NSDate *)date {
+  [_defaults removeObjectForKey:[self _key:@"lastCheckDate"]];
   if (date != nil) {
-    [_defaults setObject:date forKey:[self _key:@"lastCheckDate"]];
+    [_defaults setObject:[NSNumber numberWithDouble:[date timeIntervalSince1970]]
+                  forKey:[self _key:@"lastCheckTime"]];
   } else {
-    [_defaults removeObjectForKey:[self _key:@"lastCheckDate"]];
+    [_defaults removeObjectForKey:[self _key:@"lastCheckTime"]];
   }
 }
 
@@ -687,7 +697,8 @@ static void GPApplyFeedOverride(GPUpdaterConfiguration *configuration) {
   }
 
   NSTimeInterval elapsed = [[NSDate date] timeIntervalSinceDate:lastCheckDate];
-  return elapsed >= [[self configuration] minimumCheckInterval];
+  // A time in the future (the clock was changed) would otherwise hold checks off until it passes.
+  return elapsed < 0 || elapsed >= [[self configuration] minimumCheckInterval];
 }
 
 - (void)start {
