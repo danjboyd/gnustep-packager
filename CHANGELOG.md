@@ -30,6 +30,13 @@ What changes for users:
 - An app with updates turned on and no key can't be packaged with this release
   until it has one. Turning updates off (`updates.enabled: false`) needs no key.
 
+Windows builds: nothing changes in the MSI backend, the reusable workflow, the
+default profiles or the MSYS2 tool lookup since v0.1.7, and the gnustep-cli
+pin stays v0.1.3. The packager runs no `patch` or `diff` itself. A build
+script that does needs them installed: list `patch` and `diffutils` under
+`hostDependencies.windows.msys2Packages`, which the reusable workflow installs
+with `pacman -S --needed`.
+
 ### Changed
 - **Breaking:** updates now require an Ed25519 signature. A manifest with
   `updates.enabled: true` must set `updates.publicEDKey`, or validation fails.
