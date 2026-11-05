@@ -28,6 +28,9 @@
   `lastCheckTime`, and a time in the future counts as due. The old
   `lastCheckDate` is ignored and removed, so one automatic check runs after
   updating.
+- Updater: a second, identical update offer could appear over the download after
+  a check by hand and Install Update. The pending launch check fired when the
+  alert closed. Any check now cancels it.
 
 ## v0.1.7
 

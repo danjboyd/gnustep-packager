@@ -11,6 +11,7 @@ Describe "Updater defaults" {
 
     $script:probePath = $null
     $script:lastCheckProbePath = $null
+    $script:startupCheckProbePath = $null
     $script:libraryPath = $null
     if (-not $IsWindows -and (Get-Command gnustep-config -ErrorAction SilentlyContinue) -and (Get-Command make -ErrorAction SilentlyContinue)) {
       $buildRoot = Join-Path $script:repoRoot "dist/test-updater-defaults"
@@ -49,6 +50,18 @@ Describe "Updater defaults" {
       $output = & clang @arguments 2>&1
       if ($LASTEXITCODE -ne 0) {
         throw "last-check-probe did not build:`n$($output -join "`n")"
+      }
+
+      $script:startupCheckProbePath = Join-Path $buildRoot "startup-check-probe"
+      $arguments = @($objcFlags) + @(
+        "-I", (Join-Path $coreDirectory "Headers"),
+        "-o", $script:startupCheckProbePath,
+        (Join-Path $script:repoRoot "tests/fixtures/updater/startup-check-probe.m"),
+        (Join-Path $coreDirectory "libGPUpdaterCore.a")
+      ) + @($baseLibs)
+      $output = & clang @arguments 2>&1
+      if ($LASTEXITCODE -ne 0) {
+        throw "startup-check-probe did not build:`n$($output -join "`n")"
       }
 
       # GNUstep's libraries need not be on the default search path.
@@ -161,6 +174,21 @@ Describe "Updater defaults" {
       Invoke-Probe legacy "$now" | Out-Null
       Invoke-Probe read | Should -Be "none"
       Invoke-Probe due | Should -Be "yes"
+    } finally {
+      Remove-Item -Recurse -Force $gnustepHome -ErrorAction SilentlyContinue
+    }
+  }
+
+  It "doesn't run the launch check too when a check by hand comes first" {
+    if ($null -eq $script:startupCheckProbePath) {
+      Set-ItResult -Skipped -Because "GPUpdaterCore can't be built here (it needs gnustep-config and make, off Windows)"
+      return
+    }
+
+    $gnustepHome = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-updater-defaults-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $gnustepHome | Out-Null
+    try {
+      (Invoke-GpSkipProbe -GnustepHome $gnustepHome -ArgumentList @() -ProbePath $script:startupCheckProbePath).Output | Should -Be "1"
     } finally {
       Remove-Item -Recurse -Force $gnustepHome -ErrorAction SilentlyContinue
     }
