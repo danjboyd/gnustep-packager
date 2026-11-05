@@ -33,6 +33,12 @@
   set it under `platformOverrides.linux.launch`.
 
 ### Fixed
+- Examples: the gnustep-apps and Adwaita theme-demo setups now work on a
+  gnustep-cli-new toolchain in the hosted workflow. Their stage scripts find
+  `gdnc`, `gpbs`, `make_services` and `defaults` on PATH too, and stage the
+  local domain's Library when GNUstep itself is installed there (gnustep-cli-new
+  keeps only gnustep-make in the system domain). Their workflows start Xvfb for
+  the smoke launch.
 - Updater: a feed with assets for several architectures could install the
   wrong one, because the first asset whose backend matched was taken. The
   updater now takes the asset whose `platform` matches the running machine.
