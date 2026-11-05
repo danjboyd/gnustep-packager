@@ -10,6 +10,15 @@
   using `appimageupdatetool`. To adopt this release, add a key and sign your
   release assets; see `docs/update-feed-contract.md`.
 
+### Added
+- `examples/downstream/gnustep-apps`: SystemPreferences and Terminal AppImage
+  setups. Terminal comes from `gnustep/gap` at a fixed commit, since that repo
+  has no tags: `build-app.sh` now takes a tag or a commit, and optionally the
+  app's subdirectory.
+- The test suite checks every example workflow that calls a reusable workflow:
+  it may pass only inputs and secrets the workflow declares, must pass the
+  required ones, and all examples must pin the same release.
+
 ## v0.1.8
 
 ### Changed
