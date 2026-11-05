@@ -1,0 +1,66 @@
+name: gorm-backtrace
+
+# Test branch only: package the Gorm example without bundled fonts, then
+# run it under gdb on a fedora:42 host (no DejaVu) and save the backtrace.
+on:
+  push:
+    branches:
+      - gorm-backtrace
+  workflow_dispatch:
+
+jobs:
+  package:
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.9
+    with:
+      manifest-path: examples/downstream/gnustep-apps/gorm/package.manifest.json
+      backend: appimage
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json
+      run-validation: true
+      run-smoke: true
+      preflight-shell: bash
+      preflight-command: |
+        sudo apt-get install -y xvfb
+        nohup Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
+        echo "DISPLAY=:99" >> "$GITHUB_ENV"
+      artifact-name: gnustep-app-gorm
+
+  backtrace:
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gnustep-app-gorm-packages
+          path: pkg
+      - name: gdb on fedora:42
+        run: |
+          app=$(find pkg -name '*.AppImage' | head -1)
+          echo "AppImage: $app"
+          mkdir -p out
+          cp "$app" out/Gorm.AppImage
+          chmod +x out/Gorm.AppImage
+          cat > out/run.sh <<'SH'
+          set -x
+          dnf -y -q install gdb xorg-x11-server-Xvfb file >/dev/null
+          cd /w
+          ./Gorm.AppImage --appimage-extract >/dev/null
+          Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
+          sleep 2
+          export DISPLAY=:99 DEBUGINFOD_URLS=
+          { echo "== fc-list"; fc-list 2>&1 | head; echo "== bundled libs"; ls squashfs-root/usr/lib | grep -E 'gnustep|cairo|fontconfig|freetype' ; } > env.txt 2>&1
+          timeout 120 gdb -batch -nx \
+            -ex 'set pagination off' -ex 'set confirm off' \
+            -ex 'handle SIGPIPE nostop noprint' \
+            -ex run -ex 'info sharedlibrary' -ex 'thread apply all bt 25' \
+            -ex 'info registers rip' -ex 'x/6i $pc' \
+            --args squashfs-root/AppRun > gdb.txt 2>&1
+          echo "gdb exit $?" >> gdb.txt
+          SH
+          docker run --rm -v "$PWD/out:/w" fedora:42 bash /w/run.sh
+          cat out/env.txt; cat out/gdb.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gorm-backtrace
+          path: |
+            out/gdb.txt
+            out/env.txt
