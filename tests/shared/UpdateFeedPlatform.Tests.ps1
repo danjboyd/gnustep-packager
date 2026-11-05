@@ -19,7 +19,8 @@ Describe "Update feed platforms" {
   }
 
   It "names platforms from the backend and architecture" {
-    Get-GpUpdatePlatform -Backend appimage | Should -Be "linux-x64" -Because "the AppImage backend builds x86_64 today"
+    $hostPlatform = if ((Get-GpHostArchitecture) -eq "aarch64") { "linux-arm64" } else { "linux-x64" }
+    Get-GpUpdatePlatform -Backend appimage | Should -Be $hostPlatform -Because "an AppImage defaults to the build host's architecture"
     Get-GpUpdatePlatform -Backend msi | Should -Be "windows-x64"
     Get-GpUpdatePlatform -Backend dmg | Should -Be "macos"
     Get-GpUpdatePlatform -Backend appimage -Architecture aarch64 | Should -Be "linux-arm64"
