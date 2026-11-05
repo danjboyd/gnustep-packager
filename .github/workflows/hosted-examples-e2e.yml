@@ -1,0 +1,26 @@
+name: hosted-examples-e2e
+
+# Runs the gnustep-apps examples' package-appimage.yml as a consumer would
+# (reusable workflow @v0.1.8, gnustep-cli-new v0.1.3), one app per job.
+# Test branch only: build-app.sh and stage-app.sh are copied beside each
+# manifest, the layout examples/downstream/gnustep-apps/README.md describes.
+on:
+  push:
+    branches:
+      - hosted-examples-e2e
+  workflow_dispatch:
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [gorm, projectcenter, gworkspace, systempreferences, terminal]
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.8
+    with:
+      manifest-path: examples/downstream/gnustep-apps/${{ matrix.app }}/package.manifest.json
+      backend: appimage
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json
+      run-validation: true
+      run-smoke: true
+      artifact-name: gnustep-app-${{ matrix.app }}
