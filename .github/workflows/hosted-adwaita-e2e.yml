@@ -1,0 +1,29 @@
+name: hosted-adwaita-e2e
+
+# Test branch only: the Adwaita theme-demo example run as the adwaita repo
+# would run it, against a snapshot of danjboyd/plugins-themes-Adwaita at
+# 14b855f in adwaita-consumer/.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hosted-adwaita-e2e
+
+jobs:
+  package:
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.9
+    with:
+      manifest-path: adwaita-consumer/packaging/package.manifest.json
+      backend: appimage
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json
+      run-validation: true
+      run-smoke: true
+      # The smoke launch opens the app's window, so it needs a display: the
+      # hosted runner has none. Start Xvfb and pass DISPLAY to later steps.
+      preflight-shell: bash
+      preflight-command: |
+        sudo apt-get install -y xvfb
+        nohup Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
+        echo "DISPLAY=:99" >> "$GITHUB_ENV"
+      artifact-name: adwaita-theme-demo

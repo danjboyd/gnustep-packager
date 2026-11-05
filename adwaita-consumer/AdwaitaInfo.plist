@@ -1,0 +1,40 @@
+{
+  NSExecutable = "Adwaita";
+  NSPrincipalClass = "GnomeTheme";
+  GSThemeAuthors = (
+    "Daniel Boyd"
+  );
+  GSThemeDetails = "Adwaita GNUstep theme for GNOME";
+  GSThemeVersion = "0.1.0-alpha22";
+  /* An app's popover panels (windows conforming to GSThemePopoverPanel)
+     are drawn as libadwaita's popover, arrow included (#74). */
+  GSThemeDrawsPopoverPanels = YES;
+  GSThemeDrawsPopoverArrows = YES;
+  GSThemeDomain = {
+    NSInterfaceStyleDefault = NSWindows95InterfaceStyle;
+    NSMenuInterfaceStyle = NSWindows95InterfaceStyle;
+    NSScrollViewInterfaceStyle = NSWindows95InterfaceStyle;
+    NSScrollerInterfaceStyle = NSWindows95InterfaceStyle;
+    GSSuppressAppIcon = YES;
+    GSScrollerButtonsOffset = 0;
+    GSScrollerArrowsSameEnd = NO;
+    /* GNUstep draws the window decorations (the theme's header bar). Takes
+       effect with a libs-gui that reads it before the display server is
+       created (GSThemeInstallBackendDefaults); an explicit
+       GSBackHandlesWindowDecorations or GSX11HandlesWindowDecorations
+       default wins. */
+    GSBackHandlesWindowDecorations = NO;
+    /* With a libs-back that supports them: GNOME's window shadow and
+       rounded corners, when a compositing manager runs. */
+    GSBackWindowShadows = YES;
+    GSBackWindowCornerRadius = 15;
+    /* With a libs-back that supports it: an alpha channel for borderless
+       windows, so menus and tool tips get rounded corners. */
+    GSBackBorderlessWindowAlpha = YES;
+    /* With a libs-back that supports them: libadwaita's popover shadow
+       and 15px corners for menus (the theme marks their windows), when a
+       compositing manager runs. */
+    GSBackPopoverShadows = YES;
+    GSBackPopoverCornerRadius = 15;
+  };
+}

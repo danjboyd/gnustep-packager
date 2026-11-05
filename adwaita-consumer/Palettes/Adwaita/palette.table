@@ -1,0 +1,7 @@
+{
+  NibFile = "";
+  Class = "AdwaitaPalette";
+  Icon = "AdwaitaPalette";
+  ExportClasses = ();
+  ExportImages = ();
+}

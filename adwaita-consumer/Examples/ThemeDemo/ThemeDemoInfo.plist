@@ -1,0 +1,6 @@
+{
+  NSExecutable = "ThemeDemo";
+  NSPrincipalClass = "NSApplication";
+  NSAppIcon = "";
+}
+

@@ -1,0 +1,277 @@
+From 1ecd259c67e04f8bd174b4e43efecdf1bc7c6cf6 Mon Sep 17 00:00:00 2001
+From: Daniel Boyd <danieljboyd@icloud.com>
+Date: Thu, 15 Oct 2026 15:52:02 -0500
+Subject: [PATCH] x11: list WM_DELETE_WINDOW on closable windows the gui
+ decorates
+
+With GSBackHandlesWindowDecorations (or GSX11HandlesWindowDecorations) NO,
+-window:::: creates the X window without the window's style, keeping only
+NSIconWindowMask and NSMiniWindowMask, and -_setSupportedWMProtocols: took
+the closable bit from that stripped style.  No window the gui decorates
+listed WM_DELETE_WINDOW, so a window manager asked to close one (Alt+F4, its
+window menu, a task bar) had no way to ask the client to close it.  Mutter
+then kills the client: closing a panel with Alt+F4 quits the whole
+application at once, with nothing saved or asked.
+
+-_setSupportedWMProtocols: now takes the closable bit from the NSWindow's
+own style mask when the gui draws the decorations.  It runs again each
+time a window is ordered in, when the NSWindow is known, so the protocols
+are right before the window is mapped.  The window manager's request then
+arrives as WM_DELETE_WINDOW and goes through -performClose:, as a click on
+the gui's close button does.  Windows the window manager decorates are
+unchanged.
+
+Window managers only offer to close a window whose Motif hints allow it.
+Today a window the gui decorates allows no functions, so Mutter doesn't
+close it at all and Alt+F4 does nothing; the kill is reached once the
+hints keep the window's functions (libs-back#244).  The two changes touch
+different functions and apply in either order, but this one should not
+come after #244.
+
+Testing: Tests/x11/wmdeletewindow.m sets GSBackHandlesWindowDecorations NO
+in the argument domain, orders in NSWindows of four styles and reads their
+WM_PROTOCOLS back: a fully styled window and a closable, non-resizable one
+must list WM_DELETE_WINDOW; a titled window that isn't closable and a
+borderless one must not.  That covers the bug (closable windows missing
+it) and guards against the fix spreading to windows that can't be closed.
+It reads only the property the backend sets, so it needs a display but no
+window manager.  Without this change the two closable checks fail (3 of 5
+pass); with it all 5 pass.  The whole suite: 291 passed, none failed,
+against 286 on master; the 5 more are the new checks.
+
+Not covered by the test: what a window manager does with the protocol.
+Under GNOME Shell 48.7 (X11, private Xvfb), with a small program showing a
+closable window and panel, the gui drawing the decorations, Alt+F4:
+- master, and master with this change: Mutter doesn't offer close
+  (_NET_WM_ALLOWED_ACTIONS has no CLOSE), nothing happens;
+- with #244 and without this change: the client is killed ("X connection
+  broken");
+- with #244 and this change: the panel, then the main window, close
+  through -performClose: and the program keeps running.
+
+The tests ran against libs-gui master (fdc5cfe83); libs-gui 0.32.0 aborts
+the test process before its first window check (font roles, fixed in
+8a092cfa7).
+
+AI assistance: this change, its test and this description were written
+with Claude (Anthropic's Claude Code).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ChangeLog                   |  10 +++
+ Source/x11/XGServerWindow.m |  11 ++-
+ Tests/x11/wmdeletewindow.m  | 156 ++++++++++++++++++++++++++++++++++++
+ 3 files changed, 176 insertions(+), 1 deletion(-)
+ create mode 100644 Tests/x11/wmdeletewindow.m
+
+diff --git a/ChangeLog b/ChangeLog
+index 2b1b779..7caacd1 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,13 @@
++2026-10-15 Daniel Boyd <danieljboyd@icloud.com>
++
++	* Source/x11/XGServerWindow.m (-_setSupportedWMProtocols:): When the
++	gui draws the decorations (GSBackHandlesWindowDecorations or
++	GSX11HandlesWindowDecorations NO), take the closable style from the
++	NSWindow, as the X window is created without the style.  Closable
++	windows now list WM_DELETE_WINDOW; without it a window manager asked
++	to close one (Alt+F4) kills the whole client.
++	* Tests/x11/wmdeletewindow.m: New test.
++
+ 2026-07-22 Richard Frith-Macdonald <rfm@gnu.org>
+ 
+ 	* Source/x11/XGServerEvent.m:
+diff --git a/Source/x11/XGServerWindow.m b/Source/x11/XGServerWindow.m
+index 80ff8d5..b589dd6 100644
+--- a/Source/x11/XGServerWindow.m
++++ b/Source/x11/XGServerWindow.m
+@@ -1490,13 +1490,22 @@ _wmTestErrorHandler(Display *display, XErrorEvent *event)
+ - (void) _setSupportedWMProtocols: (gswindow_device_t *) window
+ {
+   NSWindow *nswin = GSWindowWithNumber(window->number);
++  unsigned int closeStyle = window->win_attrs.window_style;
+ 
+   window->numProtocols = 0;
+   if (!nswin || [nswin canBecomeKeyWindow])
+     {
+       window->protocols[window->numProtocols++] = generic.WM_TAKE_FOCUS_ATOM;
+     }
+-  if ((window->win_attrs.window_style & NSClosableWindowMask) != 0)
++  /* When the gui draws the decorations, the X window is created without
++     the style (see -window::::), but the window may still be closable.
++     Without WM_DELETE_WINDOW a window manager asked to close it (Alt+F4,
++     its window menu) kills the whole client instead.  */
++  if (!handlesWindowDecorations && nswin != nil)
++    {
++      closeStyle = [nswin styleMask];
++    }
++  if ((closeStyle & NSClosableWindowMask) != 0)
+     window->protocols[window->numProtocols++] = generic.WM_DELETE_WINDOW_ATOM;
+   // Add ping protocol for EWMH
+   if ((generic.wm & XGWM_EWMH) != 0)
+diff --git a/Tests/x11/wmdeletewindow.m b/Tests/x11/wmdeletewindow.m
+new file mode 100644
+index 0000000..db2b180
+--- /dev/null
++++ b/Tests/x11/wmdeletewindow.m
+@@ -0,0 +1,156 @@
++/* WM_DELETE_WINDOW on windows whose decorations the gui library draws
++ * (GSBackHandlesWindowDecorations NO).  Their X windows are created without
++ * the window's style, but a closable window must still list WM_DELETE_WINDOW
++ * in WM_PROTOCOLS once it is ordered in.  Without it a window manager asked
++ * to close the window (Alt+F4, its window menu) has no way to ask, and
++ * Mutter, for one, kills the client instead.  Windows that aren't closable
++ * must not list it.
++ *
++ * Only the property the backend sets is read, so the test works with or
++ * without a window manager on the display.
++ */
++#import <Foundation/Foundation.h>
++#import "Testing.h"
++#include "config.h"
++
++#if defined(BUILD_SERVER) && defined(SERVER_x11) && BUILD_SERVER == SERVER_x11
++
++#import <AppKit/AppKit.h>
++#import <GNUstepGUI/GSDisplayServer.h>
++#include <X11/Xlib.h>
++#include <X11/Xutil.h>
++
++/* Sets a default for this process only, in the argument domain. */
++static void
++setDefault(id value, NSString *key)
++{
++  NSUserDefaults	*defs = [NSUserDefaults standardUserDefaults];
++  NSMutableDictionary	*args;
++
++  args = [[defs volatileDomainForName: NSArgumentDomain] mutableCopy];
++  if (args == nil)
++    {
++      args = [NSMutableDictionary new];
++    }
++  [args setObject: value forKey: key];
++  [defs removeVolatileDomainForName: NSArgumentDomain];
++  [defs setVolatileDomain: args forName: NSArgumentDomain];
++  [args release];
++}
++
++/* Orders a window of the given style in, and answers whether its X window
++ * lists WM_DELETE_WINDOW.  The backend's own connection is flushed first:
++ * what it set may still be in its buffer.
++ */
++static BOOL
++listsDeleteWindow(Display *dpy, unsigned int style)
++{
++  NSWindow		*win;
++  GSDisplayServer	*srv;
++  Window		w;
++  Atom			deleteAtom = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
++  Atom			*protocols = NULL;
++  int			count = 0;
++  int			i;
++  BOOL			found = NO;
++
++  win = [[NSWindow alloc] initWithContentRect: NSMakeRect(100, 100, 300, 200)
++				    styleMask: style
++				      backing: NSBackingStoreBuffered
++					defer: NO];
++  [win setReleasedWhenClosed: NO];
++  [win orderFront: nil];
++  srv = GSServerForWindow(win);
++  w = (Window)[srv windowDevice: [win windowNumber]];
++  XSync((Display *)[srv serverDevice], False);
++
++  if (XGetWMProtocols(dpy, w, &protocols, &count) != 0)
++    {
++      for (i = 0; i < count; i++)
++	{
++	  if (protocols[i] == deleteAtom)
++	    {
++	      found = YES;
++	    }
++	}
++      XFree(protocols);
++    }
++  [win orderOut: nil];
++  [win release];
++  return found;
++}
++
++int
++main(int argc, const char **argv)
++{
++  START_SET("WM_DELETE_WINDOW")
++
++  NSAutoreleasePool	*pool = [NSAutoreleasePool new];
++  Display		*dpy;
++  BOOL			started = NO;
++
++  if (getenv("DISPLAY") == NULL || *getenv("DISPLAY") == '\0')
++    {
++      SKIP("no window server available")
++    }
++  dpy = XOpenDisplay(NULL);
++  if (dpy == NULL)
++    {
++      SKIP("no window server available")
++    }
++
++  setDefault(@"NO", @"GSBackHandlesWindowDecorations");
++  NS_DURING
++    {
++      [NSApplication sharedApplication];
++      started = YES;
++    }
++  NS_HANDLER
++    {
++      NSLog(@"the application did not start: %@", localException);
++    }
++  NS_ENDHANDLER
++  if (started == NO || GSCurrentServer() == nil
++    || [GSCurrentServer() isMemberOfClass: [GSDisplayServer class]])
++    {
++      SKIP("It looks like the GNUstep backend is not installed")
++    }
++
++  PASS([GSCurrentServer() handlesWindowDecorations] == NO,
++    "with GSBackHandlesWindowDecorations NO the gui draws the decorations");
++
++  PASS(listsDeleteWindow(dpy, NSTitledWindowMask | NSClosableWindowMask
++    | NSMiniaturizableWindowMask | NSResizableWindowMask) == YES,
++    "a fully styled window lists WM_DELETE_WINDOW");
++
++  PASS(listsDeleteWindow(dpy, NSTitledWindowMask | NSClosableWindowMask)
++    == YES,
++    "a closable window that isn't resizable lists WM_DELETE_WINDOW");
++
++  PASS(listsDeleteWindow(dpy, NSTitledWindowMask | NSResizableWindowMask)
++    == NO,
++    "a window that isn't closable doesn't list WM_DELETE_WINDOW");
++
++  PASS(listsDeleteWindow(dpy, NSBorderlessWindowMask) == NO,
++    "a borderless window doesn't list WM_DELETE_WINDOW");
++
++  XCloseDisplay(dpy);
++  [pool release];
++
++  END_SET("WM_DELETE_WINDOW")
++
++  return 0;
++}
++
++#else
++
++int
++main(int argc, const char **argv)
++{
++  START_SET("WM_DELETE_WINDOW")
++    SKIP("back is not built with the x11 server")
++  END_SET("WM_DELETE_WINDOW")
++  return 0;
++}
++
++#endif
+-- 
+2.47.3
+

@@ -1,0 +1,296 @@
+From dbfbe5397bc18895ef3e49951574e312603b03fa Mon Sep 17 00:00:00 2001
+From: Daniel Boyd <danieljboyd@icloud.com>
+Date: Tue, 6 Oct 2026 11:19:03 -0500
+Subject: [PATCH 1/5] x11: keep the window manager functions of windows the gui
+ decorates
+
+With GSBackHandlesWindowDecorations (or GSX11HandlesWindowDecorations)
+NO, setWindowHintsForStyle() gave every window the borderless window's
+Motif hints: no decorations, which is right, but also functions 0, which
+tells the window manager that the window may not be moved, resized,
+minimized, maximized or closed.  Mutter follows that for all but resize:
+the _NET_WM_ALLOWED_ACTIONS it sets on the window lists resize, but not
+move, minimize, maximize or close, so it won't do those for the window,
+whether asked through _NET_WM_MOVERESIZE, _NET_WM_STATE, Super-drag or
+its window menu.  GNUstep's own title bar moves the window itself
+(-setFrameOrigin:, which -placewindow:: carries out with
+XMoveResizeWindow), and the hints don't restrict that, so this went
+unnoticed.
+
+A styled window the gui decorates now asks for no decorations but keeps
+the functions its style allows, plus move.  Borderless windows keep
+functions 0.
+
+This changes behaviour for everyone who uses GNUstep-drawn decorations
+today: every styled window, sheets and utility panels included, now lets
+the window manager move it (and resize, minimize, maximize or close it as
+its style allows), where before it allowed nothing.
+
+Testing: Tests/x11/motifhints.m creates windows of four styles with the
+gui drawing the decorations and reads back their _MOTIF_WM_HINTS: the
+flags, the functions and the decorations, compared exactly.  Exact
+comparison catches both halves of the bug (functions missing, or
+decorations asked for), and the borderless case guards against the fix
+spreading to windows that must stay fixed.  It reads only the property
+the backend sets, so it needs a display but no particular window manager.
+Without this change the three styled checks fail ("3 0 0", nothing
+allowed); with it all five checks pass.
+
+Under GNOME Shell 48.7 (X11), with the GNUstep theme and the gui drawing
+the decorations, Mutter's _NET_WM_ALLOWED_ACTIONS for a fully styled
+window lists resize, fullscreen, change desktop, above and below without
+this change, and includes move, maximize and close with it.
+
+AI assistance: this change, its test and this description were written
+with Claude (Anthropic's Claude Code).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ChangeLog                   |  11 +++
+ Source/x11/XGServerWindow.m |  16 +++-
+ Tests/x11/motifhints.m      | 180 ++++++++++++++++++++++++++++++++++++
+ 3 files changed, 205 insertions(+), 2 deletions(-)
+ create mode 100644 Tests/x11/motifhints.m
+
+diff --git a/ChangeLog b/ChangeLog
+index 2b1b779..47ed8d1 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,14 @@
++2026-10-06 Daniel Boyd <danieljboyd@icloud.com>
++
++	* Source/x11/XGServerWindow.m (setWindowHintsForStyle): For a styled
++	window whose decorations the gui draws (GSBackHandlesWindowDecorations
++	or GSX11HandlesWindowDecorations NO), ask for no decorations but keep
++	the functions the style allows, plus move.  With functions 0, window
++	managers such as Mutter refused to move, resize, maximize, minimize
++	or close the window, even when asked with _NET_WM_MOVERESIZE or
++	_NET_WM_STATE.  Borderless windows still allow no functions.
++	* Tests/x11/motifhints.m: New test.
++
+ 2026-07-22 Richard Frith-Macdonald <rfm@gnu.org>
+ 
+ 	* Source/x11/XGServerEvent.m:
+diff --git a/Source/x11/XGServerWindow.m b/Source/x11/XGServerWindow.m
+index 19c5e9e..b491681 100644
+--- a/Source/x11/XGServerWindow.m
++++ b/Source/x11/XGServerWindow.m
+@@ -341,8 +341,7 @@ static void setWindowHintsForStyle (Display *dpy, Window window,
+   hints->functions = 0;
+ 
+   /* Now add to the hints from the styleMask */
+-  if (styleMask == NSBorderlessWindowMask
+-      || !handlesWindowDecorations)
++  if (styleMask == NSBorderlessWindowMask)
+     {
+       hints->flags |= MWM_HINTS_DECORATIONS;
+       hints->flags |= MWM_HINTS_FUNCTIONS;
+@@ -386,6 +385,19 @@ static void setWindowHintsForStyle (Display *dpy, Window window,
+ 	  hints->functions |= MWM_FUNC_MAXIMIZE;
+ 	  hints->functions |= MWM_FUNC_MOVE;
+         }
++      if (!handlesWindowDecorations)
++	{
++	  /* The gui library draws the decorations: ask for none, but keep
++	     the functions, so that the window manager still moves,
++	     resizes, maximizes, minimizes and closes the window when the
++	     user or the decorations ask it to (_NET_WM_MOVERESIZE, its
++	     window menu, keyboard shortcuts). With functions 0 a window
++	     manager such as Mutter refuses all of them. */
++	  hints->flags |= MWM_HINTS_DECORATIONS;
++	  hints->flags |= MWM_HINTS_FUNCTIONS;
++	  hints->decorations = 0;
++	  hints->functions |= MWM_FUNC_MOVE;
++	}
+       if (styleMask & NSIconWindowMask)
+ 	{
+ 	  // FIXME
+diff --git a/Tests/x11/motifhints.m b/Tests/x11/motifhints.m
+new file mode 100644
+index 0000000..c768d7f
+--- /dev/null
++++ b/Tests/x11/motifhints.m
+@@ -0,0 +1,180 @@
++/* The _MOTIF_WM_HINTS of windows whose decorations the gui library draws
++ * (GSBackHandlesWindowDecorations NO): they ask the window manager for no
++ * decorations, but keep the functions their style allows, plus move, so
++ * that the window manager still moves, resizes, minimizes, maximizes and
++ * closes them when asked to (_NET_WM_MOVERESIZE, _NET_WM_STATE, its window
++ * menu and keyboard shortcuts).  With functions 0 Mutter refuses all of
++ * these.  A borderless window still allows nothing.
++ *
++ * Only the property the backend sets is read, so the test works with or
++ * without a window manager on the display.
++ */
++#import <Foundation/Foundation.h>
++#import "Testing.h"
++#include "config.h"
++
++#if defined(BUILD_SERVER) && defined(SERVER_x11) && BUILD_SERVER == SERVER_x11
++
++#import <AppKit/AppKit.h>
++#import <GNUstepGUI/GSDisplayServer.h>
++#include <X11/Xlib.h>
++#include <X11/Xatom.h>
++
++/* From the Motif window manager hints (XGServerWindow.m). */
++#define HINTS_FUNCTIONS		(1L << 0)
++#define HINTS_DECORATIONS	(1L << 1)
++#define FUNC_RESIZE		(1L << 1)
++#define FUNC_MOVE		(1L << 2)
++#define FUNC_MINIMIZE		(1L << 3)
++#define FUNC_MAXIMIZE		(1L << 4)
++#define FUNC_CLOSE		(1L << 5)
++
++/* Sets a default for this process only, in the argument domain. */
++static void
++setDefault(id value, NSString *key)
++{
++  NSUserDefaults	*defs = [NSUserDefaults standardUserDefaults];
++  NSMutableDictionary	*args;
++
++  args = [[defs volatileDomainForName: NSArgumentDomain] mutableCopy];
++  if (args == nil)
++    {
++      args = [NSMutableDictionary new];
++    }
++  [args setObject: value forKey: key];
++  [defs removeVolatileDomainForName: NSArgumentDomain];
++  [defs setVolatileDomain: args forName: NSArgumentDomain];
++  [args release];
++}
++
++/* The window's Motif hints as "flags functions decorations", or "none".
++ * The backend's own connection is flushed first: what it set may still be
++ * in its buffer.
++ */
++static NSString *
++motifHints(GSDisplayServer *srv, Display *dpy, int win)
++{
++  Window	w = (Window)[srv windowDevice: win];
++  Atom		type;
++  int		format;
++  unsigned long	n, after;
++  unsigned char	*data = NULL;
++  NSString	*s = @"none";
++
++  XSync((Display *)[srv serverDevice], False);
++  if (XGetWindowProperty(dpy, w, XInternAtom(dpy, "_MOTIF_WM_HINTS", False),
++      0, 5, False, AnyPropertyType, &type, &format, &n, &after, &data)
++    == Success && data != NULL)
++    {
++      unsigned long *v = (unsigned long *)data;
++
++      if (n >= 3)
++	{
++	  s = [NSString stringWithFormat: @"%lu %lu %lu", v[0], v[1], v[2]];
++	}
++      XFree(data);
++    }
++  return s;
++}
++
++static NSString *
++expected(unsigned long functions)
++{
++  return [NSString stringWithFormat: @"%lu %lu %lu",
++    (unsigned long)(HINTS_FUNCTIONS | HINTS_DECORATIONS), functions, 0UL];
++}
++
++int
++main(int argc, const char **argv)
++{
++  START_SET("motif hints")
++
++  extern void	initialize_gnustep_backend(void);
++  GSDisplayServer	*srv = nil;
++  Display		*dpy;
++  int			win;
++
++  if (getenv("DISPLAY") == NULL || *getenv("DISPLAY") == '\0')
++    {
++      SKIP("no window server available")
++    }
++  dpy = XOpenDisplay(NULL);
++  if (dpy == NULL)
++    {
++      SKIP("no window server available")
++    }
++
++  setDefault(@"NO", @"GSBackHandlesWindowDecorations");
++  NS_DURING
++    {
++      initialize_gnustep_backend();
++      srv = [GSDisplayServer serverWithAttributes: nil];
++    }
++  NS_HANDLER
++    {
++      NSLog(@"the display server did not start: %@", localException);
++      SKIP("It looks like the GNUstep backend is not installed")
++    }
++  NS_ENDHANDLER
++  if (srv == nil || [srv isMemberOfClass: [GSDisplayServer class]])
++    {
++      SKIP("no concrete display server")
++    }
++  [GSDisplayServer setCurrentServer: srv];
++
++  PASS([srv handlesWindowDecorations] == NO,
++    "with GSBackHandlesWindowDecorations NO the gui draws the decorations");
++
++  win = [srv window: NSMakeRect(100, 100, 400, 300)
++		   : NSBackingStoreBuffered
++		   : NSTitledWindowMask | NSClosableWindowMask
++		     | NSMiniaturizableWindowMask | NSResizableWindowMask
++		   : 0];
++  PASS_EQUAL(motifHints(srv, dpy, win),
++    expected(FUNC_MOVE | FUNC_CLOSE | FUNC_MINIMIZE | FUNC_RESIZE
++      | FUNC_MAXIMIZE),
++    "a fully styled window asks for no decorations and allows every function");
++  [srv termwindow: win];
++
++  win = [srv window: NSMakeRect(100, 100, 400, 300)
++		   : NSBackingStoreBuffered
++		   : NSTitledWindowMask | NSClosableWindowMask
++		   : 0];
++  PASS_EQUAL(motifHints(srv, dpy, win),
++    expected(FUNC_MOVE | FUNC_CLOSE),
++    "a closable window that isn't resizable allows move and close only");
++  [srv termwindow: win];
++
++  win = [srv window: NSMakeRect(100, 100, 400, 300)
++		   : NSBackingStoreBuffered : NSTitledWindowMask : 0];
++  PASS_EQUAL(motifHints(srv, dpy, win),
++    expected(FUNC_MOVE),
++    "a titled window allows move");
++  [srv termwindow: win];
++
++  win = [srv window: NSMakeRect(100, 100, 200, 100)
++		   : NSBackingStoreBuffered : NSBorderlessWindowMask : 0];
++  PASS_EQUAL(motifHints(srv, dpy, win),
++    expected(0),
++    "a borderless window asks for no decorations and allows no functions");
++  [srv termwindow: win];
++
++  XCloseDisplay(dpy);
++
++  END_SET("motif hints")
++
++  return 0;
++}
++
++#else
++
++int
++main(int argc, const char **argv)
++{
++  START_SET("motif hints")
++    SKIP("back is not built with the x11 server")
++  END_SET("motif hints")
++  return 0;
++}
++
++#endif
+-- 
+2.47.3
+

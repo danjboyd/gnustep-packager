@@ -1,0 +1,64 @@
+Third-party notices for the GNUstep Adwaita theme
+=================================================
+
+The theme's code is licensed under the GNU Lesser General Public License,
+version 2.1 or (at your option) any later version (COPYING.LIB). The images
+listed below are not the theme's own work: they come from GNOME's Adwaita
+icon theme (adwaita-icon-theme, https://gitlab.gnome.org/GNOME/adwaita-icon-theme),
+are distributed with the theme under their own licenses, and are not covered
+by the theme's LGPL-2.1-or-later license.
+
+Copyright: the GNOME Project (https://www.gnome.org). Symbolic icon artwork
+by Jakub Steiner, Lapo Calamandrei, Hylke Bons and other contributors to
+adwaita-icon-theme; see its AUTHORS file.
+
+
+1. Icons under LGPL-3 or CC-BY-SA-3.0 US
+----------------------------------------
+
+Rendered from adwaita-icon-theme's symbolic icons at 16px and 32px, as one
+TIFF each (Tests/Scripts/render-theme-images.py), and the two cursor images
+converted from its Xcursors (Tests/Scripts/import-adwaita-cursors.py):
+
+  Resources/ThemeImages/          adwaita-icon-theme
+  common_Home.tiff                 user-home-symbolic
+  common_Mount.tiff                drive-removable-media-symbolic
+  common_Unmount.tiff              media-eject-symbolic
+  GnomeThemeStarred-symbolic.tiff  starred-symbolic
+  GnomeThemeNonStarred-symbolic.tiff
+                                  non-starred-symbolic
+  GSFrameResizeNWSECursor.tiff    cursors/nwse-resize
+  GSFrameResizeNESWCursor.tiff    cursors/nesw-resize
+
+adwaita-icon-theme's COPYING:
+
+  This work is licenced under the terms of either the GNU LGPL v3 or
+  Creative Commons Attribution-Share Alike 3.0 United States License.
+
+  To view a copy of the CC-BY-SA licence, visit
+  http://creativecommons.org/licenses/by-sa/3.0/ or send a letter to Creative
+  Commons, 171 Second Street, Suite 300, San Francisco, California 94105, USA.
+
+  When attributing the artwork, using "GNOME Project" is enough.
+  Please link to http://www.gnome.org where available.
+
+The GNU LGPL v3 is at https://www.gnu.org/licenses/lgpl-3.0.html.
+
+
+2. Icons under CC-BY-SA-4.0
+---------------------------
+
+Rendered at 16px and 32px from adwaita-icon-theme's pan-up, pan-down and
+pan-end symbolic icons, which Debian's adwaita-icon-theme copyright file
+lists under the Creative Commons Attribution-ShareAlike 4.0 International
+license (https://creativecommons.org/licenses/by-sa/4.0/):
+
+  Resources/ThemeImages/          adwaita-icon-theme
+  NSAscendingSortIndicator.tiff    pan-up-symbolic
+  NSDescendingSortIndicator.tiff   pan-down-symbolic
+  GnomeThemeBranch-symbolic.tiff   pan-end-symbolic
+
+
+Changes: each icon was rasterized at 16px and 32px into one TIFF (the
+cursors converted from Xcursor to TIFF) and renamed to the GNUstep image name the theme replaces.
+The theme tints the symbolic ones to the text colour when it draws them.

@@ -1,0 +1,527 @@
+From bd5a9830b1443c41bcf1b26ef7e48df6c6614764 Mon Sep 17 00:00:00 2001
+From: Daniel Boyd <danieljboyd@icloud.com>
+Date: Tue, 6 Oct 2026 11:36:51 -0500
+Subject: [PATCH] GSTheme: let a theme turn GNUstep-drawn window decorations on
+
+A theme that draws the window decorations itself, as one drawing GNOME's
+header bar does, needs GSBackHandlesWindowDecorations NO: the backend
+then leaves the window manager's decorations off and the gui draws its
+own.  A theme can set that default in the GSThemeDomain of its
+Info-gnustep.plist, but the backend reads it when the display server is
+created in -[NSApplication _init], before the theme is loaded, so the
+theme's value arrives too late and every user had to set the default by
+hand.
+
+GSThemeInstallBackendDefaults(), called just before the display server
+is created, reads the GSThemeDomain of the theme the GSTheme default
+names, without loading the theme's code, and installs its
+GSBackHandlesWindowDecorations (and only that) as the GSThemeDomain
+volatile domain, placed in the search list where -[GSTheme activate]
+puts it, above the registration domain.  When the theme is activated
+later its whole domain replaces this one.  Nothing is installed when the
+user has set GSBackHandlesWindowDecorations or the older
+GSX11HandlesWindowDecorations in any domain other than the registration
+domain (a value an application or library merely registered is not the
+user's choice), when a theme has already put its domain in place, for
+the GNUstep theme, or when the theme can't be found or doesn't set the
+default.  The theme bundle lookup moves out of +loadThemeNamed: into
+GSThemePathForFileName() so both use the same one.
+
+Testing: Tests/gui/GSTheme/backendDefaults.m makes two theme bundles in
+a temporary directory, one with the default in its GSThemeDomain and one
+without, names them by absolute path in GSTheme, and calls the function
+directly, so it needs no display.  It checks each case that must
+install nothing (no GSTheme, the GNUstep theme, the user's value for
+either default, a theme without the default, a theme that isn't there),
+then that the theme's value is installed alone in GSThemeDomain, reads
+back as NO although YES is registered for it, sits in the search list
+once and above the registration domain, and stays that way when the
+function is called again; and that +loadThemeNamed: still finds a theme
+by path after the lookup moved.  Defaults are set in the argument
+domain, for the test process only.  Without this change the test
+doesn't run (the function doesn't exist); with it all 11 checks pass.
+The registered-default check found a bug in an earlier draft, which
+tested -objectForKey: and so let any registered value block the theme.
+
+AI assistance: this change, its test and this description were written
+with Claude (Anthropic's Claude Code).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ChangeLog                           |  20 +++
+ Source/GSTheme.m                    | 174 ++++++++++++++++++++-----
+ Source/GSThemePrivate.h             |  11 ++
+ Source/NSApplication.m              |   5 +
+ Tests/gui/GSTheme/TestInfo          |   0
+ Tests/gui/GSTheme/backendDefaults.m | 190 ++++++++++++++++++++++++++++
+ 6 files changed, 369 insertions(+), 31 deletions(-)
+ create mode 100644 Tests/gui/GSTheme/TestInfo
+ create mode 100644 Tests/gui/GSTheme/backendDefaults.m
+
+diff --git a/ChangeLog b/ChangeLog
+index fb9c9b75d..21d77dcd7 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,23 @@
++2026-10-06 Daniel Boyd <danieljboyd@icloud.com>
++
++	* Source/GSTheme.m (GSThemePathForFileName): New function, the
++	lookup of a theme bundle's path from +loadThemeNamed:.
++	(GSDefaultSetAboveRegistration): New function.  Whether a domain
++	other than the registration domain sets a default.
++	(GSThemeInstallBackendDefaults): New function.  Install the
++	GSBackHandlesWindowDecorations default from the GSThemeDomain of the
++	theme named by the GSTheme default, without loading the theme,
++	unless the user has set GSBackHandlesWindowDecorations or
++	GSX11HandlesWindowDecorations (a registered default doesn't count),
++	or a theme has already installed its domain.  A theme that draws the window decorations itself can then
++	turn GNUstep-drawn decorations on: the backend reads that default
++	when the display server is created, before the theme is loaded.
++	(+loadThemeNamed:): Use GSThemePathForFileName().
++	* Source/GSThemePrivate.h: Declare GSThemeInstallBackendDefaults().
++	* Source/NSApplication.m (-_init): Call it before creating the
++	display server.
++	* Tests/gui/GSTheme/backendDefaults.m: New test.
++
+ 2026-09-20 Simon Peter <probonopd@users.noreply.github.com>
+ 
+ 	* Source/NSMenuView.m (-_trackWithEvent:startingMenuView:): Carry
+diff --git a/Source/GSTheme.m b/Source/GSTheme.m
+index 449dbac3e..f07425c1a 100644
+--- a/Source/GSTheme.m
++++ b/Source/GSTheme.m
+@@ -333,6 +333,148 @@ GSStringFromImageFrameStyle(NSImageFrameStyle type)
+ @implementation	GSThemeMethod
+ @end
+ 
++/* The path of the theme bundle `theme` (a file name with the .theme
++ * extension, or an absolute path): as given, or in the Themes subdirectory
++ * of one of the standard Library directories. nil when there is none.
++ */
++static NSString *
++GSThemePathForFileName(NSString *theme)
++{
++  NSFileManager	*mgr = [NSFileManager defaultManager];
++  NSString	*path = nil;
++  BOOL		isDir;
++
++  if ([theme isAbsolutePath] == YES)
++    {
++      if ([mgr fileExistsAtPath: theme isDirectory: &isDir] == YES
++	&& isDir == YES)
++	{
++	  path = theme;
++	}
++    }
++  else
++    {
++      NSEnumerator	*enumerator;
++
++      enumerator = [NSSearchPathForDirectoriesInDomains
++	(NSAllLibrariesDirectory, NSAllDomainsMask, YES) objectEnumerator];
++      while ((path = [enumerator nextObject]) != nil)
++	{
++	  path = [path stringByAppendingPathComponent: @"Themes"];
++	  path = [path stringByAppendingPathComponent: theme];
++	  if ([mgr fileExistsAtPath: path isDirectory: &isDir])
++	    {
++	      break;
++	    }
++	}
++    }
++  return path;
++}
++
++/* Whether a domain of the search list other than the registration domain
++ * (and GSThemeDomain, which a theme fills) sets the default `key': a choice
++ * made by the user, on the command line or in the defaults, as opposed to
++ * one an application or library registered.
++ */
++static BOOL
++GSDefaultSetAboveRegistration(NSUserDefaults *defs, NSString *key)
++{
++  NSEnumerator	*enumerator = [[defs searchList] objectEnumerator];
++  NSString	*name;
++
++  while ((name = [enumerator nextObject]) != nil)
++    {
++      NSDictionary	*domain;
++
++      if ([name isEqual: NSRegistrationDomain]
++	|| [name isEqual: @"GSThemeDomain"])
++	{
++	  continue;
++	}
++      domain = [defs volatileDomainForName: name];
++      if (domain == nil)
++	{
++	  domain = [defs persistentDomainForName: name];
++	}
++      if ([domain objectForKey: key] != nil)
++	{
++	  return YES;
++	}
++    }
++  return NO;
++}
++
++void
++GSThemeInstallBackendDefaults(void)
++{
++  NSUserDefaults	*defs = [NSUserDefaults standardUserDefaults];
++  NSString		*name = [defs stringForKey: @"GSTheme"];
++  NSString		*path;
++  NSDictionary		*domain;
++  id			value;
++  NSMutableArray	*searchList;
++  NSUInteger		index;
++
++  /* An explicit choice by the user stands. The backend reads
++   * GSBackHandlesWindowDecorations before GSX11HandlesWindowDecorations,
++   * so a theme value must not hide either.
++   */
++  if (GSDefaultSetAboveRegistration(defs, @"GSBackHandlesWindowDecorations")
++    || GSDefaultSetAboveRegistration(defs, @"GSX11HandlesWindowDecorations"))
++    {
++      return;
++    }
++  /* A theme already activated has put its whole domain in place. */
++  if ([defs volatileDomainForName: @"GSThemeDomain"] != nil)
++    {
++      return;
++    }
++  if ([[name pathExtension] isEqual: @"theme"])
++    {
++      name = [name stringByDeletingPathExtension];
++    }
++  if ([name length] == 0 || [[name lastPathComponent] isEqual: @"GNUstep"])
++    {
++      return;
++    }
++  if ([name isAbsolutePath] == NO)
++    {
++      name = [name lastPathComponent];
++    }
++  path = GSThemePathForFileName([name stringByAppendingPathExtension: @"theme"]);
++  domain = [[[NSBundle bundleWithPath: path] infoDictionary]
++    objectForKey: @"GSThemeDomain"];
++  if ([domain isKindOfClass: [NSDictionary class]] == NO)
++    {
++      return;
++    }
++  value = [domain objectForKey: @"GSBackHandlesWindowDecorations"];
++  if (value == nil)
++    {
++      return;
++    }
++
++  /* Where -activate puts the theme's whole domain, which replaces this.
++   */
++  [defs setVolatileDomain: [NSDictionary dictionaryWithObject: value
++    forKey: @"GSBackHandlesWindowDecorations"] forName: @"GSThemeDomain"];
++  searchList = AUTORELEASE([[defs searchList] mutableCopy]);
++  if ([searchList containsObject: @"GSThemeDomain"] == NO)
++    {
++      index = [searchList indexOfObject: GSConfigDomain];
++      if (index == NSNotFound)
++	{
++	  index = [searchList indexOfObject: NSRegistrationDomain];
++	  if (index == NSNotFound)
++	    {
++	      index = [searchList count];
++	    }
++	}
++      [searchList insertObject: @"GSThemeDomain" atIndex: index];
++      [defs setSearchList: searchList];
++    }
++}
++
+ @implementation GSTheme
+ 
+ static GSTheme			*defaultTheme = nil;
+@@ -450,37 +592,7 @@ typedef	struct {
+   bundle = [themes objectForKey: theme];
+   if (bundle == nil)
+     {
+-      NSString		*path = nil;
+-      NSFileManager	*mgr = [NSFileManager defaultManager];
+-      BOOL 		isDir;
+-
+-      /* A theme may be either an absolute path or a filename to be located
+-       * in the Themes subdirectory of one of the standard Library directories.
+-       */
+-      if ([theme isAbsolutePath] == YES)
+-        {
+-	  if ([mgr fileExistsAtPath: theme isDirectory: &isDir] == YES
+-	    && isDir == YES)
+-	    {
+-	      path = theme;
+-	    }
+-	}
+-      else
+-        {
+-	  NSEnumerator	*enumerator;
+-
+-	  enumerator = [NSSearchPathForDirectoriesInDomains
+-	    (NSAllLibrariesDirectory, NSAllDomainsMask, YES) objectEnumerator];
+-	  while ((path = [enumerator nextObject]) != nil)
+-	    {
+-	      path = [path stringByAppendingPathComponent: @"Themes"];
+-	      path = [path stringByAppendingPathComponent: theme];
+-	      if ([mgr fileExistsAtPath: path isDirectory: &isDir])
+-		{
+-		  break;
+-		}
+-	    }
+-	}
++      NSString		*path = GSThemePathForFileName(theme);
+ 
+       if (path == nil)
+ 	{
+diff --git a/Source/GSThemePrivate.h b/Source/GSThemePrivate.h
+index c9daf112c..3b0ac8ace 100644
+--- a/Source/GSThemePrivate.h
++++ b/Source/GSThemePrivate.h
+@@ -42,6 +42,17 @@ NSString *GSStringFromBorderType(NSBorderType borderType);
+ NSString *GSStringFromTabViewType(NSTabViewType type);
+ NSString *GSStringFromImageFrameStyle(NSImageFrameStyle type);
+ 
++/* Before the display server is created (-[NSApplication _init]): a theme
++ * that draws the window decorations itself sets
++ * GSBackHandlesWindowDecorations to NO in the GSThemeDomain of its
++ * Info.plist. The backend reads that default when the display server is
++ * created, before the theme is loaded, so this installs it from the
++ * theme named by the GSTheme default, without loading the theme, unless
++ * the user has set GSBackHandlesWindowDecorations or
++ * GSX11HandlesWindowDecorations.
++ */
++void GSThemeInstallBackendDefaults(void);
++
+ /** These are the nine types of tile used to draw a rectangular object.
+  */
+ typedef enum {
+diff --git a/Source/NSApplication.m b/Source/NSApplication.m
+index c4ca55965..5dd11d0bc 100644
+--- a/Source/NSApplication.m
++++ b/Source/NSApplication.m
+@@ -84,6 +84,7 @@
+ 
+ #import "GSIconManager.h"
+ #import "GNUstepGUI/GSDisplayServer.h"
++#import "GSThemePrivate.h"
+ #import "GNUstepGUI/GSServicesManager.h"
+ #import "GSGuiPrivate.h"
+ #import "GNUstepGUI/GSInfoPanel.h"
+@@ -890,6 +891,10 @@ static BOOL _isAutolaunchChecked = NO;
+   /* Load user-defined bundles */
+   gsapp_user_bundles();
+ 
++  /* Defaults the theme sets for the backend, which reads them when the
++     server is created.  */
++  GSThemeInstallBackendDefaults();
++
+   /* Connect to our window server.  */
+   srv = [GSDisplayServer serverWithAttributes: nil];
+   RETAIN(srv);
+diff --git a/Tests/gui/GSTheme/TestInfo b/Tests/gui/GSTheme/TestInfo
+new file mode 100644
+index 000000000..e69de29bb
+diff --git a/Tests/gui/GSTheme/backendDefaults.m b/Tests/gui/GSTheme/backendDefaults.m
+new file mode 100644
+index 000000000..79c375a1b
+--- /dev/null
++++ b/Tests/gui/GSTheme/backendDefaults.m
+@@ -0,0 +1,190 @@
++/* GSThemeInstallBackendDefaults(): before the display server is created, a
++   theme that draws the window decorations itself turns GNUstep-drawn
++   decorations on by setting GSBackHandlesWindowDecorations to NO in the
++   GSThemeDomain of its Info-gnustep.plist.  The backend reads that default
++   when the display server is created, before the theme is loaded, so the
++   function installs it from the theme the GSTheme default names, without
++   loading the theme, unless the user has set the default (or the older
++   GSX11HandlesWindowDecorations) or a theme has already put its domain in
++   place.
++
++   The test makes two theme bundles in a temporary directory, one with the
++   default in its GSThemeDomain and one without, names them by absolute
++   path in GSTheme, and calls the function directly.  It needs no display.
++   Defaults are set in the argument domain, for this process only.
++*/
++
++#import "Testing.h"
++#import <Foundation/NSArray.h>
++#import <Foundation/NSAutoreleasePool.h>
++#import <Foundation/NSDictionary.h>
++#import <Foundation/NSFileManager.h>
++#import <Foundation/NSPathUtilities.h>
++#import <Foundation/NSProcessInfo.h>
++#import <Foundation/NSUserDefaults.h>
++#import <GNUstepGUI/GSTheme.h>
++
++/* Private to the gui library (GSThemePrivate.h). */
++extern void GSThemeInstallBackendDefaults(void);
++
++static NSString * const key = @"GSBackHandlesWindowDecorations";
++
++/* Sets a default for this process only, in the argument domain, or
++   removes it when value is nil. */
++static void
++setDefault(id value, NSString *name)
++{
++  NSUserDefaults	*defs = [NSUserDefaults standardUserDefaults];
++  NSMutableDictionary	*args;
++
++  args = [[defs volatileDomainForName: NSArgumentDomain] mutableCopy];
++  if (args == nil)
++    {
++      args = [NSMutableDictionary new];
++    }
++  if (value == nil)
++    {
++      [args removeObjectForKey: name];
++    }
++  else
++    {
++      [args setObject: value forKey: name];
++    }
++  [defs removeVolatileDomainForName: NSArgumentDomain];
++  [defs setVolatileDomain: args forName: NSArgumentDomain];
++  [args release];
++}
++
++/* Makes dir/name.theme with that GSThemeDomain (none when nil); answers
++   its path. */
++static NSString *
++makeTheme(NSString *dir, NSString *name, NSDictionary *domain)
++{
++  NSString		*path;
++  NSString		*resources;
++  NSMutableDictionary	*info;
++
++  path = [dir stringByAppendingPathComponent:
++    [name stringByAppendingPathExtension: @"theme"]];
++  resources = [path stringByAppendingPathComponent: @"Resources"];
++  [[NSFileManager defaultManager] createDirectoryAtPath: resources
++			    withIntermediateDirectories: YES
++					     attributes: nil
++						  error: NULL];
++  info = [NSMutableDictionary dictionaryWithObject: name
++					    forKey: @"CFBundleName"];
++  if (domain != nil)
++    {
++      [info setObject: domain forKey: @"GSThemeDomain"];
++    }
++  [info writeToFile: [resources stringByAppendingPathComponent:
++    @"Info-gnustep.plist"] atomically: YES];
++  return path;
++}
++
++static NSUInteger
++occurrences(NSArray *array, id object)
++{
++  NSUInteger	count = 0;
++  NSUInteger	i;
++
++  for (i = 0; i < [array count]; i++)
++    {
++      if ([[array objectAtIndex: i] isEqual: object])
++	{
++	  count++;
++	}
++    }
++  return count;
++}
++
++int
++main(int argc, char **argv)
++{
++  NSAutoreleasePool	*pool = [NSAutoreleasePool new];
++  NSUserDefaults	*defs = [NSUserDefaults standardUserDefaults];
++  NSFileManager		*mgr = [NSFileManager defaultManager];
++  NSString		*dir;
++  NSString		*drawing;
++  NSString		*plain;
++  NSArray		*searchList;
++
++  START_SET("GSThemeInstallBackendDefaults")
++
++  dir = [NSTemporaryDirectory() stringByAppendingPathComponent:
++    [NSString stringWithFormat: @"backendDefaults-%d",
++      [[NSProcessInfo processInfo] processIdentifier]]];
++  drawing = makeTheme(dir, @"Drawing",
++    [NSDictionary dictionaryWithObject: @"NO" forKey: key]);
++  plain = makeTheme(dir, @"Plain", nil);
++
++  setDefault(nil, @"GSTheme");
++  GSThemeInstallBackendDefaults();
++  PASS([defs volatileDomainForName: @"GSThemeDomain"] == nil
++    && [defs objectForKey: key] == nil,
++    "with no GSTheme nothing is installed");
++
++  setDefault(@"GNUstep", @"GSTheme");
++  GSThemeInstallBackendDefaults();
++  PASS([defs volatileDomainForName: @"GSThemeDomain"] == nil,
++    "the GNUstep theme installs nothing");
++
++  setDefault(drawing, @"GSTheme");
++  setDefault(@"YES", key);
++  GSThemeInstallBackendDefaults();
++  PASS([defs volatileDomainForName: @"GSThemeDomain"] == nil
++    && [defs boolForKey: key] == YES,
++    "the user's GSBackHandlesWindowDecorations wins over the theme's");
++  setDefault(nil, key);
++
++  setDefault(@"YES", @"GSX11HandlesWindowDecorations");
++  GSThemeInstallBackendDefaults();
++  PASS([defs volatileDomainForName: @"GSThemeDomain"] == nil,
++    "the user's GSX11HandlesWindowDecorations wins over the theme's");
++  setDefault(nil, @"GSX11HandlesWindowDecorations");
++
++  setDefault(plain, @"GSTheme");
++  GSThemeInstallBackendDefaults();
++  PASS([defs volatileDomainForName: @"GSThemeDomain"] == nil,
++    "a theme without the default installs nothing");
++
++  setDefault([dir stringByAppendingPathComponent: @"Missing.theme"],
++    @"GSTheme");
++  GSThemeInstallBackendDefaults();
++  PASS([defs volatileDomainForName: @"GSThemeDomain"] == nil,
++    "a theme that can't be found installs nothing");
++
++  /* A registered default is below the theme's domain. */
++  [defs registerDefaults: [NSDictionary dictionaryWithObject: @"YES"
++						      forKey: key]];
++  setDefault(drawing, @"GSTheme");
++  GSThemeInstallBackendDefaults();
++  PASS_EQUAL([defs volatileDomainForName: @"GSThemeDomain"],
++    [NSDictionary dictionaryWithObject: @"NO" forKey: key],
++    "the theme's GSBackHandlesWindowDecorations is installed in"
++    " GSThemeDomain, alone");
++  PASS([defs objectForKey: key] != nil && [defs boolForKey: key] == NO,
++    "the default reads as the theme set it, above the registration domain");
++  searchList = [defs searchList];
++  PASS(occurrences(searchList, @"GSThemeDomain") == 1
++    && [searchList indexOfObject: @"GSThemeDomain"]
++      < [searchList indexOfObject: NSRegistrationDomain],
++    "GSThemeDomain is in the search list once, before the registration"
++    " domain");
++
++  GSThemeInstallBackendDefaults();
++  PASS(occurrences([defs searchList], @"GSThemeDomain") == 1,
++    "calling it again leaves the search list as it was");
++
++  /* The lookup it shares with +loadThemeNamed:. */
++  PASS([GSTheme loadThemeNamed: drawing] != nil,
++    "+loadThemeNamed: still finds a theme by its absolute path");
++
++  /* Inside the set: the set has its own autorelease pool. */
++  [mgr removeItemAtPath: dir error: NULL];
++
++  END_SET("GSThemeInstallBackendDefaults")
++
++  [pool release];
++  return 0;
++}
+-- 
+2.47.3
+

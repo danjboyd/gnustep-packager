@@ -1,0 +1,438 @@
+From 0c7dc1f0fc0bbdb53d029c8927c6201a227481fb Mon Sep 17 00:00:00 2001
+From: Daniel Boyd <danieljboyd@icloud.com>
+Date: Tue, 6 Oct 2026 11:33:53 -0500
+Subject: [PATCH] x11, cairo: popover shadows for menus, when a theme asks
+
+GNOME's menus are popovers: rounded, with a soft shadow of their own,
+fainter and shorter than a window's.  A theme that draws GNUstep's menus
+that way can round their corners with the alpha channel for borderless
+windows, but has nowhere to draw the shadow.
+
+A borderless window marked with NSUtilityWindowMask, which a borderless
+window has no other use for, is treated as a popover when the new
+GSBackPopoverShadows default is YES: it gets a transparent margin like a
+window's (14 points at the sides, 12 above, 16 below), on a window's
+terms (the gui draws the decorations, the window manager knows
+_GTK_FRAME_EXTENTS, a compositing manager runs), corners rounded by
+GSBackPopoverCornerRadius, and no resize band: presses land only in its
+visible part.  The shadow is libadwaita's popover box-shadow, "0 1px 5px
+1px" black at 0.09 and "0 2px 14px 3px" black at 0.05, computed as a CSS
+blur from the distance to the popover's rounded outline, so it follows
+the corners as a browser's does.  Only libadwaita's published numbers are
+taken; no code.  The shadow template cache keeps one template for
+windows and one for popovers.  Nothing changes unless the default is set
+and a window is marked.
+
+Testing: both shadow tests from the previous change gain popover cases.
+Tests/x11/shadowmargin.m checks that a marked window has no margin
+without the default; with it, the popover's exact margin, X window size
+and input shape (the visible part only, no band); and that the default
+gives no margin to an unmarked borderless window and doesn't change a
+titled window's.  Tests/x11/shadowdrawing.m makes a borderless,
+NSUtilityWindowMask NSPanel and reads its pixels back: contents opaque,
+corners rounded off, about 8% black beside it fading to nearly nothing
+at its margin's edge, and stronger below than above (values seen: 21 and
+1 across the margin, 26 below, 16 above, against 46, 51 and 22 for a
+window).  Without this change the popover margin check fails and the
+popover's drawing checks can't run (its X window has no margin); with
+it, shadowmargin.m passes 23 of 23 and shadowdrawing.m 14 of 14.
+
+AI assistance: this change, its tests and this description were written
+with Claude (Anthropic's Claude Code).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ChangeLog                           | 25 ++++++++++++
+ Headers/x11/XGServerWindow.h        |  2 +
+ Source/cairo/XGCairoModernSurface.m | 63 +++++++++++++++++++++++++----
+ Source/x11/XGServerWindow.m         | 50 +++++++++++++++++++++--
+ Tests/x11/shadowdrawing.m           | 48 +++++++++++++++++++++-
+ Tests/x11/shadowmargin.m            | 42 ++++++++++++++++++-
+ 6 files changed, 216 insertions(+), 14 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index 0450d7b..0638a62 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,28 @@
++2026-10-06 Daniel Boyd <danieljboyd@icloud.com>
++
++	Popover shadows: menus get libadwaita's popover shadow round their
++	rounded corners, in a transparent margin as windows do.
++	* Source/x11/XGServerWindow.m (popoverMargin, marginFor): New.  A
++	popover's margin, smaller than a window's.
++	(-_windowGetsPopoverShadow:): New.  A borderless window marked with
++	NSUtilityWindowMask (which a borderless window has no other use for;
++	a theme marks its menus) gets a popover's margin when
++	GSBackPopoverShadows is YES, on a window's terms: the gui draws the
++	decorations, the window manager lists _GTK_FRAME_EXTENTS and the
++	compositing manager shows transparency.  GSBackPopoverCornerRadius
++	rounds its corners.
++	(-window::::, -_updateShadowSizeOf:): Use the window's margin.
++	* Source/cairo/XGCairoModernSurface.m (box_shadow_layer,
++	popover_shadow_alpha): New.  libadwaita's popover box-shadow, two
++	blurred layers, each from the distance to the popover's rounded
++	outline (grown by its spread), so it follows the rounded corners.
++	(shadow_template, create_shadow): Take the kind of shadow; keep a
++	template for each.
++	* Headers/x11/XGServerWindow.h: Add shadow_popover to
++	gswindow_device_t.
++	* Tests/x11/shadowmargin.m, Tests/x11/shadowdrawing.m: Check
++	popovers.
++
+ 2026-10-06 Daniel Boyd <danieljboyd@icloud.com>
+ 
+ 	Window shadows and rounded corners for windows whose decorations the
+diff --git a/Headers/x11/XGServerWindow.h b/Headers/x11/XGServerWindow.h
+index 81bbd7b..a8257dd 100644
+--- a/Headers/x11/XGServerWindow.h
++++ b/Headers/x11/XGServerWindow.h
+@@ -113,6 +113,8 @@ typedef struct _gswindow_device_t {
+ 					  fullscreen nor tiled */
+   BOOL                  shadow_resizable; /* Takes presses in a band round
+ 					  the visible part, for resizing */
++  BOOL                  shadow_popover; /* A popover's (a menu's) smaller
++					  margin and shadow, not a window's */
+   BOOL                  shadow_settling; /* That margin changed and the
+ 					  window manager is fitting the
+ 					  window to it: the gui hears of
+diff --git a/Source/cairo/XGCairoModernSurface.m b/Source/cairo/XGCairoModernSurface.m
+index e334283..71b82dc 100644
+--- a/Source/cairo/XGCairoModernSurface.m
++++ b/Source/cairo/XGCairoModernSurface.m
+@@ -88,6 +88,50 @@ shadow_alpha(double px, double py, double x0, double x1, double y0, double y1,
+   return side;
+ }
+ 
++/*
++ * One layer of a CSS box-shadow round a rounded box: the box grown by
++ * `spread` (its corner radius too) and moved down by `offset`, blurred by
++ * `blur` (a Gaussian with half that as its deviation), as seen at (px, py).
++ * Computed from the distance to the grown box's rounded outline, so it
++ * follows the corners as a browser's does.
++ */
++static double
++box_shadow_layer(double px, double py, double x0, double x1, double y0,
++		 double y1, double radius, double offset, double spread,
++		 double blur)
++{
++  double r = radius + spread;
++  double left = x0 - spread, right = x1 + spread;
++  double top = y0 - spread + offset, bottom = y1 + spread + offset;
++  double qx = MAX(MAX(left + r - px, px - (right - r)), 0.0);
++  double qy = MAX(MAX(top + r - py, py - (bottom - r)), 0.0);
++  double d = sqrt(qx * qx + qy * qy) - r;
++
++  return 0.5 * erfc(d / (blur / 2.0 * M_SQRT2));
++}
++
++/*
++ * A popover's shadow (libadwaita's popover contents): box-shadow
++ * 0 1px 5px 1px black at 0.09, and 0 2px 14px 3px black at 0.05, at
++ * scale 1, round its rounded corners. 0 inside the rounded visible part.
++ */
++static double
++popover_shadow_alpha(double px, double py, double x0, double x1, double y0,
++		     double y1, double radius, double scale)
++{
++  double dx = MAX(MAX(x0 + radius - px, px - (x1 - radius)), 0.0);
++  double dy = MAX(MAX(y0 + radius - py, py - (y1 - radius)), 0.0);
++
++  if (sqrt(dx * dx + dy * dy) <= radius && px > x0 && px < x1 && py > y0 && py < y1)
++    {
++      return 0.0;
++    }
++  return 0.09 * box_shadow_layer(px, py, x0, x1, y0, y1, radius,
++				 1 * scale, 1 * scale, 5 * scale)
++    + 0.05 * box_shadow_layer(px, py, x0, x1, y0, y1, radius,
++			      2 * scale, 3 * scale, 14 * scale);
++}
++
+ static inline uint32_t
+ shadow_pixel(double alpha)
+ {
+@@ -114,10 +158,11 @@ typedef struct {
+ 
+ static cairo_surface_t *
+ shadow_template(cairo_surface_t *similar, const int *margin, int radius,
+-		double scale)
++		double scale, BOOL popover)
+ {
+-  static shadow_cache windowCache;
+-  shadow_cache *cache = &windowCache;
++  /* One for windows, one for popovers. */
++  static shadow_cache caches[2];
++  shadow_cache *cache = &caches[popover ? 1 : 0];
+   int width = margin[0] + 2 * radius + SHADOW_TILE + margin[1];
+   int height = margin[2] + 2 * radius + SHADOW_TILE + margin[3];
+   double x0 = margin[0], x1 = width - margin[1];
+@@ -149,8 +194,9 @@ shadow_template(cairo_surface_t *similar, const int *margin, int radius,
+ 
+       for (x = 0; x < width; x++)
+ 	{
+-	  row[x] = shadow_pixel(shadow_alpha(x + 0.5, y + 0.5, x0, x1, y0, y1,
+-					     radius, scale));
++	  row[x] = shadow_pixel(popover
++	    ? popover_shadow_alpha(x + 0.5, y + 0.5, x0, x1, y0, y1, radius, scale)
++	    : shadow_alpha(x + 0.5, y + 0.5, x0, x1, y0, y1, radius, scale));
+ 	}
+     }
+   cairo_surface_mark_dirty(image);
+@@ -200,7 +246,7 @@ shadow_copy(cairo_t *cr, cairo_surface_t *template, double sx, double sy,
+  */
+ static cairo_surface_t *
+ create_shadow(cairo_surface_t *similar, int width, int height,
+-	      const int *margin, int radius, double scale)
++	      const int *margin, int radius, double scale, BOOL popover)
+ {
+   int l = margin[0], r = margin[1], t = margin[2], b = margin[3];
+   cairo_surface_t *template, *shadow;
+@@ -212,7 +258,7 @@ create_shadow(cairo_surface_t *similar, int width, int height,
+     {
+       return NULL;
+     }
+-  template = shadow_template(similar, margin, radius, scale);
++  template = shadow_template(similar, margin, radius, scale, popover);
+   if (template == NULL)
+     {
+       return NULL;
+@@ -312,7 +358,8 @@ create_shadow(cairo_surface_t *similar, int width, int height,
+ 					 GSWINDEVICE->xframe.size.height,
+ 					 GSWINDEVICE->shadow,
+ 					 GSWINDEVICE->corner_radius,
+-					 GSWINDEVICE->shadow_scale);
++					 GSWINDEVICE->shadow_scale,
++					 GSWINDEVICE->shadow_popover);
+ 	}
+ 
+       /*NSLog(@"Window surface type %d, back buffer type %d, w %d h %d",
+diff --git a/Source/x11/XGServerWindow.m b/Source/x11/XGServerWindow.m
+index 2e1c6fc..f152119 100644
+--- a/Source/x11/XGServerWindow.m
++++ b/Source/x11/XGServerWindow.m
+@@ -620,6 +620,17 @@ BOOL AtomPresentAndPointsToItself(Display *dpy, Atom atom, Atom type)
+  */
+ static const int shadowMargin[4] = { 30, 30, 24, 36 };
+ 
++/* A popover's (libadwaita's menus): its shadow is smaller and fades out
++ * within about 14 pixels at the sides, less above and more below.
++ */
++static const int popoverMargin[4] = { 14, 14, 12, 16 };
++
++static inline const int *
++marginFor(gswindow_device_t *win)
++{
++  return win->shadow_popover ? popoverMargin : shadowMargin;
++}
++
+ /* How far outside the visible edge a resizable window takes presses, for
+  * resizing from the shadow (GTK 4 under Mutter: 12 pixels).
+  */
+@@ -794,6 +805,34 @@ static int compositorRunning = -1;
+   return [self _compositorShowsAlpha];
+ }
+ 
++/*
++ * A borderless window marked as a popover (NSUtilityWindowMask, which a
++ * borderless window has no other use for; the Adwaita theme marks its
++ * menus) gets a popover's margin and shadow when GSBackPopoverShadows is
++ * YES, on the same terms as a window's: the window manager must know the
++ * margin isn't part of the window, and the compositing manager must show
++ * transparency. GSBackPopoverCornerRadius rounds its corners.
++ */
++- (BOOL) _windowGetsPopoverShadow: (unsigned int)style
++{
++  if (handlesWindowDecorations
++    || (style & (NSTitledWindowMask | NSClosableWindowMask
++		 | NSMiniaturizableWindowMask | NSResizableWindowMask
++		 | NSDocModalWindowMask | NSIconWindowMask | NSMiniWindowMask
++		 | NSFullScreenWindowMask)) != 0
++    || (style & NSUtilityWindowMask) == 0
++    || [[NSUserDefaults standardUserDefaults]
++	 boolForKey: @"GSBackPopoverShadows"] == NO)
++    {
++      return NO;
++    }
++  if (![self _checkWMSupports: generic._GTK_FRAME_EXTENTS_ATOM])
++    {
++      return NO;
++    }
++  return [self _compositorShowsAlpha];
++}
++
+ /*
+  * A borderless window (menus, tool tips) gets an alpha channel when
+  * GSBackBorderlessWindowAlpha is YES (a theme that draws them with rounded
+@@ -873,7 +912,7 @@ static int compositorRunning = -1;
+     }
+   for (i = 0; i < 4; i++)
+     {
+-      int wanted = flat ? 0 : shadowScaled(shadowMargin[i], win->shadow_scale);
++      int wanted = flat ? 0 : shadowScaled(marginFor(win)[i], win->shadow_scale);
+ 
+       if (win->shadow[i] != wanted)
+ 	{
+@@ -2430,21 +2469,24 @@ _wmTestErrorHandler(Display *display, XErrorEvent *event)
+         = style & (NSIconWindowMask | NSMiniWindowMask);
+     }
+   /* A non-retained window has no backing store to keep its shadow in. */
+-  if (type != NSBackingStoreNonretained && [self _windowGetsShadow: style])
++  if (type != NSBackingStoreNonretained
++    && ([self _windowGetsShadow: style] || [self _windowGetsPopoverShadow: style]))
+     {
+       int i;
+ 
+       window->shadow_eligible = YES;
++      window->shadow_popover = [self _windowGetsPopoverShadow: style];
+       window->shadow_resizable = (style & NSResizableWindowMask) != 0;
+       window->shadow_scale = shadowScale();
+       for (i = 0; i < 4; i++)
+ 	{
+-	  window->shadow[i] = shadowScaled(shadowMargin[i],
++	  window->shadow[i] = shadowScaled(marginFor(window)[i],
+ 					   window->shadow_scale);
+ 	}
+       window->corner_radius = shadowScaled(MAX(0,
+ 	[[NSUserDefaults standardUserDefaults]
+-	  integerForKey: @"GSBackWindowCornerRadius"]), window->shadow_scale);
++	  integerForKey: window->shadow_popover ? @"GSBackPopoverCornerRadius"
++	    : @"GSBackWindowCornerRadius"]), window->shadow_scale);
+     }
+ 
+   frame = [self _OSFrameToXFrame: frame for: window];
+diff --git a/Tests/x11/shadowdrawing.m b/Tests/x11/shadowdrawing.m
+index 234bf32..d07f9ef 100644
+--- a/Tests/x11/shadowdrawing.m
++++ b/Tests/x11/shadowdrawing.m
+@@ -2,7 +2,10 @@
+  * gui's drawing inside its visible part, opaque, with that part's corners
+  * rounded (GSBackWindowCornerRadius), and round it a black shadow that is
+  * strongest at the edge, fades out across the margin, and is stronger
+- * below the window than above it.
++ * below the window than above it.  A popover (GSBackPopoverShadows: a
++ * borderless window marked with NSUtilityWindowMask, as a theme marks its
++ * menus) has a fainter, shorter shadow of its own, and its corners rounded
++ * by GSBackPopoverCornerRadius.
+  *
+  * The test forks a window manager that knows _GTK_FRAME_EXTENTS
+  * (FakeCSDWindowManager.h) and a compositing manager (FakeCompositor.h),
+@@ -112,6 +115,7 @@ main(int argc, const char **argv)
+   pid_t			wm;
+   pid_t			compositor;
+   NSWindow		*window;
++  NSPanel		*popover;
+   XWindowAttributes	a;
+   XImage		*image;
+   unsigned long		extents[4];
+@@ -206,6 +210,48 @@ main(int argc, const char **argv)
+     }
+   [window close];
+ 
++  setDefault(@"YES", @"GSBackPopoverShadows");
++  setDefault(@"12", @"GSBackPopoverCornerRadius");
++  popover = [[NSPanel alloc]
++    initWithContentRect: NSMakeRect(100, 100, 200, 120)
++	      styleMask: NSBorderlessWindowMask | NSUtilityWindowMask
++		backing: NSBackingStoreBuffered
++		  defer: NO];
++  image = grab(dpy, popover, &a, extents);
++  PASS(image != NULL && a.width > NSWidth([popover frame])
++    && a.height > NSHeight([popover frame]),
++    "a popover has a 32-bit X window with a margin round its frame");
++  if (image != NULL)
++    {
++      int	left = extents[0];
++      int	right = a.width - extents[1];
++      int	top = extents[2];
++      int	bottom = a.height - extents[3];
++      int	midX = (left + right) / 2;
++      int	midY = (top + bottom) / 2;
++
++      PASS(alphaAt(image, midX, midY) == 255
++	&& alphaAt(image, midX, top) == 255,
++	"the popover's contents are opaque");
++      PASS(alphaAt(image, left, top) < 128
++	&& alphaAt(image, right - 1, bottom - 1) < 128,
++	"the popover's corners are rounded off (%d, %d)",
++	alphaAt(image, left, top), alphaAt(image, right - 1, bottom - 1));
++      PASS(alphaAt(image, left - 1, midY) >= 10
++	&& alphaAt(image, left - 1, midY) <= 35,
++	"beside the popover the shadow is fainter than a window's (%d)",
++	alphaAt(image, left - 1, midY));
++      PASS(alphaAt(image, 0, midY) < alphaAt(image, left - 1, midY)
++	&& alphaAt(image, 0, midY) <= 4,
++	"the popover's shadow fades out across its margin (%d, %d)",
++	alphaAt(image, left - 1, midY), alphaAt(image, 0, midY));
++      PASS(alphaAt(image, midX, bottom) > alphaAt(image, midX, top - 1),
++	"the popover's shadow is stronger below it than above it (%d, %d)",
++	alphaAt(image, midX, bottom), alphaAt(image, midX, top - 1));
++      XDestroyImage(image);
++    }
++  [popover close];
++
+   fakeCompositorStop(dpy, compositor);
+   fakeCSDWMStop(wm);
+   XCloseDisplay(dpy);
+diff --git a/Tests/x11/shadowmargin.m b/Tests/x11/shadowmargin.m
+index 8904847..b2c22ea 100644
+--- a/Tests/x11/shadowmargin.m
++++ b/Tests/x11/shadowmargin.m
+@@ -5,7 +5,9 @@
+  * window manager has the window maximized or while no compositing manager
+  * runs, a margin that grows with GSScaleFactor, and none at all for a
+  * non-retained window, a borderless one, or a window manager that doesn't
+- * know _GTK_FRAME_EXTENTS.
++ * know _GTK_FRAME_EXTENTS.  Popovers (GSBackPopoverShadows: a borderless
++ * window marked with NSUtilityWindowMask, as a theme marks its menus) get
++ * a smaller margin of their own and no resize band.
+  *
+  * The test forks a window manager that knows _GTK_FRAME_EXTENTS
+  * (FakeCSDWindowManager.h) and a compositing manager (FakeCompositor.h).
+@@ -350,6 +352,44 @@ main(int argc, const char **argv)
+     "a borderless window has no margin");
+   [srv termwindow: win];
+ 
++  /* A popover: a popover's margin, and presses only in its visible part
++     (no resize band). */
++  win = [srv window: NSMakeRect(100, 100, 200, 100)
++		   : NSBackingStoreBuffered
++		   : NSBorderlessWindowMask | NSUtilityWindowMask : 0];
++  xwin = (Window)[srv windowDevice: win];
++  PASS([frameExtents(dpy, xwin) isEqual: @"none"],
++    "without GSBackPopoverShadows a popover has no margin");
++  [srv termwindow: win];
++  setDefault(@"YES", @"GSBackPopoverShadows");
++  win = [srv window: NSMakeRect(100, 100, 200, 100)
++		   : NSBackingStoreBuffered
++		   : NSBorderlessWindowMask | NSUtilityWindowMask : 0];
++  xwin = (Window)[srv windowDevice: win];
++  PASS(depthOf(dpy, xwin) == 32
++    && [frameExtents(dpy, xwin) isEqual: @"14 14 12 16"]
++    && NSEqualSizes(sizeOf(dpy, xwin), NSMakeSize(228, 128))
++    && NSEqualRects(inputShape(dpy, xwin), NSMakeRect(14, 12, 200, 100)),
++    "with GSBackPopoverShadows a popover has a popover's margin and takes"
++    " presses only in its visible part");
++  [srv termwindow: win];
++  win = [srv window: NSMakeRect(100, 100, 200, 100)
++		   : NSBackingStoreBuffered : NSBorderlessWindowMask : 0];
++  xwin = (Window)[srv windowDevice: win];
++  PASS([frameExtents(dpy, xwin) isEqual: @"none"],
++    "with GSBackPopoverShadows a borderless window that isn't a popover has"
++    " no margin");
++  [srv termwindow: win];
++  win = [srv window: NSMakeRect(100, 100, 400, 300)
++		   : NSBackingStoreBuffered : styled : 0];
++  xwin = (Window)[srv windowDevice: win];
++  [srv orderwindow: NSWindowAbove : 0 : win];
++  spin();
++  PASS_EQUAL(frameExtents(dpy, xwin), @"30 30 24 36",
++    "with GSBackPopoverShadows a window keeps a window's margin");
++  [srv termwindow: win];
++  setDefault(nil, @"GSBackPopoverShadows");
++
+   fakeCompositorStop(dpy, compositor);
+   spin();
+   win = [srv window: NSMakeRect(100, 100, 400, 300)
+-- 
+2.47.3
+

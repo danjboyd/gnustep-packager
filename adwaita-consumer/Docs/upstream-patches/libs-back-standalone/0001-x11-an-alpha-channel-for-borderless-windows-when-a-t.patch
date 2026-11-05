@@ -1,0 +1,526 @@
+From b94dc1b79bb56ac9cde6b0dbffa289e4ff8c56c3 Mon Sep 17 00:00:00 2001
+From: Daniel Boyd <danieljboyd@icloud.com>
+Date: Tue, 6 Oct 2026 11:23:43 -0500
+Subject: [PATCH] x11: an alpha channel for borderless windows, when a theme
+ asks
+
+A theme that draws menus and tool tips with rounded corners, as GNOME's
+are, needs what it leaves transparent at the corners to show what is
+behind the window.  The backend creates every window with the screen's
+default visual, which has no alpha channel, so the corners show black or
+the window's background.
+
+With the new GSBackBorderlessWindowAlpha default set to YES (a theme can
+set it in the GSThemeDomain of its Info.plist), a borderless window is
+created with a 32-bit visual with an alpha channel, starting transparent,
+when a compositing manager runs (it owns the _NET_WM_CM_S<n> selection)
+and the screen has such a visual.  Without a compositing manager
+transparent pixels would show black, so windows keep the default visual
+then.  Windows with a style are left alone.  Nothing changes unless the
+default is set.
+
+Testing: Tests/x11/borderlessalpha.m forks a stand-in compositing
+manager that only owns _NET_WM_CM_S0 (Tests/x11/FakeCompositor.h, used
+again by the shadow tests that follow), then creates windows and reads
+back the depth of their X windows.  It checks the default off, the
+default on with a compositing manager, a styled window with the default
+on, and the default on once the compositing manager has gone.  The depth
+of the X window is what decides whether transparency can show at all;
+the off and the no-compositor cases guard against windows getting an
+alpha channel where it would show black.  It doesn't look at the pixels
+the gui draws.  Without this change the "has an alpha channel" check
+fails; with it all four pass.  The test needs a display with no
+compositing manager (a private Xvfb) and skips otherwise.
+
+AI assistance: this change, its test and this description were written
+with Claude (Anthropic's Claude Code).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ChangeLog                   |  13 +++
+ Source/x11/XGServerWindow.m | 155 +++++++++++++++++++++++++++++++++---
+ Tests/x11/FakeCompositor.h  | 104 ++++++++++++++++++++++++
+ Tests/x11/borderlessalpha.m | 152 +++++++++++++++++++++++++++++++++++
+ 4 files changed, 413 insertions(+), 11 deletions(-)
+ create mode 100644 Tests/x11/FakeCompositor.h
+ create mode 100644 Tests/x11/borderlessalpha.m
+
+diff --git a/ChangeLog b/ChangeLog
+index 2b1b779..505f965 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,16 @@
++2026-10-06 Daniel Boyd <danieljboyd@icloud.com>
++
++	* Source/x11/XGServerWindow.m (argb_visual, -_compositorRuns,
++	-_compositorShowsAlpha): New.  A 32-bit visual with an alpha
++	channel (one per screen), and whether a compositing manager runs.
++	(-_windowGetsAlpha:): New.  A borderless window (menus, tool tips)
++	gets the 32-bit visual when GSBackBorderlessWindowAlpha is YES and a
++	compositing manager runs, so what the gui leaves transparent, such
++	as rounded corners, shows what is behind it.
++	(-window::::): Create such windows with the 32-bit visual.
++	* Tests/x11/FakeCompositor.h: New.  A compositing manager for tests.
++	* Tests/x11/borderlessalpha.m: New test.
++
+ 2026-07-22 Richard Frith-Macdonald <rfm@gnu.org>
+ 
+ 	* Source/x11/XGServerEvent.m:
+diff --git a/Source/x11/XGServerWindow.m b/Source/x11/XGServerWindow.m
+index 19c5e9e..a442fb1 100644
+--- a/Source/x11/XGServerWindow.m
++++ b/Source/x11/XGServerWindow.m
+@@ -40,6 +40,7 @@
+ #include <AppKit/NSApplication.h>
+ #include <AppKit/NSCursor.h>
+ #include <AppKit/NSGraphics.h>
++#include <AppKit/NSPanel.h>
+ #include <AppKit/NSWindow.h>
+ #include <AppKit/NSImage.h>
+ #include <AppKit/NSBitmapImageRep.h>
+@@ -64,6 +65,9 @@
+ #if HAVE_XCURSOR
+ #include <X11/Xcursor/Xcursor.h>
+ #endif
++#ifdef XRENDER
++#include <X11/extensions/Xrender.h>
++#endif
+ #ifdef HAVE_XSHAPE
+ #include <X11/extensions/shape.h>
+ #endif
+@@ -590,6 +594,111 @@ BOOL AtomPresentAndPointsToItself(Display *dpy, Atom atom, Atom type)
+   return o;
+ }
+ 
++/*
++ * A 32-bit visual with an alpha channel, and a colormap for it, for windows
++ * that show what is behind them where the gui leaves them transparent.
++ * (The screen context uses the default visual, which has no alpha.)
++ * NO when the screen has none. Looked up once per screen of the backend's
++ * one display, and kept for the life of the process.
++ */
++#define ARGB_SCREENS 8
++static BOOL
++argb_visual(Display *dpy, int screen, Visual **visual, Colormap *cmap)
++{
++  static Visual *foundVisual[ARGB_SCREENS];
++  static Colormap foundCmap[ARGB_SCREENS];
++  static BOOL looked[ARGB_SCREENS];
++  Visual *found = NULL;
++
++  if (screen < 0 || screen >= ARGB_SCREENS)
++    {
++      *visual = NULL;
++      *cmap = None;
++      return NO;
++    }
++  if (!looked[screen])
++    {
++#ifdef XRENDER
++      XVisualInfo templ, *vinfo;
++      int count, i;
++
++      templ.screen = screen;
++      templ.depth = 32;
++      templ.class = TrueColor;
++      vinfo = XGetVisualInfo(dpy, VisualScreenMask | VisualDepthMask
++			     | VisualClassMask, &templ, &count);
++      for (i = 0; vinfo != NULL && i < count && found == NULL; i++)
++	{
++	  XRenderPictFormat *format
++	    = XRenderFindVisualFormat(dpy, vinfo[i].visual);
++
++	  if (format != NULL && format->type == PictTypeDirect
++	    && format->direct.alphaMask)
++	    {
++	      found = vinfo[i].visual;
++	      foundVisual[screen] = found;
++	      foundCmap[screen] = XCreateColormap(dpy, RootWindow(dpy, screen),
++						  found, AllocNone);
++	    }
++	}
++      if (vinfo != NULL)
++	{
++	  XFree(vinfo);
++	}
++#endif
++      looked[screen] = YES;
++    }
++  *visual = foundVisual[screen];
++  *cmap = foundCmap[screen];
++  return *visual != NULL;
++}
++
++/*
++ * Whether a compositing manager runs on the default screen: it owns the
++ * _NET_WM_CM_S<n> selection.
++ */
++- (BOOL) _compositorRuns
++{
++  char name[32];
++
++  snprintf(name, sizeof(name), "_NET_WM_CM_S%d", defScreen);
++  return XGetSelectionOwner(dpy, XInternAtom(dpy, name, False)) != None;
++}
++
++/*
++ * Whether a window can show what's behind it: a compositing manager draws
++ * its transparency (without one transparent pixels show black), and the
++ * display has a 32-bit visual.
++ */
++- (BOOL) _compositorShowsAlpha
++{
++  Visual *visual;
++  Colormap cmap;
++
++  return [self _compositorRuns]
++    && argb_visual(dpy, defScreen, &visual, &cmap);
++}
++
++/*
++ * A borderless window (menus, tool tips) gets an alpha channel when
++ * GSBackBorderlessWindowAlpha is YES (a theme that draws them with rounded
++ * corners sets it in its GSThemeDomain) and the compositing manager shows
++ * transparency: what the gui leaves transparent, such as the corners, then
++ * shows what's behind the window.
++ */
++- (BOOL) _windowGetsAlpha: (unsigned int)style
++{
++  if ((style & (NSTitledWindowMask | NSClosableWindowMask
++		| NSMiniaturizableWindowMask | NSResizableWindowMask
++		| NSDocModalWindowMask | NSIconWindowMask | NSMiniWindowMask)) != 0
++    || [[NSUserDefaults standardUserDefaults]
++	 boolForKey: @"GSBackBorderlessWindowAlpha"] == NO)
++    {
++      return NO;
++    }
++  return [self _compositorShowsAlpha];
++}
++
+ /*
+  * Convert a window frame in X absolute screen coordinates to
+  * a frame suitable for setting X hints for a window manager.
+@@ -2074,17 +2183,41 @@ _wmTestErrorHandler(Display *display, XErrorEvent *event)
+ 
+   window->xwn_attrs.override_redirect = False;
+ 
+-  window->ident = XCreateWindow(dpy, window->root,
+-				NSMinX(frame), NSMinY(frame),
+-				NSWidth(frame), NSHeight(frame),
+-				0,
+-				context->depth,
+-				CopyFromParent,
+-				context->visual,
+-                                // Don't set the CWBackPixel, as the background of the
+-                                // window may be different.
+-				(CWColormap | CWBorderPixel | CWOverrideRedirect),
+-				&window->xwn_attrs);
++  if ([self _windowGetsAlpha: style])
++    {
++      Visual *visual;
++      Colormap cmap;
++
++      /* An alpha channel for what the gui leaves transparent, which
++	 starts transparent. */
++      argb_visual(dpy, defScreen, &visual, &cmap);
++      window->depth = 32;
++      window->xwn_attrs.colormap = cmap;
++      window->xwn_attrs.border_pixel = 0;
++      window->xwn_attrs.background_pixel = 0;
++      window->ident = XCreateWindow(dpy, window->root,
++				    NSMinX(frame), NSMinY(frame),
++				    NSWidth(frame), NSHeight(frame),
++				    0, 32, InputOutput, visual,
++				    (CWColormap | CWBorderPixel | CWBackPixel
++				     | CWOverrideRedirect),
++				    &window->xwn_attrs);
++    }
++  else
++    {
++      window->ident = XCreateWindow(dpy, window->root,
++				    NSMinX(frame), NSMinY(frame),
++				    NSWidth(frame), NSHeight(frame),
++				    0,
++				    context->depth,
++				    CopyFromParent,
++				    context->visual,
++				    // Don't set the CWBackPixel, as the background
++				    // of the window may be different.
++				    (CWColormap | CWBorderPixel
++				     | CWOverrideRedirect),
++				    &window->xwn_attrs);
++    }
+ 
+   /*
+    * Mark the window as the application with name & class so the WM can group it
+diff --git a/Tests/x11/FakeCompositor.h b/Tests/x11/FakeCompositor.h
+new file mode 100644
+index 0000000..eaa6131
+--- /dev/null
++++ b/Tests/x11/FakeCompositor.h
+@@ -0,0 +1,104 @@
++/* A compositing manager for the tests of windows with an alpha channel,
++ * forked by the test that needs one.
++ *
++ * It only owns the _NET_WM_CM_S0 selection, which is how the backend tells
++ * that a compositing manager runs; it composites nothing.  Killing it is
++ * how the compositing manager goes away.  A test using it needs a display
++ * with no compositing manager of its own (a private Xvfb).
++ */
++#ifndef FAKE_COMPOSITOR_H
++#define FAKE_COMPOSITOR_H
++
++#include <X11/Xlib.h>
++#include <signal.h>
++#include <sys/wait.h>
++#include <unistd.h>
++#ifdef __linux__
++#include <sys/prctl.h>
++#endif
++
++static Atom
++fakeCompositorSelection(Display *dpy)
++{
++  return XInternAtom(dpy, "_NET_WM_CM_S0", False);
++}
++
++/* Runs in the child: owns the selection until killed. */
++static void
++fakeCompositorRun(void)
++{
++  Display	*dpy = XOpenDisplay(NULL);
++  Window	owner;
++
++  if (dpy == NULL)
++    {
++      _exit(1);
++    }
++  owner = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy), -100, -100,
++    1, 1, 0, 0, 0);
++  XSetSelectionOwner(dpy, fakeCompositorSelection(dpy), owner, CurrentTime);
++  XFlush(dpy);
++  for (;;)
++    {
++      pause();
++    }
++}
++
++/* Waits until a compositing manager runs, or no longer runs. */
++static BOOL
++fakeCompositorWait(Display *dpy, BOOL running)
++{
++  unsigned	i;
++
++  for (i = 0; i < 100; i++)
++    {
++      if ((XGetSelectionOwner(dpy, fakeCompositorSelection(dpy)) != None)
++	== running)
++	{
++	  return YES;
++	}
++      usleep(50000);
++    }
++  return NO;
++}
++
++/* Forks the compositing manager and waits until it runs: its pid, or -1. */
++static pid_t
++fakeCompositorStart(Display *dpy)
++{
++  pid_t	pid = fork();
++
++  if (pid == 0)
++    {
++#ifdef __linux__
++      /* Gone with the test, should it abort. */
++      prctl(PR_SET_PDEATHSIG, SIGKILL);
++#endif
++      fakeCompositorRun();
++      _exit(0);
++    }
++  if (pid < 0 || !fakeCompositorWait(dpy, YES))
++    {
++      if (pid > 0)
++	{
++	  kill(pid, SIGKILL);
++	  waitpid(pid, NULL, 0);
++	}
++      return -1;
++    }
++  return pid;
++}
++
++/* Stops it and waits until the selection has no owner. */
++static void
++fakeCompositorStop(Display *dpy, pid_t pid)
++{
++  if (pid > 0)
++    {
++      kill(pid, SIGKILL);
++      waitpid(pid, NULL, 0);
++      fakeCompositorWait(dpy, NO);
++    }
++}
++
++#endif
+diff --git a/Tests/x11/borderlessalpha.m b/Tests/x11/borderlessalpha.m
+new file mode 100644
+index 0000000..4aaddfa
+--- /dev/null
++++ b/Tests/x11/borderlessalpha.m
+@@ -0,0 +1,152 @@
++/* The alpha channel of borderless windows (GSBackBorderlessWindowAlpha):
++ * with the default YES and a compositing manager running, a borderless
++ * window (a menu, a tool tip) is made with a 32-bit visual, so what the gui
++ * leaves transparent, such as rounded corners, shows what is behind it.
++ * Without the default, without a compositing manager (transparent pixels
++ * would show black), or for a window with a style, it keeps the screen's
++ * visual.
++ *
++ * The test forks a compositing manager (FakeCompositor.h), so it needs a
++ * display with none of its own (a private Xvfb).
++ */
++#import <Foundation/Foundation.h>
++#import "Testing.h"
++#include "config.h"
++
++#if defined(BUILD_SERVER) && defined(SERVER_x11) && BUILD_SERVER == SERVER_x11 \
++  && defined(XRENDER)
++
++#import <AppKit/AppKit.h>
++#import <GNUstepGUI/GSDisplayServer.h>
++#include "FakeCompositor.h"
++
++/* Sets a default for this process only, in the argument domain. */
++static void
++setDefault(id value, NSString *key)
++{
++  NSUserDefaults	*defs = [NSUserDefaults standardUserDefaults];
++  NSMutableDictionary	*args;
++
++  args = [[defs volatileDomainForName: NSArgumentDomain] mutableCopy];
++  if (args == nil)
++    {
++      args = [NSMutableDictionary new];
++    }
++  [args setObject: value forKey: key];
++  [defs removeVolatileDomainForName: NSArgumentDomain];
++  [defs setVolatileDomain: args forName: NSArgumentDomain];
++  [args release];
++}
++
++/* Lets the backend handle what the X server sent it, such as the news
++   that the compositing manager has stopped. */
++static void
++spin(void)
++{
++  [[NSRunLoop currentRunLoop]
++    runUntilDate: [NSDate dateWithTimeIntervalSinceNow: 0.4]];
++}
++
++/* The depth of the server's X window for a new window of that style. */
++static int
++depthOfNewWindow(GSDisplayServer *srv, Display *dpy, NSUInteger style)
++{
++  int			win;
++  XWindowAttributes	a;
++  int			depth = 0;
++
++  win = [srv window: NSMakeRect(100, 100, 200, 100)
++		   : NSBackingStoreBuffered : style : 0];
++  XSync((Display *)[srv serverDevice], False);
++  if (XGetWindowAttributes(dpy, (Window)[srv windowDevice: win], &a))
++    {
++      depth = a.depth;
++    }
++  [srv termwindow: win];
++  return depth;
++}
++
++int
++main(int argc, const char **argv)
++{
++  START_SET("borderless window alpha")
++
++  extern void		initialize_gnustep_backend(void);
++  GSDisplayServer	*srv = nil;
++  Display		*dpy;
++  pid_t			compositor;
++
++  if (getenv("DISPLAY") == NULL || *getenv("DISPLAY") == '\0')
++    {
++      SKIP("no window server available")
++    }
++  dpy = XOpenDisplay(NULL);
++  if (dpy == NULL)
++    {
++      SKIP("no window server available")
++    }
++  if (XGetSelectionOwner(dpy, fakeCompositorSelection(dpy)) != None)
++    {
++      SKIP("the display has a compositing manager of its own")
++    }
++  compositor = fakeCompositorStart(dpy);
++  if (compositor < 0)
++    {
++      SKIP("the test compositing manager did not start")
++    }
++
++  NS_DURING
++    {
++      initialize_gnustep_backend();
++      srv = [GSDisplayServer serverWithAttributes: nil];
++    }
++  NS_HANDLER
++    {
++      NSLog(@"the display server did not start: %@", localException);
++      fakeCompositorStop(dpy, compositor);
++      SKIP("It looks like the GNUstep backend is not installed")
++    }
++  NS_ENDHANDLER
++  if (srv == nil || [srv isMemberOfClass: [GSDisplayServer class]])
++    {
++      fakeCompositorStop(dpy, compositor);
++      SKIP("no concrete display server")
++    }
++  [GSDisplayServer setCurrentServer: srv];
++
++  PASS(depthOfNewWindow(srv, dpy, NSBorderlessWindowMask) != 32,
++    "without GSBackBorderlessWindowAlpha a borderless window has no alpha"
++    " channel");
++
++  setDefault(@"YES", @"GSBackBorderlessWindowAlpha");
++  PASS(depthOfNewWindow(srv, dpy, NSBorderlessWindowMask) == 32,
++    "with GSBackBorderlessWindowAlpha and a compositing manager a borderless"
++    " window has an alpha channel");
++  PASS(depthOfNewWindow(srv, dpy, NSTitledWindowMask | NSClosableWindowMask)
++    != 32,
++    "GSBackBorderlessWindowAlpha leaves windows with a style alone");
++
++  fakeCompositorStop(dpy, compositor);
++  spin();
++  PASS(depthOfNewWindow(srv, dpy, NSBorderlessWindowMask) != 32,
++    "without a compositing manager a borderless window has no alpha channel");
++
++  XCloseDisplay(dpy);
++
++  END_SET("borderless window alpha")
++
++  return 0;
++}
++
++#else
++
++int
++main(int argc, const char **argv)
++{
++  START_SET("borderless window alpha")
++    SKIP("back is not built with the x11 server and XRender")
++  END_SET("borderless window alpha")
++  return 0;
++}
++
++#endif
+-- 
+2.47.3
+

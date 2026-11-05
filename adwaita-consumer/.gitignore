@@ -1,0 +1,13 @@
+obj/
+*.app/
+*.theme/
+*.palette/
+*.d
+*.o
+*.so
+*.a
+*.dll
+*.pyc
+__pycache__/
+stamp.make
+.internal/
