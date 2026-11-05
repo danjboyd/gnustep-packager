@@ -1720,7 +1720,12 @@ function Write-GpAppImageAppRun {
   $lines.Add(("RUNTIME_ROOT={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $Config.RuntimeRootRelative))) | Out-Null
   $lines.Add(("METADATA_ROOT={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $Config.MetadataRootRelative))) | Out-Null
   $lines.Add(("ENTRY_PATH={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $launch.EntryRelativePath))) | Out-Null
-  $lines.Add(("WORKING_DIRECTORY={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $launch.WorkingDirectory))) | Out-Null
+  if ($launch.WorkingDirectory -eq "{@callerDirectory}") {
+    # Stay in the caller's directory: an empty value skips the cd below.
+    $lines.Add('WORKING_DIRECTORY=""') | Out-Null
+  } else {
+    $lines.Add(("WORKING_DIRECTORY={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $launch.WorkingDirectory))) | Out-Null
+  }
   # The cd below would make a relative argument such as Pictures/x.png resolve
   # inside the bundle, so make it absolute against the caller's directory
   # first. An argument is resolved when it exists there, or when it contains a
