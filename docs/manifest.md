@@ -84,7 +84,12 @@ Describes how the packaged app starts from the staged payload.
 
 Important fields:
 - `entryRelativePath`
-- `workingDirectory`
+- `workingDirectory`: a stage-relative directory the app starts in, or
+  `{@callerDirectory}` to start it in the directory it was launched from. Use
+  that for an app whose children should start where the user is, such as a
+  terminal or a file manager. `{@callerDirectory}` is Linux (AppImage) only:
+  set it under `platformOverrides.linux.launch.workingDirectory`, and keep a
+  package directory in `launch.workingDirectory` for Windows and macOS.
 - `pathPrepend`
 - `resourceRoots`
 - `env`
@@ -312,8 +317,9 @@ Important fields:
 - `feedUrl`
 - `minimumCheckIntervalHours`
 - `startupDelaySeconds`
-- `publicEDKey` (base64 Ed25519 public key; update payloads must then be
-  signed, see [update-feed-contract.md](update-feed-contract.md))
+- `publicEDKey` (base64 Ed25519 public key, required when `enabled` is true;
+  update payloads must be signed, see
+  [update-feed-contract.md](update-feed-contract.md))
 - `github.owner`
 - `github.repo`
 - `github.tagPattern`

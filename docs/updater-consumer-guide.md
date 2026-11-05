@@ -162,15 +162,14 @@ This is for testing only. The URL must be `https://`, `http://` to `localhost`,
 `127.0.0.1` or `[::1]` (a feed served on the test machine), or `file://`; any
 other value is ignored. Both cases are logged (`GPUpdater: TESTING: the update
 feed is overridden by ...`, or `GPUpdater: ignoring the test feed in ...`).
-Signature checks still apply when the package has `updates.publicEDKey`.
+Signature checks still apply.
 
 ## Linux Notes
 The AppImage path is intentionally ecosystem-friendly:
 
-- if `appimageupdatetool` is available and the app is running from an
-  AppImage, the helper prefers it (run with `-O`, so it overwrites the current
-  AppImage and starting it again starts the new version)
-- if not, the helper downloads the replacement AppImage itself
+- the helper downloads the whole replacement AppImage and verifies its signature
+  itself. It doesn't use `appimageupdatetool`, which checks only the `.zsync`
+  file's hashes, so in-app updates don't get delta downloads
 - if the AppImage's directory is not writable, the helper reports a
   manual-download result instead of moving files behind the user's back
 - the update is applied by a `/bin/sh` script the helper writes while the app
