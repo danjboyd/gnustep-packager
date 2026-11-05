@@ -78,6 +78,11 @@ with `pacman -S --needed`.
   An asset with no platform counts as x64 only. When the newest version has
   no build for the machine, the check says so instead of reporting the app
   as up to date.
+- AppImage backend: opening a URL or file from an app no longer starts the
+  host's browser or viewer with the bundled libraries. `AppRun` saves the
+  caller's environment as `GP_HOST_*` before changing it, and a bundled
+  `gp-bin/xdg-open` restores it, along with the caller's directory, before
+  running the host's `xdg-open`.
 
 ## v0.1.8
 
