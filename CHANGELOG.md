@@ -72,12 +72,23 @@ with `pacman -S --needed`.
   set it under `platformOverrides.linux.launch`.
 
 ### Fixed
+- Examples: the gnustep-apps and Adwaita theme-demo setups now work on a
+  gnustep-cli-new toolchain in the hosted workflow. Their stage scripts find
+  `gdnc`, `gpbs`, `make_services` and `defaults` on PATH too, and stage the
+  local domain's Library when GNUstep itself is installed there (gnustep-cli-new
+  keeps only gnustep-make in the system domain). Their workflows start Xvfb for
+  the smoke launch.
 - Updater: a feed with assets for several architectures could install the
   wrong one, because the first asset whose backend matched was taken. The
   updater now takes the asset whose `platform` matches the running machine.
   An asset with no platform counts as x64 only. When the newest version has
   no build for the machine, the check says so instead of reporting the app
   as up to date.
+- AppImage backend: opening a URL or file from an app no longer starts the
+  host's browser or viewer with the bundled libraries. `AppRun` saves the
+  caller's environment as `GP_HOST_*` before changing it, and a bundled
+  `gp-bin/xdg-open` restores it, along with the caller's directory, before
+  running the host's `xdg-open`.
 
 ## v0.1.8
 
