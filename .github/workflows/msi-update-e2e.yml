@@ -66,7 +66,12 @@ jobs:
           set -euo pipefail
           root="$(cygpath -u "$GP_GNUSTEP_CLI_ROOT")"
           export PATH="$root/System/Tools:$root/Tools:$root/bin:$root/clang64/bin:$PATH"
+          # gnustep-config needs the GNUstep environment for its flags.
+          gnustep_sh="$(find "$root" -path '*/Makefiles/GNUstep.sh' -print -quit)"
+          echo "GNUstep.sh: $gnustep_sh"
+          set +u; . "$gnustep_sh"; set -u
           command -v gnustep-config
+          echo "objc-flags: $(gnustep-config --objc-flags)"
           make -C updater/objc/gp-update-helper
           ls -l updater/objc/gp-update-helper/
 
