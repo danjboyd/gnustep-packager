@@ -82,7 +82,30 @@ Describe "AppImage backend" {
   }
 
   Context "Manifest resolution" {
-    It "resolves enabled backend and artifact naming defaults" {
+    It "refuses a smoke launch that would use the real GNUstep home" {
+    $realHome = "/home/someone"
+    { Assert-GpAppImageSmokeHomeIsolated -Environment @{} -RealHome $realHome } | Should -Throw "*without GNUSTEP_HOME*"
+    { Assert-GpAppImageSmokeHomeIsolated -Environment @{ GNUSTEP_HOME = "/home/someone/" } -RealHome $realHome } | Should -Throw "*real home*"
+    { Assert-GpAppImageSmokeHomeIsolated -Environment @{ GNUSTEP_HOME = "/home/someone/proj/dist/validation/smoke-env/home" } -RealHome $realHome } | Should -Not -Throw
+    { Assert-GpAppImageSmokeHomeIsolated -Environment @{ GNUSTEP_HOME = "/tmp/smoke-home" } } | Should -Not -Throw
+  }
+
+  It "refuses to start the isolated GUI runner on anything the sandbox would hide" {
+    $script = Join-Path $script:repoRoot "scripts/run-gui-isolated.sh"
+    $realHome = (& getent passwd (& id -u)) -split ':' | Select-Object -Index 5
+    $output = & bash $script --seconds 1 -- (Join-Path $realHome "program-under-home") 2>&1
+    if ($LASTEXITCODE -eq 69) {
+      Set-ItResult -Skipped -Because "bwrap, xvfb-run or dbus-run-session isn't installed: $output"
+      return
+    }
+    $LASTEXITCODE | Should -Be 64
+    ([string]$output) | Should -Match "Refusing to run"
+    $source = Get-Content -Raw -Path $script
+    $source | Should -Match '--bind "\$scratch_home" "\$real_home"'
+    $source | Should -Match 'setenv GNUSTEP_HOME'
+  }
+
+  It "resolves enabled backend and artifact naming defaults" {
       $context = Get-GpManifestContext -Path $script:manifestPath
       $config = Get-GpAppImageConfig -Context $context
 
