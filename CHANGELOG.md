@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- AppImage backend: strict runtime-closure validation fails when a Swift runtime
+  library isn't bundled, even if the build host has a copy, unless
+  `backends.appimage.validation.swiftFlavor` declares the flavor the target must
+  have.
+
 ## v0.1.8
 
 ### Changed
@@ -20,10 +26,6 @@
   ProjectCenter and GWorkspace, built from upstream tags.
 - The test suite now validates every manifest under `examples/` against the
   schema and the validator.
-- AppImage backend: strict runtime-closure validation fails when a Swift runtime
-  library isn't bundled, even if the build host has a copy, unless
-  `backends.appimage.validation.swiftFlavor` declares the flavor the target must
-  have.
 
 ### Fixed
 - Theme inputs: the default install command now names its install root in full.
