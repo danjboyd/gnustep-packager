@@ -29,9 +29,10 @@ To package another GNUstep app the same way, copy a manifest and change the
 
 ## What was tested
 
-Built with `/usr/GNUstep`, each from a local checkout at the tag above rather than
-a fresh clone from GitHub. All three passed package validation and the smoke run,
-and each opened its main window from the package in the sandbox.
+Built with `/usr/GNUstep`. All three passed package validation and the smoke run,
+both from a local checkout at the tag above and from a fresh clone through
+`build-app.sh`, with the pipeline run under `scripts/run-gui-isolated.sh`. Each
+opened its main window from the package in the sandbox.
 
 Not tested yet:
 
