@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- AppImage backend: packaging warns when the AppImage bundles libfontconfig or
+  libcairo but no font file and no `backends.appimage.fonts.bundle`. On a host
+  without DejaVu Sans, the font gnustep-back falls back to (Fedora, for one),
+  such an app can draw no text, exit or crash. The warning points to
+  `fonts.bundle` and to the `appimage-clean-smoke-image` check.
+
 ## v0.1.9
 
 ### Upgrading
