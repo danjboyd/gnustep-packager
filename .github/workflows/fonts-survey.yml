@@ -1,0 +1,57 @@
+name: fonts-survey
+
+# One-off survey (test branch): launch the latest released AppImages of the
+# apps that use gnustep-packager on clean ubuntu:24.04 and fedora:42 hosts
+# (Fedora has no DejaVu) and record whether each runs, crashes or finds no font.
+on:
+  push:
+    branches:
+      - fonts-survey
+  workflow_dispatch:
+
+jobs:
+  survey:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: PerformanceDashboard
+            repo: danjboyd/gnustep-performance-dashboard
+            tag: v0.1.4
+          - app: ScreenshotTool
+            repo: danjboyd/ScreenshotTool
+            tag: v0.3.4
+          - app: ObjcMarkdown
+            repo: danjboyd/ObjcMarkdown
+            tag: v0.2.6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the released AppImage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p dl
+          gh release download "${{ matrix.tag }}" --repo "${{ matrix.repo }}" --pattern '*.AppImage' --dir dl
+          ls -l dl
+      - name: Clean-host launch
+        shell: bash
+        run: |
+          set -uo pipefail
+          appimage=$(ls dl/*.AppImage | head -n 1)
+          chmod +x "$appimage"
+          for image in ubuntu:24.04 fedora:42; do
+            echo "::group::${{ matrix.app }} on $image"
+            GP_CLEAN_SMOKE_SECONDS=10 ./scripts/ci/appimage-clean-smoke.sh "$appimage" "$image" 2>&1 | tee "result-$(echo $image | tr ':/' '__').txt"
+            echo "exit=${PIPESTATUS[0]}" | tee -a "result-$(echo $image | tr ':/' '__').txt"
+            echo "::endgroup::"
+          done
+          echo "=== SUMMARY ${{ matrix.app }}"
+          for f in result-*.txt; do echo "--- $f"; grep -E 'appimage-clean-smoke:|exit=|Segmentation|font|Font' "$f" | head -20; done
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fonts-survey-${{ matrix.app }}
+          path: result-*.txt
