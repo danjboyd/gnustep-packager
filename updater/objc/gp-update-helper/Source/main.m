@@ -726,8 +726,8 @@ static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun)
   NSString *assetName = GPHelperStringValue([asset objectForKey:@"name"]);
   NSString *assetURLString = GPHelperStringValue([asset objectForKey:@"url"]);
   NSString *sha256 = GPHelperStringValue([asset objectForKey:@"sha256"]);
-  // With a public key, every payload must carry a valid signature; without
-  // one (configs from before signing) the SHA-256 alone is checked.
+  // Every payload must carry a valid signature. The SHA-256 comes from the
+  // same feed, so on its own it can't show who published the update.
   NSString *publicEDKey = GPHelperStringValue([package objectForKey:@"publicEDKey"]);
   NSString *edSignature = GPHelperStringValue([asset objectForKey:@"edSignature"]);
   NSString *workingRoot = GPHelperStringValue([execution objectForKey:@"workingRoot"]);
@@ -737,30 +737,15 @@ static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun)
 
   GPHelperUpdateState(statePath, GPHelperStatusPreparing, @"Preparing update...", nil, nil, nil, nil);
 
-  // appimageupdatetool checks only the .zsync file's hashes, so with a
-  // signing key the helper downloads and checks the AppImage itself.
-  if ([backend isEqualToString:@"appimage"] && [publicEDKey length] == 0) {
-    // appimageupdatetool, not the AppImageUpdate GUI: run with -O it
-    // overwrites the current AppImage, so starting it again starts the
-    // new version.
-    NSString *appImageUpdatePath = GPHelperFindExecutable([NSArray arrayWithObjects:@"appimageupdatetool", nil]);
-    if ([appImageUpdatePath length] > 0 && [currentAppImagePath length] > 0 &&
-        [[NSFileManager defaultManager] isWritableFileAtPath:[currentAppImagePath stringByDeletingLastPathComponent]]) {
-      NSMutableDictionary *apply = [NSMutableDictionary dictionaryWithObjectsAndKeys:
-        @"appimage-update", @"mode",
-        appImageUpdatePath, @"toolPath",
-        currentAppImagePath, @"currentAppImagePath",
-        nil
-      ];
-#if !defined(_WIN32)
-      NSString *scriptPath = GPHelperWriteAppImageApplyScript(workingRoot, @"appimage-update", currentAppImagePath, nil, appImageUpdatePath, statePath);
-      if ([scriptPath length] > 0) {
-        [apply setObject:scriptPath forKey:@"script"];
-      }
-#endif
-      GPHelperUpdateState(statePath, GPHelperStatusReadyToApply, @"Restart to let AppImageUpdate apply the new version.", nil, apply, nil, nil);
-      return 0;
-    }
+  // Refused before anything is downloaded. appimageupdatetool checks only the
+  // .zsync file's hashes, so AppImages are also downloaded and checked here.
+  if ([publicEDKey length] == 0 || [edSignature length] == 0) {
+    NSString *message = [publicEDKey length] == 0
+      ? @"This app has no update signing key, so it can't verify updates."
+      : @"The update is not signed.";
+    NSDictionary *errorDictionary = [NSDictionary dictionaryWithObjectsAndKeys:message, @"message", nil];
+    GPHelperUpdateState(statePath, GPHelperStatusFailed, @"The update was refused because it can't be verified.", nil, nil, nil, errorDictionary);
+    return 1;
   }
 
   if (dryRun) {
@@ -803,7 +788,7 @@ static int GPHelperPrepare(NSDictionary *plan, NSString *statePath, BOOL dryRun)
     return 1;
   }
 
-  if ([publicEDKey length] > 0 && !GPHelperVerifyEdSignature(downloadedPath, edSignature, publicEDKey, &error)) {
+  if (!GPHelperVerifyEdSignature(downloadedPath, edSignature, publicEDKey, &error)) {
     [[NSFileManager defaultManager] removeItemAtPath:downloadedPath error:NULL];
     NSDictionary *errorDictionary = [NSDictionary dictionaryWithObjectsAndKeys:
       [error localizedDescription], @"message",
