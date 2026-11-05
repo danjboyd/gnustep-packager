@@ -9,6 +9,12 @@
   `edSignature`, and always downloads and verifies AppImages itself instead of
   using `appimageupdatetool`. To adopt this release, add a key and sign your
   release assets; see `docs/update-feed-contract.md`.
+
+## v0.1.8
+
+### Changed
+- The docs and `examples/downstream/` workflows pin `@v0.1.8`, and the
+  downstream example manifests point `$schema` at the v0.1.8 schema.
 - AppImage backend: the smoke launch refuses to run if `smoke.environment` points
   `GNUSTEP_HOME` at the real home or clears it.
 
@@ -27,6 +33,16 @@
 - Theme inputs: the default install command now names its install root in full.
   A manifest whose `bootstrapCommands` source `GNUstep.sh`, which unsets
   `GNUSTEP_HOME`, no longer sends the theme install to `/GNUstep`.
+- Updater: automatic checks could stop west of UTC. gnustep-base reads a plist
+  date back shifted by the zone's offset, so the stored last check time moved on
+  every read and write of the defaults, into the future, where no check was due
+  until real time passed it. It's now stored as seconds since 1970, under
+  `lastCheckTime`, and a time in the future counts as due. The old
+  `lastCheckDate` is ignored and removed, so one automatic check runs after
+  updating.
+- Updater: a second, identical update offer could appear over the download after
+  a check by hand and Install Update. The pending launch check fired when the
+  alert closed. Any check now cancels it.
 
 ## v0.1.7
 
