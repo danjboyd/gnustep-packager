@@ -44,19 +44,35 @@ jobs:
           dnf -y -q install gdb xorg-x11-server-Xvfb file >/dev/null
           cd /w
           ./Gorm.AppImage --appimage-extract >/dev/null
+          R=/w/squashfs-root
+          {
+            echo "== layout"; ls $R $R/usr
+            echo "== bundled font/gfx libs"; find $R -name 'lib*.so*' | grep -E 'gnustep|cairo|fontconfig|freetype|harfbuzz|pango' | sort
+            echo "== font files"; find $R -name '*.ttf' -o -name '*.otf' -o -name '*.ttc' | head
+            echo "== host fonts"; ls /usr/share/fonts 2>&1
+          } > env.txt 2>&1
+          # Stop AppRun just before it execs the app and keep its environment.
+          sed -i 's|^exec "$ENTRY_PATH" "$@"$|printf %s "$ENTRY_PATH" > /w/entry; env > /w/appenv; exit 0|' $R/AppRun
+          grep -n 'ENTRY_PATH' $R/AppRun >> env.txt
           Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
           sleep 2
-          export DISPLAY=:99 DEBUGINFOD_URLS=
-          { echo "== fc-list"; fc-list 2>&1 | head; echo "== bundled libs"; ls squashfs-root/usr/lib | grep -E 'gnustep|cairo|fontconfig|freetype' ; } > env.txt 2>&1
-          timeout 120 gdb -batch -nx \
-            -ex 'set pagination off' -ex 'set confirm off' \
+          export DISPLAY=:99
+          $R/AppRun
+          entry=$(cat /w/entry)
+          file "$entry" >> env.txt
+          grep -v -E '^(BASH_FUNC|_=|SHLVL=|PWD=|OLDPWD=)' /w/appenv | sed 's/^/set environment /' > /w/env.gdb
+          echo "== app env"; cat /w/appenv >> env.txt
+          timeout 180 gdb -batch -nx \
+            -ex 'set pagination off' -ex 'set confirm off' -ex 'set debuginfod enabled off' \
+            -ex 'set startup-with-shell off' \
             -ex 'handle SIGPIPE nostop noprint' \
-            -ex run -ex 'info sharedlibrary' -ex 'thread apply all bt 25' \
-            -ex 'info registers rip' -ex 'x/6i $pc' \
-            --args squashfs-root/AppRun > gdb.txt 2>&1
+            -x /w/env.gdb \
+            -ex run -ex 'thread apply all bt 25' \
+            -ex 'info registers rip' -ex 'x/6i $pc' -ex 'info sharedlibrary' \
+            --args "$entry" > gdb.txt 2>&1
           echo "gdb exit $?" >> gdb.txt
           SH
-          docker run --rm -v "$PWD/out:/w" fedora:42 bash /w/run.sh
+          docker run --rm --cap-add SYS_PTRACE --security-opt seccomp=unconfined -v "$PWD/out:/w" fedora:42 bash /w/run.sh
           cat out/env.txt; cat out/gdb.txt
       - uses: actions/upload-artifact@v4
         with:
@@ -64,3 +80,4 @@ jobs:
           path: |
             out/gdb.txt
             out/env.txt
+            out/appenv
