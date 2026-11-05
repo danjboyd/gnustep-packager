@@ -98,13 +98,13 @@ typedef NS_ENUM(NSInteger, GPUpdateCheckStatus) {
 
 // The platform token of the running build, as feeds name asset platforms:
 // linux-x64, linux-arm64, windows-x64, windows-arm64 or macos.
-FOUNDATION_EXPORT NSString *GPUpdaterCurrentPlatform(void);
+extern NSString *GPUpdaterCurrentPlatform(void);
 
 // The asset in assets (GPUpdateAsset objects) for backend and platform, or
 // nil. An asset with no platform, as feeds before v0.1.9 wrote, counts as
 // x64 only, so an arm64 machine never installs it.
-FOUNDATION_EXPORT GPUpdateAsset *GPUpdaterPreferredAsset(NSArray *assets, NSString *backend, NSString *platform);
+extern GPUpdateAsset *GPUpdaterPreferredAsset(NSArray *assets, NSString *backend, NSString *platform);
 
 // A feed release (an element of the feed's "releases") as the updater reads
 // it, or nil when it isn't one.
-FOUNDATION_EXPORT GPUpdateRelease *GPUpdaterReleaseFromDictionary(NSDictionary *dictionary);
+extern GPUpdateRelease *GPUpdaterReleaseFromDictionary(NSDictionary *dictionary);
