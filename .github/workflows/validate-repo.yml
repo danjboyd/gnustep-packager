@@ -257,8 +257,13 @@ jobs:
           fi
           # The oldest glibc a host can have: the newest GLIBC_ symbol version any
           # bundled ELF needs. glibc isn't bundled, so this is the AppImage's floor.
-          floor=$(find squashfs-root -type f -exec sh -c 'file -b "$1" | grep -q ELF && objdump -T "$1" 2>/dev/null' _ {} \; \
-            | grep -o 'GLIBC_[0-9.]*' | sort -u -V | tail -1)
+          versions=$(mktemp)
+          while IFS= read -r -d '' f; do
+            if file -b "$f" | grep -q '^ELF'; then
+              readelf -V --wide "$f" 2>/dev/null | grep -o 'GLIBC_[0-9][0-9.]*' >> "$versions" || true
+            fi
+          done < <(find squashfs-root -type f -print0)
+          floor=$(sort -u -V "$versions" | tail -n 1)
           echo "glibc floor: ${floor}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload The aarch64 AppImage
