@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Reusable workflow: `container-appimage` now works with a plain Debian or
+  Ubuntu image, such as `debian:trixie` for aarch64 AppImages on
+  `ubuntu-24.04-arm`. When the image has no PowerShell, a first step installs
+  it with git, ICU and the AppImage tools, and apt runs without `sudo` as root.
+  See "aarch64 (arm64) AppImages" in `docs/github-actions.md`.
 - AppImage backend: aarch64 AppImages. `backends.appimage.architecture`
   (`x86_64` or `aarch64`, defaulting to the build host's) picks the
   appimagetool and runtime, `ARCH`, the `{arch}` token in the artifact, zsync
@@ -18,6 +23,12 @@
   `fonts.bundle` and to the `appimage-clean-smoke-image` check.
 
 ### Fixed
+- Updater UI on Linux: View Changes in the update dialog now opens the release
+  notes in the desktop's browser with `xdg-open`. Every release before this one
+  called `-[NSWorkspace openURL:]`, which in an AppImage finds no GNUstep
+  application for the URL and shows "Unable to use Application or Service to
+  open URL". In an AppImage built with v0.1.9 or later, `xdg-open` is the
+  bundled wrapper, which runs the host's with the host's environment.
 - Examples: the gnustep-apps and Adwaita theme-demo AppImages now start on hosts
   without DejaVu Sans (Fedora): their manifests bundle DejaVu Sans and Sans Mono
   through `backends.appimage.fonts.bundle`. The Adwaita stage script no longer
