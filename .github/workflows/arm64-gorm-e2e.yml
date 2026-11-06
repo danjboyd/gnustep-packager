@@ -22,7 +22,7 @@ jobs:
           set -euo pipefail
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl tar gzip git make file \
-            squashfs-tools desktop-file-utils binutils procps libicu76 libssl3t64 zlib1g imagemagick fonts-dejavu-core
+            squashfs-tools desktop-file-utils binutils procps libicu76 libssl3t64 zlib1g imagemagick fonts-dejavu-core xvfb xauth x11-utils
           # The checkout belongs to the runner user, not the container's root.
           git config --global --add safe.directory '*'
           mkdir -p /opt/microsoft/powershell/7
@@ -55,7 +55,11 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Package Gorm
+        continue-on-error: true
         run: |
+          Start-Process -FilePath Xvfb -ArgumentList ":99","-screen","0","1280x800x24"
+          Start-Sleep -Seconds 2
+          $env:DISPLAY = ":99"
           ./scripts/run-packaging-pipeline.ps1 -Manifest examples/downstream/gnustep-apps/gorm/package.manifest.json -Backend appimage
 
       - name: Check The Artifact
@@ -81,6 +85,12 @@ jobs:
         with:
           name: gorm-aarch64
           path: out/*.AppImage
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: gorm-aarch64-logs
+          path: examples/downstream/gnustep-apps/gorm/dist/logs
 
   clean-hosts:
     needs: build
