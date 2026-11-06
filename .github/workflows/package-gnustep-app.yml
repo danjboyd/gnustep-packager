@@ -205,7 +205,7 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl tar gzip git make file \
-            squashfs-tools desktop-file-utils binutils procps zlib1g
+            squashfs-tools desktop-file-utils zsync binutils procps zlib1g
           # PowerShell's ICU, whichever major version the distribution has.
           apt-get install -y --no-install-recommends "$(apt-cache search --names-only '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -n 1)"
           case "$(uname -m)" in
