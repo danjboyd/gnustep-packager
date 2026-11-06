@@ -1,0 +1,48 @@
+name: arm64-reusable-e2e
+
+# Test branch only (never merge): the reusable workflow, as a consumer calls it,
+# building the Gorm example for aarch64 in debian:trixie on ubuntu-24.04-arm.
+on:
+  push:
+    branches:
+      - arm64-reusable-e2e
+  workflow_dispatch:
+
+jobs:
+  package:
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@reusable-appimage-container
+    with:
+      manifest-path: examples/downstream/gnustep-apps/gorm/package.manifest.json
+      backend: appimage
+      runs-on-appimage: '["ubuntu-24.04-arm"]'
+      container-appimage: debian:trixie
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json
+      run-validation: true
+      run-smoke: true
+      preflight-shell: bash
+      preflight-command: |
+        apt-get install -y --no-install-recommends xvfb xauth x11-utils
+        nohup Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
+        echo "DISPLAY=:99" >> "$GITHUB_ENV"
+      artifact-name: gorm-arm64
+
+  clean-hosts:
+    needs: package
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:24.04", "fedora:42"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gorm-arm64-packages
+          path: pkg
+      - name: Clean-Host Smoke
+        shell: bash
+        run: |
+          app=$(find pkg -name '*.AppImage' | head -1)
+          file "$app"
+          chmod +x "$app"
+          ./scripts/ci/appimage-clean-smoke.sh "$app" "${{ matrix.image }}"
