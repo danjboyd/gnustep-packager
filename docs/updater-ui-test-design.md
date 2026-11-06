@@ -91,7 +91,7 @@ Host: Debian 13, GNUstep from `/usr/GNUstep` (base 1.31, gui 0.32), Xvfb.
 | 1 Up to date, automatic check | Pass: no alert |
 | 3 Later, then the next automatic check | Pass: offered again |
 | 4 Skip This Version | Pass: the next automatic check is quiet for 1.0.1 (status skipped) and offers 1.0.2 |
-| 5 More…, then View Changes | **Fails here**: `xdg-open` is never called, and the first alert doesn't come back. The app sits idle in `poll` for at least 28 s. |
+| 5 More…, then View Changes | **Failed** before #117: `xdg-open` was never called. GNUstep showed "Unable to use Application or Service to open URL" (seen in ObjcMarkdown 0.2.6's AppImage), and the panel didn't show in the fixture's screenshot. It passes with #117: `xdg-open` gets the URL and the offer comes back. |
 | 6 Tampered asset, Install Update | Pass: the helper refuses it, and the app shows "Downloaded update failed verification." |
 | 6 Feed can't be read | Pass: "Update Check Failed" with the reason |
 | 7 No build for this machine | Pass: "…has no download for this computer (linux-x64)." |
@@ -99,12 +99,11 @@ Host: Debian 13, GNUstep from `/usr/GNUstep` (base 1.31, gui 0.32), Xvfb.
 
 Findings, not fixed here:
 
-- **View Changes (case 5).** On Linux, `GPUpdaterUIOpenURL` calls
-  `-[NSWorkspace openURL:]`, not `xdg-open`. On this host that call doesn't
-  return within the test, and the first alert never comes back. It isn't known
-  yet whether a packaged AppImage, with gdnc, gpbs and the #105 `xdg-open`
-  wrapper, behaves the same. If it does, the fix is to call `xdg-open` (through
-  the wrapper) on Linux.
+- **View Changes (case 5), fixed by #117.** On Linux, `GPUpdaterUIOpenURL`
+  called `-[NSWorkspace openURL:]`. GNUstep finds no application or service
+  for an http URL, so it shows "Unable to use Application or Service to open
+  URL" and opens nothing. Every release from v0.1.0 to v0.1.9 has this. #117
+  sends the URL to `xdg-open`, which in an AppImage is the #105 wrapper.
 - **Restart after Later (case 8).** A prepared update isn't offered for
   restart at the next launch: the controller checks again and offers a fresh
   Install Update. The download stays in the state directory. The plan expected
@@ -118,8 +117,10 @@ Not run:
   Both replace and relaunch a real AppImage, so they need the packaged fixture
   and the CI job.
 - **Windows.**
-- **Two runs of an earlier draft** had one launch that didn't start within 20 s,
-  right after a case 5 run that had stalled. The CI job should run each case in a
+- **Flaky steps:** two runs of an earlier draft had one launch that didn't
+  start within 20 s, right after a case 5 run left its panel open. Case 8's
+  Later click, at a fixed offset, missed once on the two-button alert; keys or
+  a per-alert offset would be steadier. The CI job should run each case in a
   new isolated session.
 
 ## Windows
