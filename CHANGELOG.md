@@ -8,6 +8,103 @@
   setting. `validation.fetchesHttps` declares whether an app does; it defaults
   to `updates.enabled`.
 
+### Fixed
+- Examples: the gnustep-apps and Adwaita theme-demo AppImages now start on hosts
+  without DejaVu Sans (Fedora): their manifests bundle DejaVu Sans and Sans Mono
+  through `backends.appimage.fonts.bundle`. The Adwaita stage script no longer
+  needs a `packaging/ThemeDemo.png`: it makes one from GNUstep's own icon, and
+  both stage scripts convert only the largest page of a multi-page TIFF icon.
+  The example workflows also run the clean-host smoke on `ubuntu:24.04` and
+  `fedora:42`.
+
+## v0.1.9
+
+### Upgrading
+An app with `updates.enabled: true` needs a signing key before it can be built
+with this release. Do these together, in the release that moves to it:
+
+1. Make an Ed25519 key pair. Sparkle's `generate_keys` works, or
+   `openssl genpkey -algorithm ed25519`. Keep the private seed as a secret of
+   the release job only.
+2. Put the base64 public key in `updates.publicEDKey`. Validation fails without
+   one, and refuses the test key published in the docs.
+3. In the release job, after packaging and before publishing the feed, give
+   every asset an `edSignature` and a `versionSignature`. Use a signer checked
+   against the test vector in `docs/update-feed-contract.md`; ObjcMarkdown's
+   `sign-update-feed.py` with the versionSignature change is one.
+4. Keep each asset's `platform`, which the packager writes. To publish several
+   architectures in one feed, merge them with `scripts/merge-update-feeds.ps1`,
+   which keeps x64 first.
+
+What changes for users:
+- Copies built with v0.1.8 or earlier keep updating as before: they ignore the
+  new fields and take the first asset for their backend. So the first v0.1.9
+  build reaches them through the old updater, as long as the x64 asset comes
+  first.
+- Copies built with this release refuse an update whose asset lacks either
+  signature or doesn't match it, isn't newer than the installed version, or
+  has no build for the machine. The update error says which.
+- An app with updates turned on and no key can't be packaged with this release
+  until it has one. Turning updates off (`updates.enabled: false`) needs no key.
+
+Windows builds: nothing changes in the MSI backend, the reusable workflow, the
+default profiles or the MSYS2 tool lookup since v0.1.7, and the gnustep-cli
+pin stays v0.1.3. The packager runs no `patch` or `diff` itself. A build
+script that does needs them installed: list `patch` and `diffutils` under
+`hostDependencies.windows.msys2Packages`, which the reusable workflow installs
+with `pacman -S --needed`.
+
+### Changed
+- The docs and `examples/downstream/` workflows pin `@v0.1.9`, and the
+  downstream example manifests point `$schema` at the v0.1.9 schema.
+- **Breaking:** updates now require an Ed25519 signature. A manifest with
+  `updates.enabled: true` must set `updates.publicEDKey`, or validation fails.
+  `gp-update-helper` refuses any update without a signing key or a valid
+  `edSignature`, and always downloads and verifies AppImages itself instead of
+  using `appimageupdatetool`. Each asset also needs `versionSignature`, which
+  signs the package id, version, channel, platform and SHA-256 together. The
+  helper refuses a release that isn't newer than the installed version, so a feed
+  can't roll an app back to an older signed release, relabel the installed one,
+  or offer one platform's file as another's. To adopt this release, add a key
+  and sign your release assets (both signatures); see
+  `docs/update-feed-contract.md`, which includes a test vector.
+
+### Added
+- `examples/downstream/gnustep-apps`: SystemPreferences and Terminal AppImage
+  setups. Terminal comes from `gnustep/gap` at a fixed commit, since that repo
+  has no tags: `build-app.sh` now takes a tag or a commit, and optionally the
+  app's subdirectory.
+- The test suite checks every example workflow that calls a reusable workflow:
+  it may pass only inputs and secrets the workflow declares, must pass the
+  required ones, and all examples must pin the same release.
+- `scripts/merge-update-feeds.ps1` merges per-artifact update feeds into one
+  feed for several architectures. It puts x64 assets first, and refuses
+  duplicate backend and platform pairs.
+- `launch.workingDirectory` accepts `{@callerDirectory}` on Linux: `AppRun`
+  then starts the app in the directory it was launched from instead of a
+  directory inside the AppImage, so the programs it starts (a terminal's
+  shell, a file manager's apps) start there too. Other platforms refuse it;
+  set it under `platformOverrides.linux.launch`.
+
+### Fixed
+- Examples: the gnustep-apps and Adwaita theme-demo setups now work on a
+  gnustep-cli-new toolchain in the hosted workflow. Their stage scripts find
+  `gdnc`, `gpbs`, `make_services` and `defaults` on PATH too, and stage the
+  local domain's Library when GNUstep itself is installed there (gnustep-cli-new
+  keeps only gnustep-make in the system domain). Their workflows start Xvfb for
+  the smoke launch.
+- Updater: a feed with assets for several architectures could install the
+  wrong one, because the first asset whose backend matched was taken. The
+  updater now takes the asset whose `platform` matches the running machine.
+  An asset with no platform counts as x64 only. When the newest version has
+  no build for the machine, the check says so instead of reporting the app
+  as up to date.
+- AppImage backend: opening a URL or file from an app no longer starts the
+  host's browser or viewer with the bundled libraries. `AppRun` saves the
+  caller's environment as `GP_HOST_*` before changing it, and a bundled
+  `gp-bin/xdg-open` restores it, along with the caller's directory, before
+  running the host's `xdg-open`.
+
 ## v0.1.8
 
 ### Changed

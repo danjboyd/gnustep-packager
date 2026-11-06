@@ -92,6 +92,7 @@
     "channel": "stable",
     "minimumCheckIntervalHours": 24,
     "startupDelaySeconds": 15,
+    "publicEDKey": "Hy722xdSBsoFAq7M9eQ3gnE1YZGWggiSyV+7aUsRd3c=",
     "github": {
       "owner": "example-org",
       "repo": "my-gnustep-linux-app",

@@ -405,6 +405,128 @@ Describe "AppImage backend" {
       }
     }
 
+    It "stays in the caller's directory when launch.workingDirectory is {@callerDirectory}" {
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-caller-dir-" + [guid]::NewGuid().ToString("N"))
+      $manifestPath = New-GpSiblingManifest -Customize {
+        param($manifest)
+        $manifest["launch"]["workingDirectory"] = "{@callerDirectory}"
+      }
+      try {
+        Assert-GpEqual -Actual @(Test-GpManifestSchema -Path $manifestPath).Count -Expected 0 -Message "The schema should accept {@callerDirectory}."
+        $context = Get-GpManifestContext -Path $manifestPath
+        Assert-GpEqual -Actual @(Test-GpManifest -Manifest $context.Manifest).Count -Expected 0 -Message "The validator should accept {@callerDirectory}."
+        $config = Get-GpAppImageConfig -Context $context
+        Assert-GpEqual -Actual (Get-GpLaunchContract -Context $context).WorkingDirectoryPath -Expected $null -Message "{@callerDirectory} has no path in the package."
+
+        $appDir = Join-Path $tempRoot "AppDir"
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        & cp -a $script:packageResult.AppDirRoot $appDir
+        $appRun = Write-GpAppImageAppRun -Context $context -Config $config -AppDirRoot $appDir -LogPath (Join-Path $tempRoot "apprun.log")
+        $entryPath = Join-Path $appDir "usr/app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp"
+        Set-Content -Path $entryPath -Value @(
+          '#!/bin/sh'
+          'printf ''cwd=%s\n'' "$(pwd)"'
+          'for a do printf ''arg=[%s]\n'' "$a"; done'
+        )
+        Set-GpUnixExecutable -Path $entryPath
+
+        $callerDir = Join-Path $tempRoot "home"
+        New-Item -ItemType Directory -Force -Path (Join-Path $callerDir "Pictures") | Out-Null
+        Set-Content -Path (Join-Path $callerDir "Pictures/x.png") -Value ""
+        $output = @(& env "HOME=$tempRoot" sh -c 'cd "$1" && shift && exec "$@"' sh $callerDir $appRun "Pictures/x.png" 2>&1)
+        Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message ("AppRun should succeed. Output: " + [string]::Join("`n", $output))
+        $lines = @($output | ForEach-Object { [string]$_ } | Where-Object { $_ -match '^(cwd=|arg=\[)' })
+        Assert-GpEqual -Actual $lines -Expected @(
+          "cwd=$callerDir"
+          "arg=[$callerDir/Pictures/x.png]"
+        ) -Message "The app should start in the caller's directory, with relative arguments still made absolute."
+
+        $windowsContext = $context.PSObject.Copy()
+        $windowsContext.TargetPlatform = "windows"
+        $threw = $false
+        try { Get-GpLaunchContract -Context $windowsContext | Out-Null } catch { $threw = $_.Exception.Message -match 'platformOverrides\.linux' }
+        Assert-GpTrue -Condition $threw -Message "{@callerDirectory} should be refused outside Linux, pointing at platformOverrides.linux."
+      } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue $manifestPath
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
+        }
+      }
+    }
+
+    It "starts xdg-open children with the host's environment and directory" {
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-host-env-" + [guid]::NewGuid().ToString("N"))
+      try {
+        # Like a real app: the bundled library directory goes first on LD_LIBRARY_PATH.
+        $manifestPath = New-GpSiblingManifest -Customize {
+          param($manifest)
+          $manifest["launch"]["env"]["LD_LIBRARY_PATH"] = [ordered]@{ value = "{@runtimeRoot}/lib"; policy = "prepend" }
+        }
+        $context = Get-GpManifestContext -Path $manifestPath
+        $config = Get-GpAppImageConfig -Context $context
+        $appDir = Join-Path $tempRoot "AppDir"
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        & cp -a $script:packageResult.AppDirRoot $appDir
+        $appRun = Write-GpAppImageAppRun -Context $context -Config $config -AppDirRoot $appDir -LogPath (Join-Path $tempRoot "apprun.log")
+        Assert-GpTrue -Condition (Test-Path (Join-Path $appDir "gp-bin/xdg-open")) -Message "The AppDir should ship gp-bin/xdg-open."
+
+        # The app opens a URL the way NSWorkspace falls back to: xdg-open on PATH.
+        $entryPath = Join-Path $appDir "usr/app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp"
+        Set-Content -Path $entryPath -Value @(
+          '#!/bin/sh'
+          'printf ''app_ld=%s\n'' "${LD_LIBRARY_PATH:-}"'
+          'exec xdg-open "https://example.invalid/page"'
+        )
+        Set-GpUnixExecutable -Path $entryPath
+
+        # The host's xdg-open reports what it was started with.
+        $hostBin = Join-Path $tempRoot "hostbin"
+        New-Item -ItemType Directory -Force -Path $hostBin | Out-Null
+        $hostTool = Join-Path $hostBin "xdg-open"
+        Set-Content -Path $hostTool -Value @(
+          '#!/bin/sh'
+          'printf ''host_cwd=%s\n'' "$(pwd)"'
+          'printf ''host_ld=%s\n'' "${LD_LIBRARY_PATH-<unset>}"'
+          'printf ''host_path=%s\n'' "$PATH"'
+          'printf ''host_gnustep_conf=%s\n'' "${GNUSTEP_CONFIG_FILE-<unset>}"'
+          'printf ''host_appdir=%s\n'' "${APPDIR-<unset>}"'
+          'printf ''host_gp_vars=%s\n'' "$(env | grep -c ''^GP_HOST_'')"'
+          'printf ''host_arg=%s\n'' "$1"'
+        )
+        Set-GpUnixExecutable -Path $hostTool
+
+        $callerDir = Join-Path $tempRoot "home"
+        New-Item -ItemType Directory -Force -Path $callerDir | Out-Null
+        $hostPath = "${hostBin}:/usr/bin:/bin"
+
+        foreach ($case in @(
+          @{ Name = "host LD_LIBRARY_PATH set"; Env = @("LD_LIBRARY_PATH=/host/lib"); ExpectedLd = "/host/lib" },
+          @{ Name = "host LD_LIBRARY_PATH unset"; Env = @(); ExpectedLd = "<unset>" }
+        )) {
+          $envArgs = @("-i", "HOME=$tempRoot", "PATH=$hostPath") + $case.Env
+          $output = @(& env @envArgs sh -c 'cd "$1" && shift && exec "$@"' sh $callerDir $appRun 2>&1 | ForEach-Object { [string]$_ })
+          Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message ("AppRun should succeed ($($case.Name)). Output: " + [string]::Join("`n", $output))
+          $appLd = @($output | Where-Object { $_ -like 'app_ld=*' })[0]
+          Assert-GpTrue -Condition ($appLd -like "*$appDir*") -Message "The app itself should still get the bundled LD_LIBRARY_PATH ($($case.Name)). Got: $appLd"
+          $hostLines = @($output | Where-Object { $_ -like 'host_*' })
+          Assert-GpEqual -Actual $hostLines -Expected @(
+            "host_cwd=$callerDir"
+            "host_ld=$($case.ExpectedLd)"
+            "host_path=$hostPath"
+            "host_gnustep_conf=<unset>"
+            "host_appdir=<unset>"
+            "host_gp_vars=0"
+            "host_arg=https://example.invalid/page"
+          ) -Message "xdg-open's child should get the host's environment and the caller's directory ($($case.Name))."
+        }
+      } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue $manifestPath
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
+        }
+      }
+    }
+
     It "resolves relative path arguments against the caller's directory, not the working directory" {
       $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-relative-args-" + [guid]::NewGuid().ToString("N"))
       try {

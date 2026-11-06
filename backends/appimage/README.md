@@ -110,8 +110,30 @@ Check the result on a host without GNUstep: the reusable workflow's
 fonts, under a GNOME and a non-GNOME `XDG_CURRENT_DESKTOP`. Fedora matters
 here: it has no DejaVu, which `gnustep-back` falls back to.
 
+## Programs the App Starts
+
+`AppRun` sets `LD_LIBRARY_PATH`, `PATH`, `GNUSTEP_CONFIG_FILE` and the
+manifest's `launch.env` for the app, and every process the app starts inherits
+them. Before it changes any of them, `AppRun` saves the caller's values as
+`GP_HOST_<name>`, lists the names in `GP_HOST_VARS` (and the ones the caller
+didn't set in `GP_HOST_UNSET`), and saves the caller's directory as
+`GP_HOST_PWD`.
+
+The AppImage ships `gp-bin/xdg-open`, which `AppRun` puts first on `PATH`.
+When the app opens a URL or a file it has no handler for (GNUstep's
+`NSWorkspace` falls back to `xdg-open`), the wrapper restores the saved values,
+unsets the AppImage runtime's `APPDIR`, `APPIMAGE`, `ARGV0` and `OWD`, changes
+to the caller's directory and runs the host's `xdg-open`. The browser or viewer
+it starts then loads the host's libraries, not the bundled ones.
+
+Other programs an app starts, such as a terminal's shell, still inherit the
+app's environment. An app can restore the `GP_HOST_*` values itself before
+starting them. `docs/appimage-runpath-design.md` describes a fuller fix.
+
 ## Command-Line Arguments
-`AppRun` runs the app in `launch.workingDirectory`, inside the mounted AppImage.
+`AppRun` runs the app in `launch.workingDirectory`, inside the mounted AppImage,
+unless that is `{@callerDirectory}`: then the app starts in the directory it was
+launched from.
 Before changing into that directory, it makes relative path arguments absolute
 against the directory the AppImage was started from. As a result,
 `./MyApp.AppImage Pictures/x.png` opens `Pictures/x.png` relative to the
