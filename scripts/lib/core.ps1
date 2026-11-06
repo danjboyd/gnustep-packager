@@ -1756,13 +1756,18 @@ function Test-GpManifest {
         Add-Issue "updates.startupDelaySeconds must be an integer greater than or equal to 0."
       }
 
-      if ($updates.Contains("publicEDKey") -and ($updates["publicEDKey"] -ne $null)) {
+      if (($updates.Contains("enabled") -and $updates["enabled"] -eq $true) -and (-not $updates.Contains("publicEDKey") -or -not (Test-StringValue $updates["publicEDKey"]))) {
+        Add-Issue "updates.publicEDKey is required when updates.enabled is true: the updater refuses any update it can't verify. Generate an Ed25519 key pair, put the base64 public key here, and sign each release's assets (see docs/update-feed-contract.md)."
+      } elseif ($updates.Contains("publicEDKey") -and ($updates["publicEDKey"] -ne $null)) {
         $publicKeyBytes = $null
         if ($updates["publicEDKey"] -is [string]) {
           try { $publicKeyBytes = [Convert]::FromBase64String([string]$updates["publicEDKey"]) } catch { $publicKeyBytes = $null }
         }
         if ($null -eq $publicKeyBytes -or $publicKeyBytes.Length -ne 32) {
           Add-Issue "updates.publicEDKey must be a base64 Ed25519 public key (32 bytes) when present."
+        } elseif ([string]$updates["publicEDKey"] -eq "Ll6BcPIwCiJWeu8fUhAG52rU62luKpZdTNsdJBfgxIs=") {
+          # Its private seed is published in docs/update-feed-contract.md.
+          Add-Issue "updates.publicEDKey is gnustep-packager's published test key, whose private half anyone can read. Generate a key pair of your own."
         }
       }
 
@@ -2691,18 +2696,90 @@ function Test-GpBackendEmitsUpdates {
   return ($Backend -in @("msi", "appimage"))
 }
 
-function Get-GpUpdatePlatform {
+# The CPU architecture a backend builds for, in its own spelling. Both
+# backends build x64 only today: the AppImage backend's appimagetool and
+# runtime are x86_64 and the MSI is linked -arch x64. This is the one place
+# to change when an arm64 build lands, so update feeds follow it.
+function Get-GpBackendArchitecture {
   param(
     [Parameter(Mandatory = $true)]
     [string]$Backend
   )
 
   switch ($Backend) {
-    "msi" { return "windows-x64" }
-    "appimage" { return "linux-x64" }
-    "dmg" { return "macos" }
+    "appimage" { return "x86_64" }
+    "msi" { return "x64" }
+    default { return $null }
+  }
+}
+
+# The update-feed platform token for a backend and architecture: linux-x64,
+# linux-arm64, windows-x64, windows-arm64, or macos for the DMG backend. The
+# updater matches it exactly against the running machine.
+function Get-GpUpdatePlatform {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Backend,
+    [string]$Architecture
+  )
+
+  if ($Backend -eq "dmg") {
+    return "macos"
+  }
+  if ([string]::IsNullOrWhiteSpace($Architecture)) {
+    $Architecture = Get-GpBackendArchitecture -Backend $Backend
+  }
+  $arch = switch -Regex ([string]$Architecture) {
+    '^(x86_64|x64|amd64)$' { "x64"; break }
+    '^(aarch64|arm64)$' { "arm64"; break }
+    default { throw "Unknown architecture '$Architecture' for update platform." }
+  }
+  switch ($Backend) {
+    "msi" { return "windows-$arch" }
+    "appimage" { return "linux-$arch" }
     default { return $Backend }
   }
+}
+
+# Problems with a feed's assets that would make clients pick the wrong one:
+# two assets with the same backend and platform in a release, and, for
+# clients before v0.1.9 that take the first asset whose backend matches, a
+# non-x64 asset listed before that backend's x64 asset.
+function Test-GpUpdateFeedAssets {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Feed
+  )
+
+  $issues = [System.Collections.Generic.List[string]]::new()
+  foreach ($release in @($Feed["releases"])) {
+    if (-not ($release -is [System.Collections.IDictionary])) { continue }
+    $version = [string]$release["version"]
+    $seen = @{}
+    $firstPlatformByBackend = @{}
+    foreach ($asset in @($release["assets"])) {
+      if (-not ($asset -is [System.Collections.IDictionary])) { continue }
+      $backend = [string]$asset["backend"]
+      $platform = [string]$asset["platform"]
+      $key = "$backend|$platform"
+      if ($seen.ContainsKey($key)) {
+        $issues.Add(("Release {0} has two {1} assets for platform '{2}': {3} and {4}." -f $version, $backend, $platform, $seen[$key], [string]$asset["name"])) | Out-Null
+      } else {
+        $seen[$key] = [string]$asset["name"]
+      }
+      if (-not $firstPlatformByBackend.ContainsKey($backend)) {
+        $firstPlatformByBackend[$backend] = $platform
+      }
+    }
+    foreach ($backend in $firstPlatformByBackend.Keys) {
+      $first = $firstPlatformByBackend[$backend]
+      $hasX64 = @(@($release["assets"]) | Where-Object { $_ -is [System.Collections.IDictionary] -and [string]$_["backend"] -eq $backend -and ([string]$_["platform"]).EndsWith("-x64") }).Count -gt 0
+      if ($hasX64 -and -not ([string]$first).EndsWith("-x64")) {
+        $issues.Add(("Release {0} lists a {1} asset for '{2}' before the x64 one. Updaters before gnustep-packager v0.1.9 install the first {1} asset, so list x64 first." -f $version, $backend, $first)) | Out-Null
+      }
+    }
+  }
+  return [string[]]@($issues.ToArray())
 }
 
 function Get-GpUpdateRuntimeConfigRelativePath {
@@ -3638,7 +3715,16 @@ function Get-GpLaunchContract {
   }
 
   $entryPath = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $launch["entryRelativePath"]
-  $workingDirectoryPath = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $launch["workingDirectory"]
+  # {@callerDirectory}: start the app in the directory it was launched from
+  # instead of a directory in the package. Only AppRun supports it.
+  if ([string]$launch["workingDirectory"] -eq "{@callerDirectory}") {
+    if ($Context.TargetPlatform -ne "linux") {
+      throw ("launch.workingDirectory {{@callerDirectory}} is supported for Linux (AppImage) only. Set it under platformOverrides.linux.launch.workingDirectory and keep a package directory for {0}." -f $Context.TargetPlatform)
+    }
+    $workingDirectoryPath = $null
+  } else {
+    $workingDirectoryPath = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $launch["workingDirectory"]
+  }
 
   return [pscustomobject]@{
     StageRoot             = $stageRoot

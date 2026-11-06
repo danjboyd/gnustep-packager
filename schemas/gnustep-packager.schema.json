@@ -696,6 +696,14 @@
     "updates": {
       "type": "object",
       "additionalProperties": false,
+      "if": {
+        "properties": { "enabled": { "const": true } },
+        "required": ["enabled"]
+      },
+      "then": {
+        "properties": { "publicEDKey": { "type": "string", "minLength": 1 } },
+        "required": ["publicEDKey"]
+      },
       "properties": {
         "enabled": {
           "type": "boolean"
@@ -723,7 +731,7 @@
         },
         "publicEDKey": {
           "type": ["string", "null"],
-          "description": "Base64 Ed25519 public key (32 bytes). When set, the updater refuses any payload without a valid edSignature in the feed."
+          "description": "Base64 Ed25519 public key (32 bytes). Required when updates are enabled. The updater refuses any payload without a valid edSignature in the feed."
         },
         "github": {
           "type": "object",

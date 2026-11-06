@@ -33,6 +33,11 @@ typedef NS_ENUM(NSInteger, GPUpdateCheckStatus) {
 // The Ed25519 signature of the asset's bytes, base64 (the feed's
 // "edSignature").
 @property (nonatomic, readonly, copy) NSString *edSignature;
+// The Ed25519 signature, base64, of GPUpdaterVersionSignatureMessage() for
+// this asset (the feed's "versionSignature"). It ties the asset's SHA-256 to
+// the package, release version, channel and platform, so a feed can't offer
+// an older signed payload as a newer version, or one platform's as another's.
+@property (nonatomic, readonly, copy) NSString *versionSignature;
 @end
 
 @interface GPUpdateRelease : NSObject
@@ -95,3 +100,31 @@ typedef NS_ENUM(NSInteger, GPUpdateCheckStatus) {
 - (void)skipVersion:(NSString *)version;
 - (void)clearSkippedVersion;
 @end
+
+// The platform token of the running build, as feeds name asset platforms:
+// linux-x64, linux-arm64, windows-x64, windows-arm64 or macos.
+extern NSString *GPUpdaterCurrentPlatform(void);
+
+// The asset in assets (GPUpdateAsset objects) for backend and platform, or
+// nil. An asset with no platform, as feeds before v0.1.9 wrote, counts as
+// x64 only, so an arm64 machine never installs it.
+extern GPUpdateAsset *GPUpdaterPreferredAsset(NSArray *assets, NSString *backend, NSString *platform);
+
+// A feed release (an element of the feed's "releases") as the updater reads
+// it, or nil when it isn't one.
+extern GPUpdateRelease *GPUpdaterReleaseFromDictionary(NSDictionary *dictionary);
+
+// Orders two version strings the way the updater decides what is newer:
+// numeric dotted base versions, then pre-release identifiers (1.2.3-beta.1).
+extern NSComparisonResult GPUpdaterCompareVersions(NSString *leftVersion, NSString *rightVersion);
+
+// The UTF-8 message a feed's versionSignature signs, with lines joined by
+// "\n" and no trailing newline:
+//   gnustep-packager-update-v1
+//   <package id>
+//   <release version>
+//   <channel>
+//   <asset platform, such as linux-x64>
+//   <asset SHA-256, lowercase hex>
+// Returns nil when any part is empty or contains a line break.
+extern NSData *GPUpdaterVersionSignatureMessage(NSString *packageIdentifier, NSString *version, NSString *channel, NSString *platform, NSString *SHA256);

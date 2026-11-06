@@ -20,17 +20,40 @@ cp -a "$demo_root/ThemeDemo.app" "$stage_root/app/"
 system_library=$(gnustep-config --variable=GNUSTEP_SYSTEM_LIBRARY)
 mkdir -p "$runtime_root/System"
 cp -a "$system_library" "$runtime_root/System/Library"
+# gnustep-cli-new installs gnustep-base, -gui and -back in the local domain
+# and keeps only gnustep-make in the system domain, so stage the local
+# domain's Library too when GNUstep itself lives there. (On a /usr/GNUstep
+# install, base is in the system domain and the local one holds only
+# unrelated extras, which stay out.)
+toolchain_local_library=$(gnustep-config --variable=GNUSTEP_LOCAL_LIBRARY)
+if [ "$toolchain_local_library" != "$system_library" ] &&
+   ls "$toolchain_local_library"/Libraries/libgnustep-base.so* >/dev/null 2>&1; then
+  cp -a "$toolchain_local_library/." "$runtime_root/System/Library/"
+fi
 rm -rf "$runtime_root/System/Library/Makefiles" \
   "$runtime_root/System/Library/Themes" \
   "$runtime_root/System/Library/Headers"
 system_tools=$(gnustep-config --variable=GNUSTEP_SYSTEM_TOOLS)
 mkdir -p "$runtime_root/System/Tools"
+# A GNUstep tool from the system domain, or from PATH when the toolchain keeps
+# it elsewhere (gnustep-cli-new does not put gdnc and its peers in
+# GNUSTEP_SYSTEM_TOOLS).
+system_tool() {
+  if [ -x "$system_tools/$1" ]; then
+    printf '%s\n' "$system_tools/$1"
+  elif command -v "$1" >/dev/null 2>&1; then
+    command -v "$1"
+  else
+    printf 'GNUstep tool %s not found in %s or on PATH\n' "$1" "$system_tools" >&2
+    return 1
+  fi
+}
 for tool in gdnc gpbs make_services; do
-  cp -a "$system_tools/$tool" "$runtime_root/System/Tools/"
+  cp -L "$(system_tool "$tool")" "$runtime_root/System/Tools/$tool"
 done
 # Seeding packagedDefaults.defaultTheme runs the bundled defaults tool from here.
 mkdir -p "$runtime_root/bin"
-cp -a "$system_tools/defaults" "$runtime_root/bin/"
+cp -L "$(system_tool defaults)" "$runtime_root/bin/defaults"
 
 # Every shared library the demo, the tools and the back-end bundle need, except the host's
 # C runtime.
@@ -45,5 +68,22 @@ find "$app_stage" "$runtime_root/System/Library/Bundles" "$runtime_root/System/T
     cp -L "$library" "$runtime_root/lib/"
   done
 
-cp packaging/ThemeDemo.png "$stage_root/metadata/icons/ThemeDemo.png"
+# ThemeDemo has no icon of its own: use packaging/ThemeDemo.png when the repo
+# has one, otherwise GNUstep's own icon from the staged runtime.
+# A TIFF can hold several sizes, and convert would write one PNG per page:
+# take the largest page.
+largest_page() {
+  page=$(identify -format '%p %w\n' "$1" 2>/dev/null | sort -k2 -n | tail -n 1 | cut -d' ' -f1)
+  printf '%s[%s]\n' "$1" "${page:-0}"
+}
+if [ -f packaging/ThemeDemo.png ]; then
+  cp packaging/ThemeDemo.png "$stage_root/metadata/icons/ThemeDemo.png"
+else
+  gnustep_icon=$(find "$runtime_root/System/Library/Images" -name 'GNUstep.tiff' | head -n 1)
+  if [ -z "$gnustep_icon" ]; then
+    printf 'No packaging/ThemeDemo.png and no GNUstep.tiff to make an icon from\n' >&2
+    exit 1
+  fi
+  convert "$(largest_page "$gnustep_icon")" -resize 256x256 "$stage_root/metadata/icons/ThemeDemo.png"
+fi
 cp COPYING.LIB "$stage_root/metadata/licenses/gnustep-runtime.txt"
