@@ -1,0 +1,102 @@
+name: arm64-gorm-e2e
+
+# Test branch only (never merge): the Gorm example built for aarch64 with the
+# gnustep-cli-new arm64 toolchain in debian:trixie, then launched on clean hosts.
+on:
+  push:
+    branches:
+      - arm64-gorm-e2e
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Install Linux Prerequisites And PowerShell
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl tar gzip git make file \
+            squashfs-tools desktop-file-utils binutils procps libicu76 libssl3t64 zlib1g imagemagick fonts-dejavu-core
+          # The checkout belongs to the runner user, not the container's root.
+          git config --global --add safe.directory '*'
+          mkdir -p /opt/microsoft/powershell/7
+          curl -fsSL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-arm64.tar.gz \
+            | tar -xz -C /opt/microsoft/powershell/7
+          chmod +x /opt/microsoft/powershell/7/pwsh
+          ln -sf /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh
+          pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bootstrap And Smoke Test gnustep-cli-new
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GP_GNUSTEP_CLI_ROOT="${RUNNER_TEMP}/gnustep-cli-new"
+          export GP_GNUSTEP_CLI_LOG_ROOT="${GITHUB_WORKSPACE}/dist/logs/gnustep-cli-new"
+          export GP_GNUSTEP_CLI_SMOKE_ROOT="${RUNNER_TEMP}/gnustep-cli-new-smoke"
+          export GP_GNUSTEP_CLI_HOST_KIND="linux-debian-trixie-arm64-container"
+          ./scripts/ci/gnustep-cli-new-bootstrap-smoke.sh
+          {
+            echo "${GP_GNUSTEP_CLI_ROOT}/bin"
+            echo "${GP_GNUSTEP_CLI_ROOT}/Tools"
+            echo "${GP_GNUSTEP_CLI_ROOT}/System/Tools"
+          } >> "$GITHUB_PATH"
+          {
+            echo "GP_GNUSTEP_CLI_ROOT=${GP_GNUSTEP_CLI_ROOT}"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json}"
+          } >> "$GITHUB_ENV"
+
+      - name: Package Gorm
+        run: |
+          ./scripts/run-packaging-pipeline.ps1 -Manifest examples/downstream/gnustep-apps/gorm/package.manifest.json -Backend appimage
+
+      - name: Check The Artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          appimage=$(ls examples/downstream/gnustep-apps/gorm/dist/packages/*.AppImage)
+          file "$appimage"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --appimage-extract >/dev/null
+          versions=$(mktemp); elfs=0
+          while IFS= read -r -d '' f; do
+            if file -b "$f" | grep -q '^ELF'; then
+              elfs=$((elfs + 1))
+              file -b "$f" | grep -q aarch64 || echo "not aarch64: $f"
+              readelf -V --wide "$f" 2>/dev/null | grep -o 'GLIBC_[0-9][0-9.]*' >> "$versions" || true
+            fi
+          done < <(find squashfs-root -type f -print0)
+          echo "ELF files: ${elfs}"
+          echo "glibc floor: $(sort -u -V "$versions" | tail -n 1)"
+          mkdir -p out && cp "$appimage" out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gorm-aarch64
+          path: out/*.AppImage
+
+  clean-hosts:
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:24.04", "debian:trixie", "fedora:42"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gorm-aarch64
+          path: arm64
+      - name: Clean-Host Smoke
+        shell: bash
+        run: |
+          chmod +x arm64/*.AppImage
+          ./scripts/ci/appimage-clean-smoke.sh "$(ls arm64/*.AppImage)" "${{ matrix.image }}"
