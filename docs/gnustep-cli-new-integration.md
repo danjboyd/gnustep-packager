@@ -160,13 +160,23 @@ them in this order, and uses the first one that is set:
 In a package, step 4 is the trust-store path compiled into the libgnutls you
 bundle. A library built on Debian or Ubuntu reads
 `/etc/ssl/certs/ca-certificates.crt`. A target that keeps its bundle elsewhere
-falls through to step 5, so the package needs that file. On Windows, libgnutls
-reads the Windows certificate store.
+falls through to step 5, so the package needs that file.
+
+On Windows, libgnutls reads the Windows certificate store. v0.1.5's gnustep-base
+also always loads `GSTLS/ca-certificates.crt`, alongside the store rather than
+only when the store fails, because Windows adds many roots to its store only
+when its own software first needs them. The v0.1.5 Windows toolchain's file is
+Mozilla's set as MSYS2 packages it (121 authorities, dated 2026-08-16), at
+`lib/GNUstep/Libraries/gnustep-base/Versions/1.31/Resources/GSTLS/`.
+gnustep-base's older file is a personal list with expired entries; ObjcMarkdown
+0.2.6's MSI carries 180 of them. So rebuild Windows packages with v0.1.5, and
+stage that folder there too.
 
 To keep step 5 working, stage gnustep-base's `Resources/GSTLS` folder with
 the rest of its resources. A stage script that copies the whole system
 `Library`, as `examples/downstream/gnustep-apps/stage-app.sh` does, already
-includes it. To use a bundle of your own, ship it and set `GS_TLS_CA_FILE` to
+includes it, and so does a Windows stage that copies all of
+`clang64/lib/GNUstep`. To use a bundle of your own, ship it and set `GS_TLS_CA_FILE` to
 it under `launch.env`.
 
 Set `validation.fetchesHttps: true` for an app that does this without
