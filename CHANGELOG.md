@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+- Examples: the gnustep-apps and Adwaita theme-demo AppImages now start on hosts
+  without DejaVu Sans (Fedora): their manifests bundle DejaVu Sans and Sans Mono
+  through `backends.appimage.fonts.bundle`. The Adwaita stage script no longer
+  needs a `packaging/ThemeDemo.png`: it makes one from GNUstep's own icon, and
+  both stage scripts convert only the largest page of a multi-page TIFF icon.
+  The example workflows also run the clean-host smoke on `ubuntu:24.04` and
+  `fedora:42`.
+
 ## v0.1.9
 
 ### Upgrading
