@@ -11,6 +11,10 @@
   toolchain is still published for Debian only (ICU 76, glibc 2.41).
 
 ### Added
+- AppImage and MSI validation warn when an app that fetches https has no CA
+  bundle in the package and no `GS_TLS_CA_FILE`, `SSL_CERT_FILE` or `GSTLSCAFile`
+  setting. `validation.fetchesHttps` declares whether an app does; it defaults
+  to `updates.enabled`.
 - Reusable workflow: `container-appimage` now works with a plain Debian or
   Ubuntu image, such as `debian:trixie` for aarch64 AppImages on
   `ubuntu-24.04-arm`. When the image has no PowerShell, a first step installs

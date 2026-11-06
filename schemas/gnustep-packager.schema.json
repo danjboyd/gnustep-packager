@@ -511,6 +511,10 @@
         "logs"
       ],
       "properties": {
+        "fetchesHttps": {
+          "type": "boolean",
+          "description": "Whether the app fetches https through GNUstep. Defaults to updates.enabled. Backends warn when such an app has no CA bundle."
+        },
         "smoke": {
           "type": "object",
           "additionalProperties": false,
