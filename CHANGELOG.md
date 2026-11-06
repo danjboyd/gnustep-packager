@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+- The default toolchain is gnustep-cli-new v0.1.5 (was v0.1.3): the reusable
+  workflow's manifest and bootstrap defaults (with the new bootstrap digests),
+  the repo's CI, the examples and the docs. Its gnustep-base verifies TLS hosts
+  strictly, so an app that fetches https needs trusted authorities it can read:
+  see "Strict TLS" in `docs/gnustep-cli-new-integration.md`. The arm64
+  toolchain is still published for Debian only (ICU 76, glibc 2.41).
+
 ### Added
 - Reusable workflow: `container-appimage` now works with a plain Debian or
   Ubuntu image, such as `debian:trixie` for aarch64 AppImages on
@@ -13,7 +21,7 @@
   appimagetool and runtime, `ARCH`, the `{arch}` token in the artifact, zsync
   and download names, and the update feed's platform (`linux-arm64`). Build an
   aarch64 AppImage on an aarch64 host; a mismatch stops packaging. The
-  gnustep-cli-new arm64 toolchain (v0.1.3 and v0.1.4) is published for Debian
+  gnustep-cli-new arm64 toolchain (v0.1.3 to v0.1.5) is published for Debian
   only (ICU 76, glibc 2.41), so CI builds in a `debian:trixie` container on
   `ubuntu-24.04-arm`. The result needs at least the glibc it was built against.
 - AppImage backend: packaging warns when the AppImage bundles libfontconfig or
