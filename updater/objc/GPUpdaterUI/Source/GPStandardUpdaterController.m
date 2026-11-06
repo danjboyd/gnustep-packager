@@ -73,8 +73,32 @@ static BOOL GPUpdaterUIWriteJSONObject(NSDictionary *dictionary, NSString *path)
   return [data writeToFile:path atomically:YES];
 }
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+// The first executable xdg-open on PATH. In an AppImage that is the bundled
+// gp-bin/xdg-open, which restores the caller's environment before running
+// the host's.
+static NSString *GPUpdaterUIXDGOpenPath(void) {
+  NSString *path = [[[NSProcessInfo processInfo] environment] objectForKey:@"PATH"];
+  NSEnumerator *enumerator = [[path componentsSeparatedByString:@":"] objectEnumerator];
+  NSString *directory = nil;
+  while ((directory = [enumerator nextObject]) != nil) {
+    if ([directory length] == 0) {
+      continue;
+    }
+    NSString *candidate = [directory stringByAppendingPathComponent:@"xdg-open"];
+    if ([[NSFileManager defaultManager] isExecutableFileAtPath:candidate]) {
+      return candidate;
+    }
+  }
+  return nil;
+}
+#endif
+
 // Opens a URL with the system's handler. On win32, GNUstep's NSWorkspace
-// can't open http(s) URLs, so ShellExecuteW does it.
+// can't open http(s) URLs, so ShellExecuteW does it. Elsewhere outside
+// macOS it can't either: it looks for a GNUstep application or service for
+// the URL, finds none, and shows "Unable to use Application or Service to
+// open URL". xdg-open hands the URL to the desktop's browser instead.
 static BOOL GPUpdaterUIOpenURL(NSURL *url) {
   if (url == nil) {
     return NO;
@@ -90,7 +114,18 @@ static BOOL GPUpdaterUIOpenURL(NSURL *url) {
   int opened = GPUpdaterUIShellOpen((const wchar_t *)buffer);
   free(buffer);
   return opened != 0;
+#elif defined(__APPLE__)
+  return [[NSWorkspace sharedWorkspace] openURL:url];
 #else
+  NSString *xdgOpen = GPUpdaterUIXDGOpenPath();
+  if (xdgOpen != nil) {
+    @try {
+      [NSTask launchedTaskWithLaunchPath:xdgOpen arguments:[NSArray arrayWithObject:[url absoluteString]]];
+      return YES;
+    } @catch (NSException *exception) {
+      NSLog(@"GPUpdaterUI: could not run %@: %@", xdgOpen, [exception reason]);
+    }
+  }
   return [[NSWorkspace sharedWorkspace] openURL:url];
 #endif
 }
