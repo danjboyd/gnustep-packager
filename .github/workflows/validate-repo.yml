@@ -173,6 +173,148 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  linux-arm64-validation:
+    # aarch64 AppImages build on an aarch64 host: appimagetool and its runtime
+    # run only on their own architecture (#109).
+    runs-on: ubuntu-24.04-arm
+    # In a Debian trixie container: gnustep-cli-new v0.1.3's linux-arm64
+    # toolchain links ICU 76, and ubuntu-24.04-arm has ICU 74, which the
+    # toolchain refuses (icu_major_mismatch). Trixie has ICU 76.
+    container: debian:trixie
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Install Linux Prerequisites And PowerShell
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl tar gzip git make file \
+            squashfs-tools desktop-file-utils binutils procps libicu76 libssl3t64 zlib1g
+          # The checkout belongs to the runner user, not the container's root.
+          git config --global --add safe.directory '*'
+          mkdir -p /opt/microsoft/powershell/7
+          curl -fsSL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-arm64.tar.gz \
+            | tar -xz -C /opt/microsoft/powershell/7
+          chmod +x /opt/microsoft/powershell/7/pwsh
+          ln -sf /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh
+          pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bootstrap And Smoke Test gnustep-cli-new
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GP_GNUSTEP_CLI_ROOT="${RUNNER_TEMP}/gnustep-cli-new"
+          export GP_GNUSTEP_CLI_LOG_ROOT="${GITHUB_WORKSPACE}/dist/logs/gnustep-cli-new"
+          export GP_GNUSTEP_CLI_SMOKE_ROOT="${RUNNER_TEMP}/gnustep-cli-new-smoke"
+          export GP_GNUSTEP_CLI_HOST_KIND="linux-debian-trixie-arm64-container"
+          ./scripts/ci/gnustep-cli-new-bootstrap-smoke.sh
+          {
+            echo "${GP_GNUSTEP_CLI_ROOT}/bin"
+            echo "${GP_GNUSTEP_CLI_ROOT}/Tools"
+            echo "${GP_GNUSTEP_CLI_ROOT}/System/Tools"
+          } >> "$GITHUB_PATH"
+          {
+            echo "GP_GNUSTEP_CLI_ROOT=${GP_GNUSTEP_CLI_ROOT}"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json}"
+          } >> "$GITHUB_ENV"
+
+      - name: Validate Linux Example Manifest
+        run: |
+          ./scripts/gnustep-packager.ps1 -Command manifest-check -Manifest examples/sample-linux/package.manifest.json
+
+      - name: Resolve Linux Example Manifest
+        run: |
+          ./scripts/gnustep-packager.ps1 -Command resolve-manifest -Manifest examples/sample-linux/package.manifest.json
+
+      - name: Describe Linux Example Manifest
+        run: |
+          ./scripts/gnustep-packager.ps1 -Command describe -Manifest examples/sample-linux/package.manifest.json
+
+      - name: Run Pester Regression Tests
+        run: |
+          ./scripts/test-repo.ps1 -CI
+
+      - name: Run Shared Packaging Pipeline
+        run: |
+          ./scripts/run-packaging-pipeline.ps1 -Manifest examples/sample-linux/package.manifest.json -Backend appimage -RunSmoke
+
+      - name: Check The aarch64 Artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          appimage=examples/sample-linux/dist/packages/SampleGNUstepLinuxApp-0.1.0-aarch64.AppImage
+          file "$appimage" | tee /dev/stderr | grep -q 'ARM aarch64'
+          # The runtime and every bundled ELF must be aarch64.
+          APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --appimage-extract >/dev/null
+          if find squashfs-root -type f -exec file {} + | grep 'ELF' | grep -v 'aarch64'; then
+            echo "Non-aarch64 ELF files in the AppImage" >&2
+            exit 1
+          fi
+          # The oldest glibc a host can have: the newest GLIBC_ symbol version any
+          # bundled ELF needs. glibc isn't bundled, so this is the AppImage's floor.
+          # The sample app and its tools are shell scripts, so this AppImage's only
+          # ELF may be its runtime, which is outside squashfs-root; say so.
+          versions=$(mktemp); elfs=0
+          while IFS= read -r -d '' f; do
+            if file -b "$f" | grep -q '^ELF'; then
+              elfs=$((elfs + 1))
+              readelf -V --wide "$f" 2>/dev/null | grep -o 'GLIBC_[0-9][0-9.]*' >> "$versions" || true
+            fi
+          done < <(find squashfs-root -type f -print0)
+          floor=$(sort -u -V "$versions" | tail -n 1)
+          echo "ELF files in the payload: ${elfs}; glibc floor: ${floor:-none (no ELF payload)}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload The aarch64 AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-appimage
+          path: examples/sample-linux/dist/packages/SampleGNUstepLinuxApp-0.1.0-aarch64.AppImage
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload gnustep-cli-new Diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-gnustep-cli-new
+          path: dist/logs/gnustep-cli-new
+          retention-days: 7
+          if-no-files-found: warn
+
+  linux-arm64-clean-hosts:
+    # Where the aarch64 AppImage built above runs. It's built in debian:trixie,
+    # because the toolchain is Debian-scoped (ICU 76, glibc 2.41), so hosts with
+    # an older glibc may refuse it. Each host is a separate step, and a failure
+    # is reported without failing the run: this records what works.
+    needs: linux-arm64-validation
+    runs-on: ubuntu-24.04-arm
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:24.04", "debian:trixie", "fedora:42"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download The aarch64 AppImage
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64-appimage
+          path: arm64-appimage
+
+      - name: Clean-Host Smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x arm64-appimage/*.AppImage
+          ./scripts/ci/appimage-clean-smoke.sh arm64-appimage/SampleGNUstepLinuxApp-0.1.0-aarch64.AppImage "${{ matrix.image }}"
+
   macos-validation:
     runs-on: macos-latest
     # One early run stalled after the pipeline had finished; cap it.

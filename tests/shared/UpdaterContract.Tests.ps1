@@ -151,7 +151,9 @@ Describe "Updater contract" {
       Assert-GpEqual -Actual $settings.Channel -Expected "stable" -Message "The shared update channel should resolve from the manifest."
       Assert-GpEqual -Actual $settings.GitHub.Tag -Expected "v0.1.0" -Message "Release tags should resolve from updates.github.tagPattern and package.version."
       Assert-GpEqual -Actual $settings.FeedUrl -Expected "https://example.invalid/updates/linux/stable.json" -Message "Backend-specific feed URLs should override shared update feed settings."
-      Assert-GpEqual -Actual $settings.Platform -Expected "linux-x64" -Message "Update platform resolution should follow the selected backend."
+      # An AppImage defaults to the build host's architecture (the macOS runners are arm64).
+      $expectedPlatform = if ((Get-GpHostArchitecture) -eq "aarch64") { "linux-arm64" } else { "linux-x64" }
+      Assert-GpEqual -Actual $settings.Platform -Expected $expectedPlatform -Message "Update platform resolution should follow the selected backend and its architecture."
       Assert-GpEqual -Actual $settings.RuntimeConfigRelativePath -Expected (Join-Path "metadata" "updates/gnustep-packager-update.json") -Message "Runtime config should live under the packaged metadata tree."
     } finally {
       if (Test-Path $manifestPath) {

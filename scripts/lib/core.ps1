@@ -2696,18 +2696,48 @@ function Test-GpBackendEmitsUpdates {
   return ($Backend -in @("msi", "appimage"))
 }
 
-# The CPU architecture a backend builds for, in its own spelling. Both
-# backends build x64 only today: the AppImage backend's appimagetool and
-# runtime are x86_64 and the MSI is linked -arch x64. This is the one place
-# to change when an arm64 build lands, so update feeds follow it.
+# The build host's CPU in AppImage spelling: x86_64 or aarch64.
+function Get-GpHostArchitecture {
+  $machine = ""
+  try { $machine = ([string](& uname -m 2>$null)).Trim() } catch { $machine = "" }
+  if ([string]::IsNullOrWhiteSpace($machine)) {
+    $machine = [string][System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+  }
+  switch -Regex ($machine) {
+    '^(x86_64|amd64|X64)$' { return "x86_64" }
+    '^(aarch64|arm64|Arm64)$' { return "aarch64" }
+    default { throw "Unsupported build host architecture '$machine'." }
+  }
+}
+
+# The CPU architecture a backend builds for, in its own spelling: the one
+# place update feeds, artifact names ({arch}) and AppRun take it from. The
+# AppImage backend builds for backends.appimage.architecture (x86_64 or
+# aarch64), or the build host's when that is unset; appimagetool runs only
+# on its own architecture, so the two must match. The MSI is x64 only.
 function Get-GpBackendArchitecture {
   param(
     [Parameter(Mandatory = $true)]
-    [string]$Backend
+    [string]$Backend,
+    [System.Collections.IDictionary]$Manifest
   )
 
   switch ($Backend) {
-    "appimage" { return "x86_64" }
+    "appimage" {
+      $configured = $null
+      if ($null -ne $Manifest -and ($Manifest["backends"] -is [System.Collections.IDictionary]) -and
+          ($Manifest["backends"]["appimage"] -is [System.Collections.IDictionary]) -and
+          -not [string]::IsNullOrWhiteSpace([string]$Manifest["backends"]["appimage"]["architecture"])) {
+        $configured = [string]$Manifest["backends"]["appimage"]["architecture"]
+      }
+      if ($null -eq $configured) {
+        return Get-GpHostArchitecture
+      }
+      if ($configured -notin @("x86_64", "aarch64")) {
+        throw "backends.appimage.architecture must be x86_64 or aarch64, not '$configured'."
+      }
+      return $configured
+    }
     "msi" { return "x64" }
     default { return $null }
   }
@@ -2897,7 +2927,7 @@ function Get-GpUpdateSettings {
     StartupDelaySeconds = $(if ($updates.Contains("startupDelaySeconds")) { [int]$updates["startupDelaySeconds"] } else { 15 })
     PublicEDKey = $(if ($updates.Contains("publicEDKey") -and -not [string]::IsNullOrWhiteSpace([string]$updates["publicEDKey"])) { [string]$updates["publicEDKey"] } else { $null })
     Backend = $Backend
-    Platform = Get-GpUpdatePlatform -Backend $Backend
+    Platform = Get-GpUpdatePlatform -Backend $Backend -Architecture (Get-GpBackendArchitecture -Backend $Backend -Manifest $Context.Manifest)
     RuntimeConfigRelativePath = Get-GpUpdateRuntimeConfigRelativePath -MetadataRootRelative ([string]$payload["metadataRoot"])
     GitHub = [pscustomobject]@{
       Owner = $githubOwner
@@ -4666,12 +4696,16 @@ function Get-GpArtifactPlan {
   $backendConfig = $manifest["backends"][$Backend]
   $outputPaths = Get-GpOutputPaths -Context $Context
   $artifactPattern = [string]$backendConfig["artifactNamePattern"]
-  $artifactName = Resolve-GpPatternTokens -Pattern $artifactPattern -Tokens @{
+  $tokens = @{
     name = $package["name"]
     version = $package["version"]
     packageId = $package["id"]
     backend = $Backend
   }
+  if ($artifactPattern.Contains("{arch}")) {
+    $tokens["arch"] = Get-GpBackendArchitecture -Backend $Backend -Manifest $manifest
+  }
+  $artifactName = Resolve-GpPatternTokens -Pattern $artifactPattern -Tokens $tokens
 
   return [pscustomobject]@{
     Backend      = $Backend
