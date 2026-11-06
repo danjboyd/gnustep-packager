@@ -186,6 +186,42 @@ jobs:
       run:
         shell: pwsh
     steps:
+      # A plain Debian or Ubuntu image, such as debian:trixie for the arm64
+      # toolchain (#112), has no PowerShell, git or sudo. This gives it what
+      # the steps below use. An image that already has pwsh is left alone.
+      - name: Prepare AppImage Container
+        if: ${{ inputs.backend == 'appimage' && inputs.container-appimage != '' }}
+        shell: sh
+        run: |
+          set -eu
+          if command -v pwsh >/dev/null 2>&1; then
+            echo "pwsh is already in the image."
+            exit 0
+          fi
+          if ! command -v apt-get >/dev/null 2>&1; then
+            echo "The AppImage container has no pwsh and no apt-get: use an image with PowerShell 7." >&2
+            exit 1
+          fi
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl tar gzip git make file \
+            squashfs-tools desktop-file-utils zsync binutils procps zlib1g
+          # PowerShell's ICU, whichever major version the distribution has.
+          apt-get install -y --no-install-recommends "$(apt-cache search --names-only '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -n 1)"
+          case "$(uname -m)" in
+            x86_64) pwsh_arch=x64 ;;
+            aarch64) pwsh_arch=arm64 ;;
+            *) echo "No PowerShell build for $(uname -m)." >&2; exit 1 ;;
+          esac
+          mkdir -p /opt/microsoft/powershell/7
+          curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-${pwsh_arch}.tar.gz" \
+            | tar -xz -C /opt/microsoft/powershell/7
+          chmod +x /opt/microsoft/powershell/7/pwsh
+          ln -sf /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh
+          # The checkout belongs to the runner's user, not the container's root.
+          git config --global --add safe.directory '*'
+          pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+
       - name: Checkout Consumer Repo
         uses: actions/checkout@v4
         with:
@@ -616,8 +652,13 @@ jobs:
           if [ -z "$packages" ]; then
             exit 0
           fi
-          sudo apt-get update
-          sudo apt-get install -y $packages
+          # Containers usually run as root without sudo.
+          sudo=""
+          if [ "$(id -u)" != "0" ]; then
+            sudo="sudo"
+          fi
+          $sudo apt-get update
+          $sudo apt-get install -y $packages
 
       - name: Bootstrap And Smoke Test gnustep-cli-new
         if: ${{ inputs.backend == 'appimage' && !inputs.skip-default-host-setup }}
