@@ -199,7 +199,7 @@ jobs:
     with:
       manifest-path: packaging/package.manifest.json
       backend: msi
-      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.5/release-manifest.json
       run-validation: true
       run-smoke: true
       artifact-name: my-app-windows
@@ -212,7 +212,7 @@ jobs:
     with:
       manifest-path: packaging/package.manifest.json
       backend: appimage
-      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.5/release-manifest.json
       run-validation: true
       run-smoke: true
       artifact-name: my-app-linux

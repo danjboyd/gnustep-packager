@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+- The default toolchain is gnustep-cli-new v0.1.5 (was v0.1.3): the reusable
+  workflow's manifest and bootstrap defaults (with the new bootstrap digests),
+  the repo's CI, the examples and the docs. Its gnustep-base verifies TLS hosts
+  strictly, so an app that fetches https needs trusted authorities it can read:
+  see "Strict TLS" in `docs/gnustep-cli-new-integration.md`. The arm64
+  toolchain is still published for Debian only (ICU 76, glibc 2.41).
+
 ### Added
 - AppImage backend: aarch64 AppImages. `backends.appimage.architecture`
   (`x86_64` or `aarch64`, defaulting to the build host's) picks the
