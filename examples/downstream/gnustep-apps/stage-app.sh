@@ -91,4 +91,10 @@ if [ -z "$icon" ]; then
   printf 'No icon found in %s.app\n' "$app_name" >&2
   exit 1
 fi
-convert "$icon" -resize 256x256 "$stage_root/metadata/icons/app.png"
+# A TIFF can hold several sizes, and convert would write one PNG per page:
+# take the largest page.
+largest_page() {
+  page=$(identify -format '%p %w\n' "$1" 2>/dev/null | sort -k2 -n | tail -n 1 | cut -d' ' -f1)
+  printf '%s[%s]\n' "$1" "${page:-0}"
+}
+convert "$(largest_page "$icon")" -resize 256x256 "$stage_root/metadata/icons/app.png"
