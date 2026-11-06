@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Reusable workflow: `container-appimage` now works with a plain Debian or
+  Ubuntu image, such as `debian:trixie` for aarch64 AppImages on
+  `ubuntu-24.04-arm`. When the image has no PowerShell, a first step installs
+  it with git, ICU and the AppImage tools, and apt runs without `sudo` as root.
+  See "aarch64 (arm64) AppImages" in `docs/github-actions.md`.
 - AppImage backend: aarch64 AppImages. `backends.appimage.architecture`
   (`x86_64` or `aarch64`, defaulting to the build host's) picks the
   appimagetool and runtime, `ARCH`, the `{arch}` token in the artifact, zsync
