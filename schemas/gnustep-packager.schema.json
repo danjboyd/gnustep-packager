@@ -1054,6 +1054,11 @@
             "enabled": {
               "type": "boolean"
             },
+            "architecture": {
+              "type": "string",
+              "enum": ["x86_64", "aarch64"],
+              "description": "CPU the AppImage is built for. Defaults to the build host's; appimagetool runs only on its own architecture, so build aarch64 AppImages on an aarch64 host."
+            },
             "appDirName": {
               "type": "string"
             },
