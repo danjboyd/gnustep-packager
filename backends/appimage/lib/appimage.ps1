@@ -1527,6 +1527,36 @@ function Get-GpAppImageMissingGuiTools {
   return [string[]]@($missing)
 }
 
+# The AppImage carries its own fontconfig or cairo but no font file. gnustep-back
+# then falls back to DejaVu Sans from the host, and a host without it (Fedora
+# installs Cantarell and Noto) leaves the app with no font: depending on the app
+# it draws no text, exits or crashes. Packaging can't tell whether the host's
+# fonts will do, so this is a warning that names the check that can.
+function Get-GpAppImageFontGap {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$AppDirRoot,
+    [AllowEmptyCollection()]
+    [object[]]$BundledFonts = @()
+  )
+
+  if (@($BundledFonts).Count -gt 0) {
+    return $null
+  }
+  $usrRoot = Join-Path $AppDirRoot "usr"
+  $fontLibraries = @(Get-ChildItem -Path $usrRoot -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^lib(fontconfig|cairo)\.so' } | ForEach-Object { $_.Name } | Sort-Object -Unique)
+  if ($fontLibraries.Count -eq 0) {
+    return $null
+  }
+  $fontFiles = @(Get-ChildItem -Path $usrRoot -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in @(".ttf", ".otf", ".ttc") } | Select-Object -First 1)
+  if ($fontFiles.Count -gt 0) {
+    return $null
+  }
+  return ("the AppImage bundles {0} but no font file and no backends.appimage.fonts.bundle. gnustep-back falls back to DejaVu Sans from the host; on a host without it (Fedora, for one) the app can draw no text, exit or crash. Bundle a font with backends.appimage.fonts.bundle, or check the result with the reusable workflow's appimage-clean-smoke-image (for example ""ubuntu:24.04 fedora:42"")." -f ($fontLibraries -join ", "))
+}
+
 function Write-GpAppImageGnustepConfig {
   param(
     [Parameter(Mandatory = $true)]
@@ -2076,6 +2106,11 @@ function Prepare-GpAppDir {
   $iconAssets = Copy-GpAppImageIconAssets -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
   $gnustepConfig = Write-GpAppImageGnustepConfig -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
   $fontNotices = @(Write-GpAppImageBundledFonts -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath)
+  $fontGap = Get-GpAppImageFontGap -AppDirRoot $WorkPaths.AppDirRoot -BundledFonts @($Config.BundledFonts)
+  if ($null -ne $fontGap) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("WARNING: " + $fontGap)
+    Write-Warning $fontGap
+  }
   $appRunPath = Write-GpAppImageAppRun -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
   $noticeReport = Write-GpAppImageNoticeReport -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath -AdditionalEntries $fontNotices
   $metadataRoot = Ensure-GpDirectory -Path (Join-Path (Join-Path $WorkPaths.AppDirRoot "usr") ($Config.MetadataRootRelative -replace "/", [System.IO.Path]::DirectorySeparatorChar))

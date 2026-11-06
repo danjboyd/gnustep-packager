@@ -796,6 +796,52 @@ Describe "AppImage backend" {
       }
     }
 
+    It "warns while packaging when the stage bundles cairo but no font, and not when fonts are bundled" {
+      # Packaging only copies the library; ldd sees it at validation, which this test doesn't run.
+      $stagedCairo = Join-Path $script:packageConfig.StageRoot "runtime/lib/libcairo.so.2"
+      Set-Content -Path $stagedCairo -Value "fixture cairo" -Encoding ascii
+      $fontSourceRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-fontgap-" + [guid]::NewGuid().ToString("N"))
+      New-Item -ItemType Directory -Force -Path $fontSourceRoot | Out-Null
+      $fontPath = Join-Path $fontSourceRoot "GpFixtureSans.ttf"
+      $licensePath = Join-Path $fontSourceRoot "LICENSE"
+      Set-Content -Path $fontPath -Value "not a font" -Encoding ascii
+      Set-Content -Path $licensePath -Value "Fixture font license" -Encoding ascii
+      $bundledManifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["fonts"] = @{
+          bundle = @(@{ name = "Fixture Sans"; files = @($fontPath); licenseFile = $licensePath })
+        }
+      }
+      $stagedFontConfig = Join-Path $script:packageConfig.StageRoot "runtime/etc/fonts/fonts.conf"
+      $stagedFontConfigAside = "$stagedFontConfig.pester-aside"
+      try {
+        $logPath = Join-Path $script:packageConfig.OutputPaths.LogRoot "pester-appimage-package-fontgap.log"
+        $warnings = $null
+        Invoke-GpAppImagePackage -Context $script:packageContext -LogPath $logPath -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+        $gapWarnings = @($warnings | Where-Object { "$_" -like "*bundles libcairo.so.2 but no font file*" })
+        Assert-GpEqual -Actual $gapWarnings.Count -Expected 1 -Message ("Packaging should warn once about cairo without a font. Warnings: " + (@($warnings) -join " | "))
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $logPath) -Pattern "WARNING: the AppImage bundles libcairo\.so\.2 but no font file" -Message "The package log should carry the font-gap warning."
+
+        # The fixture stages a fonts.conf of its own, which bundling fonts refuses to replace.
+        Move-Item -LiteralPath $stagedFontConfig -Destination $stagedFontConfigAside
+        $bundledLogPath = Join-Path $script:packageConfig.OutputPaths.LogRoot "pester-appimage-package-fontgap-bundled.log"
+        $warnings = $null
+        Invoke-GpAppImagePackage -Context (Get-GpManifestContext -Path $bundledManifestPath) -LogPath $bundledLogPath -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+        Assert-GpEqual -Actual @($warnings | Where-Object { "$_" -like "*no font file*" }).Count -Expected 0 -Message "With fonts.bundle set, packaging should not warn."
+        Assert-GpTrue -Condition ((Get-Content -Raw -Path $bundledLogPath) -notmatch "no font file") -Message "With fonts.bundle set, the package log should not carry the warning."
+      } finally {
+        Remove-Item -Force $stagedCairo -ErrorAction SilentlyContinue
+        if (Test-Path $stagedFontConfigAside) {
+          Move-Item -LiteralPath $stagedFontConfigAside -Destination $stagedFontConfig -Force
+        }
+        foreach ($path in @($bundledManifestPath, $fontSourceRoot)) {
+          if (Test-Path $path) {
+            Remove-Item -Recurse -Force $path
+          }
+        }
+      }
+    }
+
     It "can emit updater metadata and a feed sidecar when updates are enabled" {
       $manifestPath = New-GpSiblingManifest {
         param($manifest)
