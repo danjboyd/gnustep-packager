@@ -40,8 +40,11 @@ w=$(wait_alert 1) && { shot c7; press "$w" Return; }; sleep 1; stop
 launch c8-restart-later offer101 manual GPUI_RESET=1 APPIMAGE=$U/feeds/Installed.AppImage
 w=$(wait_alert 1) && press "$w" Return
 w=$(wait_alert 2) && { shot c8; press "$w" click:170,140; }; sleep 1; stop
+echo "STATE-BEFORE $(ls "$GPUI_STATE" | tr '\n' ' ')" >> "$GPUI_MARKER"
 # 8, next launch: same state directory. The plan expects the restart offer.
 export GPUI_MARKER=$OUT/c8-relaunch.marker; rm -f "$GPUI_MARKER"
 env GPUI_CONFIG=$U/feeds/config-offer101.json GPUI_MODE=auto APPIMAGE=$U/feeds/Installed.AppImage "$APP" > $OUT/c8-relaunch.log 2>&1 &
 APP_PID=$!
 w=$(wait_alert 1) && { shot c8-relaunch; press "$w" click:170,140; }; sleep 1; stop
+# Option A (#4462): the unapplied download and its state are gone.
+echo "STATE-AFTER $(ls "$GPUI_STATE" | tr '\n' ' ')" >> "$GPUI_MARKER"
