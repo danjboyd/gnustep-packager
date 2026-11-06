@@ -395,6 +395,13 @@ Important fields:
 
 ### `backends.appimage`
 Important fields:
+- `architecture`: `x86_64` or `aarch64`, the CPU the AppImage is for. It
+  defaults to the build host's. appimagetool and the AppImage runtime run only
+  on their own architecture, so an aarch64 AppImage is built on an aarch64 host
+  (in GitHub Actions, `runs-on-appimage: '["ubuntu-24.04-arm"]'`); a mismatch
+  stops packaging. It sets the `{arch}` token in `artifactNamePattern`,
+  `updates.zsyncArtifactNamePattern` and `downloadUrl` (all default to names
+  with `{arch}`), and the update feed's platform (`linux-x64` or `linux-arm64`).
 - `appDirName`
 - `desktopEntryName`
 - `startupWMClass`

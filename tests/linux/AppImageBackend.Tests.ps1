@@ -110,7 +110,7 @@ Describe "AppImage backend" {
       $config = Get-GpAppImageConfig -Context $context
 
       Assert-GpEqual -Actual @(Get-GpEnabledBackends -Manifest $context.Manifest) -Expected @("appimage") -Message "Linux fixture should only enable the AppImage backend."
-      Assert-GpEqual -Actual $config.ArtifactPlan.ArtifactName -Expected "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage" -Message "AppImage artifact name should use the default naming pattern."
+      Assert-GpEqual -Actual $config.ArtifactPlan.ArtifactName -Expected "SampleGNUstepLinuxApp-0.1.0-$(Get-GpHostArchitecture).AppImage" -Message "AppImage artifact name should use the default naming pattern."
       Assert-GpEqual -Actual $config.DesktopEntryName -Expected "sample-gnustep-linux.desktop" -Message "AppImage desktop entry name should come from the manifest."
       Assert-GpEqual -Actual $config.Smoke.Mode -Expected "launch-only" -Message "Linux fixture should default to launch-only AppImage smoke validation."
     }
@@ -181,11 +181,11 @@ Describe "AppImage backend" {
     It "writes a provenance record that is safe to publish" {
       $provenancePath = $script:packageResult.ProvenancePath
       Assert-GpTrue -Condition (Test-Path $provenancePath) -Message "A provenance sidecar should be written beside the AppImage."
-      Assert-GpMatch -Actual $provenancePath -Pattern "SampleGNUstepLinuxApp-0\.1\.0-x86_64\.provenance\.json$" -Message "The provenance sidecar should be named after the artifact."
+      Assert-GpMatch -Actual $provenancePath -Pattern "SampleGNUstepLinuxApp-0\.1\.0-$(Get-GpHostArchitecture)\.provenance\.json$" -Message "The provenance sidecar should be named after the artifact."
 
       $text = Get-Content -Raw -Path $provenancePath
       $provenance = Get-GpJsonFile -Path $provenancePath
-      Assert-GpEqual -Actual $provenance["artifact"]["name"] -Expected "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage" -Message "The provenance should name the artifact, not its path."
+      Assert-GpEqual -Actual $provenance["artifact"]["name"] -Expected "SampleGNUstepLinuxApp-0.1.0-$(Get-GpHostArchitecture).AppImage" -Message "The provenance should name the artifact, not its path."
       Assert-GpEqual -Actual $provenance["artifact"]["sha256"] -Expected (Get-GpFileSha256 -Path $script:packageResult.ArtifactPath) -Message "The provenance should carry the artifact's SHA-256."
       Assert-GpEqual -Actual $provenance["package"]["version"] -Expected "0.1.0" -Message "The provenance should carry the package version."
       $entry = @($provenance["files"] | Where-Object { $_["role"] -eq "entry" })
@@ -796,6 +796,52 @@ Describe "AppImage backend" {
       }
     }
 
+    It "warns while packaging when the stage bundles cairo but no font, and not when fonts are bundled" {
+      # Packaging only copies the library; ldd sees it at validation, which this test doesn't run.
+      $stagedCairo = Join-Path $script:packageConfig.StageRoot "runtime/lib/libcairo.so.2"
+      Set-Content -Path $stagedCairo -Value "fixture cairo" -Encoding ascii
+      $fontSourceRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-fontgap-" + [guid]::NewGuid().ToString("N"))
+      New-Item -ItemType Directory -Force -Path $fontSourceRoot | Out-Null
+      $fontPath = Join-Path $fontSourceRoot "GpFixtureSans.ttf"
+      $licensePath = Join-Path $fontSourceRoot "LICENSE"
+      Set-Content -Path $fontPath -Value "not a font" -Encoding ascii
+      Set-Content -Path $licensePath -Value "Fixture font license" -Encoding ascii
+      $bundledManifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["fonts"] = @{
+          bundle = @(@{ name = "Fixture Sans"; files = @($fontPath); licenseFile = $licensePath })
+        }
+      }
+      $stagedFontConfig = Join-Path $script:packageConfig.StageRoot "runtime/etc/fonts/fonts.conf"
+      $stagedFontConfigAside = "$stagedFontConfig.pester-aside"
+      try {
+        $logPath = Join-Path $script:packageConfig.OutputPaths.LogRoot "pester-appimage-package-fontgap.log"
+        $warnings = $null
+        Invoke-GpAppImagePackage -Context $script:packageContext -LogPath $logPath -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+        $gapWarnings = @($warnings | Where-Object { "$_" -like "*bundles libcairo.so.2 but no font file*" })
+        Assert-GpEqual -Actual $gapWarnings.Count -Expected 1 -Message ("Packaging should warn once about cairo without a font. Warnings: " + (@($warnings) -join " | "))
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $logPath) -Pattern "WARNING: the AppImage bundles libcairo\.so\.2 but no font file" -Message "The package log should carry the font-gap warning."
+
+        # The fixture stages a fonts.conf of its own, which bundling fonts refuses to replace.
+        Move-Item -LiteralPath $stagedFontConfig -Destination $stagedFontConfigAside
+        $bundledLogPath = Join-Path $script:packageConfig.OutputPaths.LogRoot "pester-appimage-package-fontgap-bundled.log"
+        $warnings = $null
+        Invoke-GpAppImagePackage -Context (Get-GpManifestContext -Path $bundledManifestPath) -LogPath $bundledLogPath -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+        Assert-GpEqual -Actual @($warnings | Where-Object { "$_" -like "*no font file*" }).Count -Expected 0 -Message "With fonts.bundle set, packaging should not warn."
+        Assert-GpTrue -Condition ((Get-Content -Raw -Path $bundledLogPath) -notmatch "no font file") -Message "With fonts.bundle set, the package log should not carry the warning."
+      } finally {
+        Remove-Item -Force $stagedCairo -ErrorAction SilentlyContinue
+        if (Test-Path $stagedFontConfigAside) {
+          Move-Item -LiteralPath $stagedFontConfigAside -Destination $stagedFontConfig -Force
+        }
+        foreach ($path in @($bundledManifestPath, $fontSourceRoot)) {
+          if (Test-Path $path) {
+            Remove-Item -Recurse -Force $path
+          }
+        }
+      }
+    }
+
     It "can emit updater metadata and a feed sidecar when updates are enabled" {
       $manifestPath = New-GpSiblingManifest {
         param($manifest)
@@ -826,7 +872,7 @@ Describe "AppImage backend" {
         Assert-GpTrue -Condition (Test-Path $result.UpdateFeedPath) -Message "Update-enabled AppImage packaging should emit an update feed sidecar."
         Assert-GpMatch -Actual $metadata["updates"]["appimage"]["updateInformation"] -Pattern "^gh-releases-zsync\|" -Message "AppImage metadata should record the embedded AppImage update information."
         Assert-GpEqual -Actual $metadata["updates"]["feedUrl"] -Expected "https://example.invalid/updates/linux/stable.json" -Message "AppImage metadata should record the resolved feed URL."
-        Assert-GpEqual -Actual $metadata["updates"]["appimage"]["zsyncArtifactName"] -Expected "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage.zsync" -Message "AppImage metadata should preserve the configured zsync artifact name even when the active appimagetool build omits the sidecar."
+        Assert-GpEqual -Actual $metadata["updates"]["appimage"]["zsyncArtifactName"] -Expected "SampleGNUstepLinuxApp-0.1.0-$(Get-GpHostArchitecture).AppImage.zsync" -Message "AppImage metadata should preserve the configured zsync artifact name even when the active appimagetool build omits the sidecar."
       } finally {
         if (Test-Path $manifestPath) {
           Remove-Item -Force $manifestPath
@@ -1075,10 +1121,10 @@ Describe "AppImage backend" {
         $survivors = @(Stop-GpAppImageSmokeProcess -Process $tree -GnustepHome $gnustepHome)
         Assert-GpEqual -Actual $survivors.Count -Expected 0 -Message "Nothing from the smoke launch should survive."
         foreach ($id in $treeIds) {
-          Assert-GpTrue -Condition (-not (Test-Path "/proc/$id")) -Message "Process $id from the smoke tree should be gone."
+          Assert-GpTrue -Condition (-not (Test-GpProcessAlive -ProcessId $id)) -Message "Process $id from the smoke tree should be gone."
         }
-        Assert-GpTrue -Condition (-not (Test-Path "/proc/$($detached.Id)")) -Message "A detached process with the smoke's GNUstep home should be gone."
-        Assert-GpTrue -Condition (Test-Path "/proc/$($other.Id)") -Message "A process with a different GNUstep home should be left alone."
+        Assert-GpTrue -Condition (-not (Test-GpProcessAlive -ProcessId $detached.Id)) -Message "A detached process with the smoke's GNUstep home should be gone."
+        Assert-GpTrue -Condition (Test-GpProcessAlive -ProcessId $other.Id) -Message "A process with a different GNUstep home should be left alone."
       } finally {
         foreach ($process in @($tree, $detached, $other)) {
           Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
