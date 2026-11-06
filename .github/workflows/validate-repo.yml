@@ -255,6 +255,19 @@ jobs:
             echo "Non-aarch64 ELF files in the AppImage" >&2
             exit 1
           fi
+          # The oldest glibc a host can have: the newest GLIBC_ symbol version any
+          # bundled ELF needs. glibc isn't bundled, so this is the AppImage's floor.
+          floor=$(find squashfs-root -type f -exec sh -c 'file -b "$1" | grep -q ELF && objdump -T "$1" 2>/dev/null' _ {} \; \
+            | grep -o 'GLIBC_[0-9.]*' | sort -u -V | tail -1)
+          echo "glibc floor: ${floor}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload The aarch64 AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-appimage
+          path: examples/sample-linux/dist/packages/SampleGNUstepLinuxApp-0.1.0-aarch64.AppImage
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Upload gnustep-cli-new Diagnostics
         if: ${{ always() }}
@@ -264,6 +277,35 @@ jobs:
           path: dist/logs/gnustep-cli-new
           retention-days: 7
           if-no-files-found: warn
+
+  linux-arm64-clean-hosts:
+    # Where the aarch64 AppImage built above runs. It's built in debian:trixie,
+    # because the toolchain is Debian-scoped (ICU 76, glibc 2.41), so hosts with
+    # an older glibc may refuse it. Each host is a separate step, and a failure
+    # is reported without failing the run: this records what works.
+    needs: linux-arm64-validation
+    runs-on: ubuntu-24.04-arm
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:24.04", "debian:trixie", "fedora:42"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download The aarch64 AppImage
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64-appimage
+          path: arm64-appimage
+
+      - name: Clean-Host Smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x arm64-appimage/*.AppImage
+          ./scripts/ci/appimage-clean-smoke.sh arm64-appimage/SampleGNUstepLinuxApp-0.1.0-aarch64.AppImage "${{ matrix.image }}"
 
   macos-validation:
     runs-on: macos-latest
