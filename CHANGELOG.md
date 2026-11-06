@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+- AppImage backend: aarch64 AppImages. `backends.appimage.architecture`
+  (`x86_64` or `aarch64`, defaulting to the build host's) picks the
+  appimagetool and runtime, `ARCH`, the `{arch}` token in the artifact, zsync
+  and download names, and the update feed's platform (`linux-arm64`). Build an
+  aarch64 AppImage on an aarch64 host; a mismatch stops packaging. The
+  gnustep-cli-new arm64 toolchain (v0.1.3 and v0.1.4) is published for Debian
+  only (ICU 76, glibc 2.41), so CI builds in a `debian:trixie` container on
+  `ubuntu-24.04-arm`. The result needs at least the glibc it was built against.
+- AppImage backend: packaging warns when the AppImage bundles libfontconfig or
+  libcairo but no font file and no `backends.appimage.fonts.bundle`. On a host
+  without DejaVu Sans, the font gnustep-back falls back to (Fedora, for one),
+  such an app can draw no text, exit or crash. The warning points to
+  `fonts.bundle` and to the `appimage-clean-smoke-image` check.
+
 ### Fixed
 - Updater UI on Linux: View Changes in the update dialog now opens the release
   notes in the desktop's browser with `xdg-open`. Every release before this one
