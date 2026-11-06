@@ -1,6 +1,6 @@
 # Updater Dialog Tests (proposed)
 
-Status: plan for v0.1.10. Not implemented.
+Status: plan for v0.1.10. Cases 1 and 3–8 ran locally on 2026-11-06 (below); no CI job yet.
 
 ## Gap
 
@@ -68,6 +68,60 @@ launch does, and press the dialog buttons with synthetic key events.
 9. A failed apply (an unwritable target folder): the next launch shows the
    outcome dialog with the apply script's reason.
 
+## Local run, 2026-11-06
+
+`tests/fixtures/updater-ui/run-local.sh WORKDIR` builds GPUpdaterCore,
+GPUpdaterUI, `gp-update-helper` and a fixture app (`main.m`) against the host's
+GNUstep. It makes signed `file://` feeds with the published test key, then runs
+the cases in `run-cases.sh` under `scripts/run-gui-isolated.sh`: a private X
+server, a private session bus, and a scratch home, so skipped versions and
+other defaults go to scratch.
+
+The fixture isn't packaged: it runs the libraries directly, with `APPIMAGE`
+pointing at a stand-in file. It logs each NSAlert's text and buttons, and the
+button that closed it. The driver clicks the panel, which gives it keyboard
+focus, then presses Return or Tab and space, or clicks a button. Without the
+first click, synthetic keys don't reach the panel under Xvfb.
+
+Host: Debian 13, GNUstep from `/usr/GNUstep` (base 1.31, gui 0.32), Xvfb.
+
+| Case | Result |
+| --- | --- |
+| 1 Up to date, manual check | Pass: "is up to date", OK |
+| 1 Up to date, automatic check | Pass: no alert |
+| 3 Later, then the next automatic check | Pass: offered again |
+| 4 Skip This Version | Pass: the next automatic check is quiet for 1.0.1 (status skipped) and offers 1.0.2 |
+| 5 More…, then View Changes | **Fails here**: `xdg-open` is never called, and the first alert doesn't come back. The app sits idle in `poll` for at least 28 s. |
+| 6 Tampered asset, Install Update | Pass: the helper refuses it, and the app shows "Downloaded update failed verification." |
+| 6 Feed can't be read | Pass: "Update Check Failed" with the reason |
+| 7 No build for this machine | Pass: "…has no download for this computer (linux-x64)." |
+| 8 Restart to Finish Updating, Later | Prepares and shows the restart offer: pass. On the next launch with the same state directory, the app offers "1.0.1 is available" again, not the restart. |
+
+Findings, not fixed here:
+
+- **View Changes (case 5).** On Linux, `GPUpdaterUIOpenURL` calls
+  `-[NSWorkspace openURL:]`, not `xdg-open`. On this host that call doesn't
+  return within the test, and the first alert never comes back. It isn't known
+  yet whether a packaged AppImage, with gdnc, gpbs and the #105 `xdg-open`
+  wrapper, behaves the same. If it does, the fix is to call `xdg-open` (through
+  the wrapper) on Linux.
+- **Restart after Later (case 8).** A prepared update isn't offered for
+  restart at the next launch: the controller checks again and offers a fresh
+  Install Update. The download stays in the state directory. The plan expected
+  the restart offer. Which one is intended is a product decision.
+- **Wording (case 6).** A verification failure after Install Update is titled
+  "Update Check Failed", though the check itself succeeded.
+
+Not run:
+
+- **Case 2 (Install Update through to relaunch) and case 9 (a failed apply).**
+  Both replace and relaunch a real AppImage, so they need the packaged fixture
+  and the CI job.
+- **Windows.**
+- **Two runs of an earlier draft** had one launch that didn't start within 20 s,
+  right after a case 5 run that had stalled. The CI job should run each case in a
+  new isolated session.
+
 ## Windows
 
 The same cases for the MSI, on `windows-latest`, are a second step. NSAlert on
@@ -77,6 +131,8 @@ MSI end-to-end job in `msi-update-e2e` is the starting point.
 
 ## Cost and order
 
-About a day for the Linux fixture and cases 1 to 6 in a new CI job, and half a
-day more for 7 to 9. Windows follows separately. The fixture app is the larger
+The fixture and driver exist now (`tests/fixtures/updater-ui/`). What's left
+for CI: package the fixture as an AppImage, run cases 2 and 9 against it, and
+put `run-cases.sh` in a job. That's about half a day, once the case 5 and
+case 8 questions are settled. Windows follows separately. The fixture app is the larger
 part; the driver reuses the smoke launch's X handling.
