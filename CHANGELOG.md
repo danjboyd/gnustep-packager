@@ -11,6 +11,11 @@
   gnustep-cli-new arm64 toolchain (v0.1.3 and v0.1.4) is published for Debian
   only (ICU 76, glibc 2.41), so CI builds in a `debian:trixie` container on
   `ubuntu-24.04-arm`. The result needs at least the glibc it was built against.
+- AppImage backend: packaging warns when the AppImage bundles libfontconfig or
+  libcairo but no font file and no `backends.appimage.fonts.bundle`. On a host
+  without DejaVu Sans, the font gnustep-back falls back to (Fedora, for one),
+  such an app can draw no text, exit or crash. The warning points to
+  `fonts.bundle` and to the `appimage-clean-smoke-image` check.
 
 ### Fixed
 - Examples: the gnustep-apps and Adwaita theme-demo AppImages now start on hosts
