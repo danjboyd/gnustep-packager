@@ -23,6 +23,12 @@
   `fonts.bundle` and to the `appimage-clean-smoke-image` check.
 
 ### Fixed
+- Updater UI on Linux: View Changes in the update dialog now opens the release
+  notes in the desktop's browser with `xdg-open`. Every release before this one
+  called `-[NSWorkspace openURL:]`, which in an AppImage finds no GNUstep
+  application for the URL and shows "Unable to use Application or Service to
+  open URL". In an AppImage built with v0.1.9 or later, `xdg-open` is the
+  bundled wrapper, which runs the host's with the host's environment.
 - Examples: the gnustep-apps and Adwaita theme-demo AppImages now start on hosts
   without DejaVu Sans (Fedora): their manifests bundle DejaVu Sans and Sans Mono
   through `backends.appimage.fonts.bundle`. The Adwaita stage script no longer
