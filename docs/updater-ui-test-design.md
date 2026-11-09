@@ -104,10 +104,11 @@ Findings, not fixed here:
   for an http URL, so it shows "Unable to use Application or Service to open
   URL" and opens nothing. Every release from v0.1.0 to v0.1.9 has this. #117
   sends the URL to `xdg-open`, which in an AppImage is the #105 wrapper.
-- **Restart after Later (case 8).** A prepared update isn't offered for
-  restart at the next launch: the controller checks again and offers a fresh
-  Install Update. The download stays in the state directory. The plan expected
-  the restart offer. Which one is intended is a product decision.
+- **Restart after Later (case 8), decided.** A prepared update isn't offered
+  for restart at the next launch: the app checks again and offers Install
+  Update. Dan chose to keep that (ask #4462, option A) and to delete the
+  unapplied download and its state at launch. `run-cases.sh` checks both
+  (`STATE-BEFORE`, `STATE-AFTER`).
 - **Wording (case 6).** A verification failure after Install Update is titled
   "Update Check Failed", though the check itself succeeded.
 

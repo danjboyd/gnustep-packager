@@ -35,6 +35,11 @@
   `fonts.bundle` and to the `appimage-clean-smoke-image` check.
 
 ### Fixed
+- Updater UI: an update prepared in an earlier session but not installed (the
+  user chose Later on "Restart to Finish Updating") no longer leaves its
+  download behind. At the next launch the app deletes it and its state, then
+  checks the feed again as before, so the install is verified against the
+  current feed.
 - Updater UI on Linux: View Changes in the update dialog now opens the release
   notes in the desktop's browser with `xdg-open`. Every release before this one
   called `-[NSWorkspace openURL:]`, which in an AppImage finds no GNUstep

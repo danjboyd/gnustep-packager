@@ -34,6 +34,7 @@ static NSString * const GPUpdaterHelperStatusManualActionRequired = @"manualActi
 - (void)_runRestartToFinishAlert:(id)unused;
 - (void)_runManualUpdateAlert:(NSDictionary *)info;
 - (void)_presentPreviousInstallOutcome;
+- (void)_discardUnappliedUpdate;
 - (void)_runInstallFailedAlert:(GPUpdaterApplyOutcome *)outcome;
 - (void)_openReleaseNotesURL:(NSURL *)releaseNotesURL;
 - (void)_beginPrepareForResult:(GPUpdateCheckResult *)result;
@@ -203,6 +204,7 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
 
 - (void)start {
   [self _presentPreviousInstallOutcome];
+  [self _discardUnappliedUpdate];
   [[self updater] start];
 }
 
@@ -722,6 +724,27 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
   }
 
   [self _presentAlertDeferred:@selector(_runInstallFailedAlert:) withObject:outcome];
+}
+
+// An update prepared in an earlier session but not installed: the user chose
+// Later on "Restart to Finish Updating" and then quit. It isn't offered for
+// restart now. The launch checks the feed again, so a newer release is
+// picked up and the download is verified against the feed just before it's
+// installed. So the old download and its state go. A recorded apply request
+// means the app quit to install it; that is _presentPreviousInstallOutcome's.
+- (void)_discardUnappliedUpdate {
+  NSString *stateRoot = [self _helperStateRoot];
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  if ([fileManager fileExistsAtPath:[stateRoot stringByAppendingPathComponent:@"apply-request.json"]]) {
+    return;
+  }
+  NSDictionary *state = GPUpdaterUILoadJSONObject([stateRoot stringByAppendingPathComponent:@"update-state.json"]);
+  if (![GPUpdaterUIStringValue([state objectForKey:@"status"]) isEqualToString:GPUpdaterHelperStatusReadyToApply]) {
+    return;
+  }
+  [GPUpdaterApplyOutcome clearDirectory:stateRoot];
+  [fileManager removeItemAtPath:[stateRoot stringByAppendingPathComponent:@"downloads"] error:NULL];
+  [fileManager removeItemAtPath:[stateRoot stringByAppendingPathComponent:@"apply-appimage.sh"] error:NULL];
 }
 
 - (void)_runInstallFailedAlert:(GPUpdaterApplyOutcome *)outcome {
