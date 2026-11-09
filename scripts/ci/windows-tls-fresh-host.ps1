@@ -54,6 +54,14 @@ $stageRoot = Join-Path $projectRoot "dist\stage"
 New-Item -ItemType Directory -Force -Path (Join-Path $stageRoot "app"), (Join-Path $stageRoot "runtime\lib"), (Join-Path $stageRoot "metadata\licenses") | Out-Null
 Copy-Item -Force $ToolPath (Join-Path $stageRoot "app\gp-tls-fetch.exe")
 Copy-Item -Recurse -Force (Join-Path $ToolchainClangRoot "lib\GNUstep") (Join-Path $stageRoot "runtime\lib\GNUstep")
+# gnustep-base goes in runtime\bin, as in a real Windows stage: it finds its
+# resources (GSTLS among them) at ..\lib\GNUstep relative to its DLL. The MSI
+# backend's closure analysis copies the remaining DLLs from runtimeSearchRoots.
+New-Item -ItemType Directory -Force -Path (Join-Path $stageRoot "runtime\bin") | Out-Null
+$baseDll = Get-ChildItem -Path (Join-Path $ToolchainClangRoot "bin") -Filter "gnustep-base*.dll" | Select-Object -First 1
+if ($null -eq $baseDll) { throw "No gnustep-base DLL in $ToolchainClangRoot\bin" }
+Copy-Item -Force $baseDll.FullName (Join-Path $stageRoot "runtime\bin")
+Write-Host "staged $($baseDll.Name)"
 Set-Content -Path (Join-Path $stageRoot "metadata\licenses\gp-tls-fetch.txt") -Value "gp-tls-fetch test fixture. GNUstep libraries: LGPL-2.1-or-later."
 
 $stagedBundle = Get-ChildItem -Path (Join-Path $stageRoot "runtime\lib\GNUstep") -Recurse -Filter "ca-certificates.crt" |
