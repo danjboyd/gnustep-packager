@@ -51,6 +51,32 @@ and check that the resulting glibc floor is acceptable for the distributions
 you support. A job that builds inside `container-appimage` takes its glibc
 from the container image, not from the runner.
 
+### aarch64 (arm64) AppImages
+An aarch64 AppImage is built on an aarch64 runner (`backends.appimage.architecture`
+defaults to the build host's). gnustep-cli-new's arm64 toolchain (v0.1.3 to
+v0.1.5) is published for Debian only (ICU 76, glibc 2.41), and the stock
+`ubuntu-24.04-arm` image has ICU 74. So build in a `debian:trixie` container on
+the arm runner:
+
+```yaml
+    with:
+      backend: appimage
+      runs-on-appimage: '["ubuntu-24.04-arm"]'
+      container-appimage: debian:trixie
+```
+
+The workflow sets up a plain Debian or Ubuntu container itself. When the image
+has no `pwsh`, a first step installs PowerShell 7.4.6 for the image's
+architecture, `git`, the distribution's ICU and the AppImage tools, and the apt
+step then runs without `sudo`. The default host setup (manifest apt packages,
+gnustep-cli-new bootstrap) runs as usual inside it. `appimage-clean-smoke-image`
+needs Docker, which a container job doesn't have. Run the clean-host smoke in a
+separate job on the bare arm runner instead.
+
+Proven with the Gorm example (gnustep-apps). It built in this setup, and the
+AppImage runs on clean arm64 `ubuntu:24.04` and `fedora:42`. Its bundled
+binaries need glibc 2.39, so Ubuntu 24.04 is the oldest Ubuntu it runs on.
+
 ## Default Host Setup
 When `skip-default-host-setup` is `false`, the workflow provisions a documented
 baseline per backend, resolves the manifest, and then merges manifest-declared
@@ -199,7 +225,7 @@ jobs:
     with:
       manifest-path: packaging/package.manifest.json
       backend: msi
-      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.5/release-manifest.json
       run-validation: true
       run-smoke: true
       artifact-name: my-app-windows
@@ -212,7 +238,7 @@ jobs:
     with:
       manifest-path: packaging/package.manifest.json
       backend: appimage
-      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.3/release-manifest.json
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.5/release-manifest.json
       run-validation: true
       run-smoke: true
       artifact-name: my-app-linux

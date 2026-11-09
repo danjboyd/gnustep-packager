@@ -1718,6 +1718,10 @@ function Test-GpManifest {
     Test-PackageContractSection -Section $(if ($validation.Contains("installedResult")) { $validation["installedResult"] } else { $null }) -Label "validation.installedResult"
   }
 
+  if ($Manifest.Contains("validation") -and ($Manifest["validation"] -is [System.Collections.IDictionary]) -and $Manifest["validation"].Contains("fetchesHttps") -and -not ($Manifest["validation"]["fetchesHttps"] -is [bool])) {
+    Add-Issue "validation.fetchesHttps must be a boolean when present."
+  }
+
   if ($Manifest.Contains("updates")) {
     if (-not ($Manifest["updates"] -is [System.Collections.IDictionary])) {
       Add-Issue "updates must be an object when present."
@@ -3154,6 +3158,74 @@ function Move-GpPathEntryToEnd {
   }
 
   return [string]::Join([string]$separator, $kept)
+}
+
+# Whether an app that fetches https can find trusted certificate authorities.
+# gnustep-base takes them from the GSTLSCAFile default, then GS_TLS_CA_FILE, then
+# SSL_CERT_FILE, and otherwise from the system's store, falling back to its own
+# GSTLS/ca-certificates.crt resource. With strict host verification (libs-base
+# 586eba532), a connection fails when it finds none, so this warns before the
+# app reaches users. A warning, not an error: the target's system store may
+# well be enough, and only the target can show that.
+function Get-GpTlsCaBundleStatus {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    # The extracted or installed package.
+    [Parameter(Mandatory = $true)]
+    [string]$RootPath
+  )
+
+  function Get-GpManifestSection {
+    param([object]$Parent, [string[]]$Keys)
+
+    $current = $Parent
+    foreach ($key in $Keys) {
+      if (-not ($current -is [System.Collections.IDictionary]) -or -not $current.Contains($key)) {
+        return $null
+      }
+      $current = $current[$key]
+    }
+    return $current
+  }
+
+  $manifest = $Context.Manifest
+  $declared = Get-GpManifestSection -Parent $manifest -Keys @("validation", "fetchesHttps")
+  $applies = if ($null -ne $declared) {
+    $declared -eq $true
+  } else {
+    (Get-GpManifestSection -Parent $manifest -Keys @("updates", "enabled")) -eq $true
+  }
+  if (-not $applies) {
+    return [pscustomobject]@{ Applies = $false; Source = $null; Warning = $null }
+  }
+
+  foreach ($keys in @(
+    @("backends", "appimage", "gnustepConfig", "globalDefaults", "GSTLSCAFile"),
+    @("packagedDefaults", "appDomain", "values", "GSTLSCAFile")
+  )) {
+    if (Get-GpManifestSection -Parent $manifest -Keys $keys) {
+      return [pscustomobject]@{ Applies = $true; Source = ("default GSTLSCAFile ({0})" -f [string]::Join(".", $keys[0..($keys.Count - 2)])); Warning = $null }
+    }
+  }
+
+  foreach ($name in @("GS_TLS_CA_FILE", "SSL_CERT_FILE")) {
+    if (Get-GpManifestSection -Parent $manifest -Keys @("launch", "env", $name)) {
+      return [pscustomobject]@{ Applies = $true; Source = ("launch environment {0}" -f $name); Warning = $null }
+    }
+  }
+
+  $bundled = @(Get-ChildItem -LiteralPath $RootPath -Recurse -File -Filter "ca-certificates.crt" -ErrorAction SilentlyContinue |
+    Where-Object { (Split-Path -Leaf (Split-Path -Parent $_.FullName)) -eq "GSTLS" -and (Select-String -LiteralPath $_.FullName -SimpleMatch -Quiet -Pattern "BEGIN CERTIFICATE") })
+  if ($bundled.Count -gt 0) {
+    return [pscustomobject]@{ Applies = $true; Source = $bundled[0].FullName; Warning = $null }
+  }
+
+  return [pscustomobject]@{
+    Applies = $true
+    Source = $null
+    Warning = "This app fetches https, but the package has no CA bundle: no GSTLS/ca-certificates.crt from gnustep-base, and no GS_TLS_CA_FILE, SSL_CERT_FILE or GSTLSCAFile setting. It depends on the target's system store, and with strict TLS (gnustep-cli v0.1.5) its connections fail if that store can't be read. Stage gnustep-base's GSTLS resources, or set one of those. If the app doesn't fetch https, set validation.fetchesHttps to false."
+  }
 }
 
 function Get-GpShellCommandPath {
