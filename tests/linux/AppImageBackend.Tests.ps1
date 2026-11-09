@@ -110,7 +110,7 @@ Describe "AppImage backend" {
       $config = Get-GpAppImageConfig -Context $context
 
       Assert-GpEqual -Actual @(Get-GpEnabledBackends -Manifest $context.Manifest) -Expected @("appimage") -Message "Linux fixture should only enable the AppImage backend."
-      Assert-GpEqual -Actual $config.ArtifactPlan.ArtifactName -Expected "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage" -Message "AppImage artifact name should use the default naming pattern."
+      Assert-GpEqual -Actual $config.ArtifactPlan.ArtifactName -Expected "SampleGNUstepLinuxApp-0.1.0-$(Get-GpHostArchitecture).AppImage" -Message "AppImage artifact name should use the default naming pattern."
       Assert-GpEqual -Actual $config.DesktopEntryName -Expected "sample-gnustep-linux.desktop" -Message "AppImage desktop entry name should come from the manifest."
       Assert-GpEqual -Actual $config.Smoke.Mode -Expected "launch-only" -Message "Linux fixture should default to launch-only AppImage smoke validation."
     }
@@ -181,11 +181,11 @@ Describe "AppImage backend" {
     It "writes a provenance record that is safe to publish" {
       $provenancePath = $script:packageResult.ProvenancePath
       Assert-GpTrue -Condition (Test-Path $provenancePath) -Message "A provenance sidecar should be written beside the AppImage."
-      Assert-GpMatch -Actual $provenancePath -Pattern "SampleGNUstepLinuxApp-0\.1\.0-x86_64\.provenance\.json$" -Message "The provenance sidecar should be named after the artifact."
+      Assert-GpMatch -Actual $provenancePath -Pattern "SampleGNUstepLinuxApp-0\.1\.0-$(Get-GpHostArchitecture)\.provenance\.json$" -Message "The provenance sidecar should be named after the artifact."
 
       $text = Get-Content -Raw -Path $provenancePath
       $provenance = Get-GpJsonFile -Path $provenancePath
-      Assert-GpEqual -Actual $provenance["artifact"]["name"] -Expected "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage" -Message "The provenance should name the artifact, not its path."
+      Assert-GpEqual -Actual $provenance["artifact"]["name"] -Expected "SampleGNUstepLinuxApp-0.1.0-$(Get-GpHostArchitecture).AppImage" -Message "The provenance should name the artifact, not its path."
       Assert-GpEqual -Actual $provenance["artifact"]["sha256"] -Expected (Get-GpFileSha256 -Path $script:packageResult.ArtifactPath) -Message "The provenance should carry the artifact's SHA-256."
       Assert-GpEqual -Actual $provenance["package"]["version"] -Expected "0.1.0" -Message "The provenance should carry the package version."
       $entry = @($provenance["files"] | Where-Object { $_["role"] -eq "entry" })
@@ -398,6 +398,196 @@ Describe "AppImage backend" {
           Assert-GpMatch -Actual $markerText -Pattern ("(?m)^gnustep_system_library=" + [regex]::Escape($expectedLibrary) + "$") -Message "GNUstep.conf should resolve into the relocated AppDir."
           Assert-GpMatch -Actual $markerText -Pattern ("(?m)^gnustep_theme=" + [regex]::Escape($case.Theme) + "$") -Message "The default theme should apply only on the named desktops."
         }
+      } finally {
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
+        }
+      }
+    }
+
+    It "stays in the caller's directory when launch.workingDirectory is {@callerDirectory}" {
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-caller-dir-" + [guid]::NewGuid().ToString("N"))
+      $manifestPath = New-GpSiblingManifest -Customize {
+        param($manifest)
+        $manifest["launch"]["workingDirectory"] = "{@callerDirectory}"
+      }
+      try {
+        Assert-GpEqual -Actual @(Test-GpManifestSchema -Path $manifestPath).Count -Expected 0 -Message "The schema should accept {@callerDirectory}."
+        $context = Get-GpManifestContext -Path $manifestPath
+        Assert-GpEqual -Actual @(Test-GpManifest -Manifest $context.Manifest).Count -Expected 0 -Message "The validator should accept {@callerDirectory}."
+        $config = Get-GpAppImageConfig -Context $context
+        Assert-GpEqual -Actual (Get-GpLaunchContract -Context $context).WorkingDirectoryPath -Expected $null -Message "{@callerDirectory} has no path in the package."
+
+        $appDir = Join-Path $tempRoot "AppDir"
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        & cp -a $script:packageResult.AppDirRoot $appDir
+        $appRun = Write-GpAppImageAppRun -Context $context -Config $config -AppDirRoot $appDir -LogPath (Join-Path $tempRoot "apprun.log")
+        $entryPath = Join-Path $appDir "usr/app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp"
+        Set-Content -Path $entryPath -Value @(
+          '#!/bin/sh'
+          'printf ''cwd=%s\n'' "$(pwd)"'
+          'for a do printf ''arg=[%s]\n'' "$a"; done'
+        )
+        Set-GpUnixExecutable -Path $entryPath
+
+        $callerDir = Join-Path $tempRoot "home"
+        New-Item -ItemType Directory -Force -Path (Join-Path $callerDir "Pictures") | Out-Null
+        Set-Content -Path (Join-Path $callerDir "Pictures/x.png") -Value ""
+        $output = @(& env "HOME=$tempRoot" sh -c 'cd "$1" && shift && exec "$@"' sh $callerDir $appRun "Pictures/x.png" 2>&1)
+        Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message ("AppRun should succeed. Output: " + [string]::Join("`n", $output))
+        $lines = @($output | ForEach-Object { [string]$_ } | Where-Object { $_ -match '^(cwd=|arg=\[)' })
+        Assert-GpEqual -Actual $lines -Expected @(
+          "cwd=$callerDir"
+          "arg=[$callerDir/Pictures/x.png]"
+        ) -Message "The app should start in the caller's directory, with relative arguments still made absolute."
+
+        $windowsContext = $context.PSObject.Copy()
+        $windowsContext.TargetPlatform = "windows"
+        $threw = $false
+        try { Get-GpLaunchContract -Context $windowsContext | Out-Null } catch { $threw = $_.Exception.Message -match 'platformOverrides\.linux' }
+        Assert-GpTrue -Condition $threw -Message "{@callerDirectory} should be refused outside Linux, pointing at platformOverrides.linux."
+      } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue $manifestPath
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
+        }
+      }
+    }
+
+    It "starts xdg-open children with the host's environment and directory" {
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-host-env-" + [guid]::NewGuid().ToString("N"))
+      try {
+        # Like a real app: the bundled library directory goes first on LD_LIBRARY_PATH.
+        $manifestPath = New-GpSiblingManifest -Customize {
+          param($manifest)
+          $manifest["launch"]["env"]["LD_LIBRARY_PATH"] = [ordered]@{ value = "{@runtimeRoot}/lib"; policy = "prepend" }
+        }
+        $context = Get-GpManifestContext -Path $manifestPath
+        $config = Get-GpAppImageConfig -Context $context
+        $appDir = Join-Path $tempRoot "AppDir"
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        & cp -a $script:packageResult.AppDirRoot $appDir
+        $appRun = Write-GpAppImageAppRun -Context $context -Config $config -AppDirRoot $appDir -LogPath (Join-Path $tempRoot "apprun.log")
+        Assert-GpTrue -Condition (Test-Path (Join-Path $appDir "gp-bin/xdg-open")) -Message "The AppDir should ship gp-bin/xdg-open."
+
+        # The app opens a URL the way NSWorkspace falls back to: xdg-open on PATH.
+        $entryPath = Join-Path $appDir "usr/app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp"
+        Set-Content -Path $entryPath -Value @(
+          '#!/bin/sh'
+          'printf ''app_ld=%s\n'' "${LD_LIBRARY_PATH:-}"'
+          'exec xdg-open "https://example.invalid/page"'
+        )
+        Set-GpUnixExecutable -Path $entryPath
+
+        # The host's xdg-open reports what it was started with.
+        $hostBin = Join-Path $tempRoot "hostbin"
+        New-Item -ItemType Directory -Force -Path $hostBin | Out-Null
+        $hostTool = Join-Path $hostBin "xdg-open"
+        Set-Content -Path $hostTool -Value @(
+          '#!/bin/sh'
+          'printf ''host_cwd=%s\n'' "$(pwd)"'
+          'printf ''host_ld=%s\n'' "${LD_LIBRARY_PATH-<unset>}"'
+          'printf ''host_path=%s\n'' "$PATH"'
+          'printf ''host_gnustep_conf=%s\n'' "${GNUSTEP_CONFIG_FILE-<unset>}"'
+          'printf ''host_appdir=%s\n'' "${APPDIR-<unset>}"'
+          'printf ''host_gp_vars=%s\n'' "$(env | grep -c ''^GP_HOST_'')"'
+          'printf ''host_arg=%s\n'' "$1"'
+        )
+        Set-GpUnixExecutable -Path $hostTool
+
+        $callerDir = Join-Path $tempRoot "home"
+        New-Item -ItemType Directory -Force -Path $callerDir | Out-Null
+        $hostPath = "${hostBin}:/usr/bin:/bin"
+
+        foreach ($case in @(
+          @{ Name = "host LD_LIBRARY_PATH set"; Env = @("LD_LIBRARY_PATH=/host/lib"); ExpectedLd = "/host/lib" },
+          @{ Name = "host LD_LIBRARY_PATH unset"; Env = @(); ExpectedLd = "<unset>" }
+        )) {
+          $envArgs = @("-i", "HOME=$tempRoot", "PATH=$hostPath") + $case.Env
+          $output = @(& env @envArgs sh -c 'cd "$1" && shift && exec "$@"' sh $callerDir $appRun 2>&1 | ForEach-Object { [string]$_ })
+          Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message ("AppRun should succeed ($($case.Name)). Output: " + [string]::Join("`n", $output))
+          $appLd = @($output | Where-Object { $_ -like 'app_ld=*' })[0]
+          Assert-GpTrue -Condition ($appLd -like "*$appDir*") -Message "The app itself should still get the bundled LD_LIBRARY_PATH ($($case.Name)). Got: $appLd"
+          $hostLines = @($output | Where-Object { $_ -like 'host_*' })
+          Assert-GpEqual -Actual $hostLines -Expected @(
+            "host_cwd=$callerDir"
+            "host_ld=$($case.ExpectedLd)"
+            "host_path=$hostPath"
+            "host_gnustep_conf=<unset>"
+            "host_appdir=<unset>"
+            "host_gp_vars=0"
+            "host_arg=https://example.invalid/page"
+          ) -Message "xdg-open's child should get the host's environment and the caller's directory ($($case.Name))."
+        }
+      } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue $manifestPath
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
+        }
+      }
+    }
+
+    It "passes the caller's environment to the app as GP_HOST_*" {
+      # docs/launch-contract.md describes this as a stable interface: set
+      # (even empty) becomes GP_HOST_<name>, unset goes into GP_HOST_UNSET, a
+      # prepend key that was unset also gets an empty GP_HOST_<name>, and a
+      # relaunch from inside the AppImage keeps the first launch's values.
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-host-contract-" + [guid]::NewGuid().ToString("N"))
+      try {
+        $appDir = Join-Path $tempRoot "AppDir"
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        & cp -a $script:packageResult.AppDirRoot $appDir
+        $appRun = Join-Path $appDir "AppRun"
+        $entryPath = Join-Path $appDir "usr/app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp"
+        Set-Content -Path $entryPath -Value @(
+          '#!/bin/sh'
+          'if [ "${GP_TEST_RELAUNCH:-}" = 1 ]; then GP_TEST_RELAUNCH=2 GNUSTEP_CONFIG_FILE=/inner/GNUstep.conf exec "$GP_TEST_APPRUN"; fi'
+          'printf ''conf=%s\n'' "${GNUSTEP_CONFIG_FILE-<unset>}"'
+          'printf ''host_conf=%s\n'' "${GP_HOST_GNUSTEP_CONFIG_FILE-<unset>}"'
+          'printf ''host_xdg=%s\n'' "${GP_HOST_XDG_DATA_DIRS-<unset>}"'
+          'printf ''unset=%s\n'' "$(echo ${GP_HOST_UNSET-<unset>})"'
+          'printf ''vars=%s\n'' "${GP_HOST_VARS-<unset>}"'
+          'printf ''pwd=%s\n'' "${GP_HOST_PWD-<unset>}"'
+        )
+        Set-GpUnixExecutable -Path $entryPath
+
+        $callerDir = Join-Path $tempRoot "home"
+        New-Item -ItemType Directory -Force -Path $callerDir | Out-Null
+
+        function Invoke-GpContractAppRun {
+          param([string[]]$Environment)
+          $envArgs = @("-i", "HOME=$tempRoot", "PATH=/usr/bin:/bin", "GP_TEST_APPRUN=$appRun") + $Environment
+          $output = @(& env @envArgs sh -c 'cd "$1" && shift && exec "$@"' sh $callerDir $appRun 2>&1 | ForEach-Object { [string]$_ })
+          Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message ("AppRun should succeed. Output: " + [string]::Join("`n", $output))
+          $values = @{}
+          foreach ($line in $output) {
+            if ($line -match '^(conf|host_conf|host_xdg|unset|vars|pwd)=(.*)$') { $values[$Matches[1]] = $Matches[2] }
+          }
+          return $values
+        }
+
+        $set = Invoke-GpContractAppRun -Environment @("GNUSTEP_CONFIG_FILE=/host/GNUstep.conf", "XDG_DATA_DIRS=/host/share")
+        Assert-GpTrue -Condition ($set.conf -like "$appDir/*") -Message "The app should run with the bundled GNUstep.conf. Got: $($set.conf)"
+        Assert-GpEqual -Actual $set.host_conf -Expected "/host/GNUstep.conf" -Message "GP_HOST_GNUSTEP_CONFIG_FILE should hold the caller's value."
+        Assert-GpEqual -Actual $set.host_xdg -Expected "/host/share" -Message "A prepend key should keep the caller's value in GP_HOST_<key>."
+        Assert-GpTrue -Condition (-not (" $($set.unset) " -match ' (GNUSTEP_CONFIG_FILE|XDG_DATA_DIRS) ')) -Message "Set variables shouldn't be in GP_HOST_UNSET. Got: $($set.unset)"
+        foreach ($name in @("PATH", "LD_LIBRARY_PATH", "GNUSTEP_CONFIG_FILE", "FONTCONFIG_FILE", "FONTCONFIG_PATH", "XDG_DATA_DIRS", "GSTheme")) {
+          Assert-GpTrue -Condition ((" " + $set.vars + " ") -like "* $name *") -Message "GP_HOST_VARS should list $name. Got: $($set.vars)"
+        }
+        Assert-GpEqual -Actual $set.pwd -Expected $callerDir -Message "GP_HOST_PWD should be the caller's directory."
+
+        $empty = Invoke-GpContractAppRun -Environment @("GNUSTEP_CONFIG_FILE=")
+        Assert-GpEqual -Actual $empty.host_conf -Expected "" -Message "An empty caller value should be saved as an empty GP_HOST_<name>, not as unset."
+        Assert-GpTrue -Condition (-not (" $($empty.unset) " -like "* GNUSTEP_CONFIG_FILE *")) -Message "An empty caller value shouldn't be in GP_HOST_UNSET. Got: $($empty.unset)"
+
+        $unset = Invoke-GpContractAppRun -Environment @()
+        Assert-GpEqual -Actual $unset.host_conf -Expected "<unset>" -Message "An unset caller value should leave GP_HOST_<name> unset."
+        Assert-GpTrue -Condition ((" $($unset.unset) " -like "* GNUSTEP_CONFIG_FILE *") -and (" $($unset.unset) " -like "* XDG_DATA_DIRS *")) -Message "Unset caller values should be in GP_HOST_UNSET. Got: $($unset.unset)"
+        Assert-GpEqual -Actual $unset.host_xdg -Expected "" -Message "An unset prepend key also gets an empty GP_HOST_<key>, which is why GP_HOST_UNSET is read first."
+
+        $relaunch = Invoke-GpContractAppRun -Environment @("GNUSTEP_CONFIG_FILE=/host/GNUstep.conf", "GP_TEST_RELAUNCH=1")
+        Assert-GpEqual -Actual $relaunch.host_conf -Expected "/host/GNUstep.conf" -Message "A relaunch from inside the AppImage should keep the first launch's GP_HOST_* values."
+        Assert-GpTrue -Condition ($relaunch.conf -like "$appDir/*") -Message "The relaunched app should still run with the bundled GNUstep.conf. Got: $($relaunch.conf)"
       } finally {
         if (Test-Path $tempRoot) {
           Remove-Item -Recurse -Force $tempRoot
@@ -674,6 +864,52 @@ Describe "AppImage backend" {
       }
     }
 
+    It "warns while packaging when the stage bundles cairo but no font, and not when fonts are bundled" {
+      # Packaging only copies the library; ldd sees it at validation, which this test doesn't run.
+      $stagedCairo = Join-Path $script:packageConfig.StageRoot "runtime/lib/libcairo.so.2"
+      Set-Content -Path $stagedCairo -Value "fixture cairo" -Encoding ascii
+      $fontSourceRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-fontgap-" + [guid]::NewGuid().ToString("N"))
+      New-Item -ItemType Directory -Force -Path $fontSourceRoot | Out-Null
+      $fontPath = Join-Path $fontSourceRoot "GpFixtureSans.ttf"
+      $licensePath = Join-Path $fontSourceRoot "LICENSE"
+      Set-Content -Path $fontPath -Value "not a font" -Encoding ascii
+      Set-Content -Path $licensePath -Value "Fixture font license" -Encoding ascii
+      $bundledManifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["fonts"] = @{
+          bundle = @(@{ name = "Fixture Sans"; files = @($fontPath); licenseFile = $licensePath })
+        }
+      }
+      $stagedFontConfig = Join-Path $script:packageConfig.StageRoot "runtime/etc/fonts/fonts.conf"
+      $stagedFontConfigAside = "$stagedFontConfig.pester-aside"
+      try {
+        $logPath = Join-Path $script:packageConfig.OutputPaths.LogRoot "pester-appimage-package-fontgap.log"
+        $warnings = $null
+        Invoke-GpAppImagePackage -Context $script:packageContext -LogPath $logPath -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+        $gapWarnings = @($warnings | Where-Object { "$_" -like "*bundles libcairo.so.2 but no font file*" })
+        Assert-GpEqual -Actual $gapWarnings.Count -Expected 1 -Message ("Packaging should warn once about cairo without a font. Warnings: " + (@($warnings) -join " | "))
+        Assert-GpMatch -Actual (Get-Content -Raw -Path $logPath) -Pattern "WARNING: the AppImage bundles libcairo\.so\.2 but no font file" -Message "The package log should carry the font-gap warning."
+
+        # The fixture stages a fonts.conf of its own, which bundling fonts refuses to replace.
+        Move-Item -LiteralPath $stagedFontConfig -Destination $stagedFontConfigAside
+        $bundledLogPath = Join-Path $script:packageConfig.OutputPaths.LogRoot "pester-appimage-package-fontgap-bundled.log"
+        $warnings = $null
+        Invoke-GpAppImagePackage -Context (Get-GpManifestContext -Path $bundledManifestPath) -LogPath $bundledLogPath -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+        Assert-GpEqual -Actual @($warnings | Where-Object { "$_" -like "*no font file*" }).Count -Expected 0 -Message "With fonts.bundle set, packaging should not warn."
+        Assert-GpTrue -Condition ((Get-Content -Raw -Path $bundledLogPath) -notmatch "no font file") -Message "With fonts.bundle set, the package log should not carry the warning."
+      } finally {
+        Remove-Item -Force $stagedCairo -ErrorAction SilentlyContinue
+        if (Test-Path $stagedFontConfigAside) {
+          Move-Item -LiteralPath $stagedFontConfigAside -Destination $stagedFontConfig -Force
+        }
+        foreach ($path in @($bundledManifestPath, $fontSourceRoot)) {
+          if (Test-Path $path) {
+            Remove-Item -Recurse -Force $path
+          }
+        }
+      }
+    }
+
     It "can emit updater metadata and a feed sidecar when updates are enabled" {
       $manifestPath = New-GpSiblingManifest {
         param($manifest)
@@ -704,7 +940,7 @@ Describe "AppImage backend" {
         Assert-GpTrue -Condition (Test-Path $result.UpdateFeedPath) -Message "Update-enabled AppImage packaging should emit an update feed sidecar."
         Assert-GpMatch -Actual $metadata["updates"]["appimage"]["updateInformation"] -Pattern "^gh-releases-zsync\|" -Message "AppImage metadata should record the embedded AppImage update information."
         Assert-GpEqual -Actual $metadata["updates"]["feedUrl"] -Expected "https://example.invalid/updates/linux/stable.json" -Message "AppImage metadata should record the resolved feed URL."
-        Assert-GpEqual -Actual $metadata["updates"]["appimage"]["zsyncArtifactName"] -Expected "SampleGNUstepLinuxApp-0.1.0-x86_64.AppImage.zsync" -Message "AppImage metadata should preserve the configured zsync artifact name even when the active appimagetool build omits the sidecar."
+        Assert-GpEqual -Actual $metadata["updates"]["appimage"]["zsyncArtifactName"] -Expected "SampleGNUstepLinuxApp-0.1.0-$(Get-GpHostArchitecture).AppImage.zsync" -Message "AppImage metadata should preserve the configured zsync artifact name even when the active appimagetool build omits the sidecar."
       } finally {
         if (Test-Path $manifestPath) {
           Remove-Item -Force $manifestPath
@@ -953,10 +1189,10 @@ Describe "AppImage backend" {
         $survivors = @(Stop-GpAppImageSmokeProcess -Process $tree -GnustepHome $gnustepHome)
         Assert-GpEqual -Actual $survivors.Count -Expected 0 -Message "Nothing from the smoke launch should survive."
         foreach ($id in $treeIds) {
-          Assert-GpTrue -Condition (-not (Test-Path "/proc/$id")) -Message "Process $id from the smoke tree should be gone."
+          Assert-GpTrue -Condition (-not (Test-GpProcessAlive -ProcessId $id)) -Message "Process $id from the smoke tree should be gone."
         }
-        Assert-GpTrue -Condition (-not (Test-Path "/proc/$($detached.Id)")) -Message "A detached process with the smoke's GNUstep home should be gone."
-        Assert-GpTrue -Condition (Test-Path "/proc/$($other.Id)") -Message "A process with a different GNUstep home should be left alone."
+        Assert-GpTrue -Condition (-not (Test-GpProcessAlive -ProcessId $detached.Id)) -Message "A detached process with the smoke's GNUstep home should be gone."
+        Assert-GpTrue -Condition (Test-GpProcessAlive -ProcessId $other.Id) -Message "A process with a different GNUstep home should be left alone."
       } finally {
         foreach ($process in @($tree, $detached, $other)) {
           Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue

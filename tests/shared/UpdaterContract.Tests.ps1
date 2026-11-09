@@ -58,11 +58,70 @@ Describe "Updater contract" {
     . (Join-Path $script:repoRoot "scripts\\lib\\core.ps1")
   }
 
+  It "requires a signing key whenever updates are enabled" {
+    foreach ($key in @($null, "", "missing")) {
+      $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:linuxManifestPath -Customize {
+        param($manifest)
+        $manifest["updates"] = @{
+          enabled = $true
+          provider = "github-release-feed"
+          github = @{ owner = "example"; repo = "app" }
+        }
+        if ($key -ne "missing") {
+          $manifest["updates"]["publicEDKey"] = $key
+        }
+      }
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $issues = @(Test-GpManifest -Manifest $context.Manifest)
+        Assert-GpTrue -Condition (@($issues | Where-Object { $_ -like "*publicEDKey*required*" }).Count -eq 1) -Message "Enabled updates with key '$key' should be an error. Issues: $($issues -join '; ')"
+        $schemaIssues = @(Test-GpManifestSchema -Path $manifestPath)
+        Assert-GpTrue -Condition ($schemaIssues.Count -gt 0) -Message "The schema should reject enabled updates with key '$key'."
+      } finally {
+        Remove-Item -Force $manifestPath -ErrorAction SilentlyContinue
+      }
+    }
+  }
+
+  It "refuses the published test signing key" {
+    $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:linuxManifestPath -Customize {
+      param($manifest)
+      $manifest["updates"] = @{
+        enabled = $true
+        provider = "github-release-feed"
+        github = @{ owner = "example"; repo = "app" }
+        publicEDKey = "Ll6BcPIwCiJWeu8fUhAG52rU62luKpZdTNsdJBfgxIs="
+      }
+    }
+    try {
+      $context = Get-GpManifestContext -Path $manifestPath
+      $issues = @(Test-GpManifest -Manifest $context.Manifest)
+      Assert-GpTrue -Condition (@($issues | Where-Object { $_ -like "*published test key*" }).Count -eq 1) -Message "The published test key should be refused. Issues: $($issues -join '; ')"
+    } finally {
+      Remove-Item -Force $manifestPath -ErrorAction SilentlyContinue
+    }
+  }
+
+  It "lets a manifest with updates turned off leave the signing key out" {
+    $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:linuxManifestPath -Customize {
+      param($manifest)
+      $manifest["updates"] = @{ enabled = $false }
+    }
+    try {
+      $context = Get-GpManifestContext -Path $manifestPath
+      Assert-GpTrue -Condition (@(@(Test-GpManifest -Manifest $context.Manifest) | Where-Object { $_ -like "*publicEDKey*" }).Count -eq 0) -Message "Updates off shouldn't need a key."
+      Assert-GpEqual -Actual @(Test-GpManifestSchema -Path $manifestPath).Count -Expected 0 -Message "The schema should accept updates off with no key."
+    } finally {
+      Remove-Item -Force $manifestPath -ErrorAction SilentlyContinue
+    }
+  }
+
   It "validates and resolves shared plus backend-specific update settings" {
     $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:linuxManifestPath -Customize {
       param($manifest)
       $manifest["updates"] = @{
         enabled = $true
+        publicEDKey = "zhJy7ojERZsU55cvzuifdKiIIR2u3KeSp5M8GRFJrhM="
         provider = "github-release-feed"
         channel = "stable"
         minimumCheckIntervalHours = 12
@@ -92,7 +151,9 @@ Describe "Updater contract" {
       Assert-GpEqual -Actual $settings.Channel -Expected "stable" -Message "The shared update channel should resolve from the manifest."
       Assert-GpEqual -Actual $settings.GitHub.Tag -Expected "v0.1.0" -Message "Release tags should resolve from updates.github.tagPattern and package.version."
       Assert-GpEqual -Actual $settings.FeedUrl -Expected "https://example.invalid/updates/linux/stable.json" -Message "Backend-specific feed URLs should override shared update feed settings."
-      Assert-GpEqual -Actual $settings.Platform -Expected "linux-x64" -Message "Update platform resolution should follow the selected backend."
+      # An AppImage defaults to the build host's architecture (the macOS runners are arm64).
+      $expectedPlatform = if ((Get-GpHostArchitecture) -eq "aarch64") { "linux-arm64" } else { "linux-x64" }
+      Assert-GpEqual -Actual $settings.Platform -Expected $expectedPlatform -Message "Update platform resolution should follow the selected backend and its architecture."
       Assert-GpEqual -Actual $settings.RuntimeConfigRelativePath -Expected (Join-Path "metadata" "updates/gnustep-packager-update.json") -Message "Runtime config should live under the packaged metadata tree."
     } finally {
       if (Test-Path $manifestPath) {
@@ -177,6 +238,7 @@ Describe "Updater contract" {
       param($manifest)
       $manifest["updates"] = @{
         enabled = $true
+        publicEDKey = "zhJy7ojERZsU55cvzuifdKiIIR2u3KeSp5M8GRFJrhM="
         provider = "github-release-feed"
         channel = "stable"
         github = @{
@@ -230,6 +292,7 @@ Describe "Updater contract" {
       param($manifest)
       $manifest["updates"] = @{
         enabled = $true
+        publicEDKey = "zhJy7ojERZsU55cvzuifdKiIIR2u3KeSp5M8GRFJrhM="
         provider = "github-release-feed"
         channel = "stable"
         github = @{

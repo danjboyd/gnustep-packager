@@ -1718,6 +1718,10 @@ function Test-GpManifest {
     Test-PackageContractSection -Section $(if ($validation.Contains("installedResult")) { $validation["installedResult"] } else { $null }) -Label "validation.installedResult"
   }
 
+  if ($Manifest.Contains("validation") -and ($Manifest["validation"] -is [System.Collections.IDictionary]) -and $Manifest["validation"].Contains("fetchesHttps") -and -not ($Manifest["validation"]["fetchesHttps"] -is [bool])) {
+    Add-Issue "validation.fetchesHttps must be a boolean when present."
+  }
+
   if ($Manifest.Contains("updates")) {
     if (-not ($Manifest["updates"] -is [System.Collections.IDictionary])) {
       Add-Issue "updates must be an object when present."
@@ -1752,13 +1756,18 @@ function Test-GpManifest {
         Add-Issue "updates.startupDelaySeconds must be an integer greater than or equal to 0."
       }
 
-      if ($updates.Contains("publicEDKey") -and ($updates["publicEDKey"] -ne $null)) {
+      if (($updates.Contains("enabled") -and $updates["enabled"] -eq $true) -and (-not $updates.Contains("publicEDKey") -or -not (Test-StringValue $updates["publicEDKey"]))) {
+        Add-Issue "updates.publicEDKey is required when updates.enabled is true: the updater refuses any update it can't verify. Generate an Ed25519 key pair, put the base64 public key here, and sign each release's assets (see docs/update-feed-contract.md)."
+      } elseif ($updates.Contains("publicEDKey") -and ($updates["publicEDKey"] -ne $null)) {
         $publicKeyBytes = $null
         if ($updates["publicEDKey"] -is [string]) {
           try { $publicKeyBytes = [Convert]::FromBase64String([string]$updates["publicEDKey"]) } catch { $publicKeyBytes = $null }
         }
         if ($null -eq $publicKeyBytes -or $publicKeyBytes.Length -ne 32) {
           Add-Issue "updates.publicEDKey must be a base64 Ed25519 public key (32 bytes) when present."
+        } elseif ([string]$updates["publicEDKey"] -eq "Ll6BcPIwCiJWeu8fUhAG52rU62luKpZdTNsdJBfgxIs=") {
+          # Its private seed is published in docs/update-feed-contract.md.
+          Add-Issue "updates.publicEDKey is gnustep-packager's published test key, whose private half anyone can read. Generate a key pair of your own."
         }
       }
 
@@ -2687,18 +2696,120 @@ function Test-GpBackendEmitsUpdates {
   return ($Backend -in @("msi", "appimage"))
 }
 
-function Get-GpUpdatePlatform {
+# The build host's CPU in AppImage spelling: x86_64 or aarch64.
+function Get-GpHostArchitecture {
+  $machine = ""
+  try { $machine = ([string](& uname -m 2>$null)).Trim() } catch { $machine = "" }
+  if ([string]::IsNullOrWhiteSpace($machine)) {
+    $machine = [string][System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+  }
+  switch -Regex ($machine) {
+    '^(x86_64|amd64|X64)$' { return "x86_64" }
+    '^(aarch64|arm64|Arm64)$' { return "aarch64" }
+    default { throw "Unsupported build host architecture '$machine'." }
+  }
+}
+
+# The CPU architecture a backend builds for, in its own spelling: the one
+# place update feeds, artifact names ({arch}) and AppRun take it from. The
+# AppImage backend builds for backends.appimage.architecture (x86_64 or
+# aarch64), or the build host's when that is unset; appimagetool runs only
+# on its own architecture, so the two must match. The MSI is x64 only.
+function Get-GpBackendArchitecture {
   param(
     [Parameter(Mandatory = $true)]
-    [string]$Backend
+    [string]$Backend,
+    [System.Collections.IDictionary]$Manifest
   )
 
   switch ($Backend) {
-    "msi" { return "windows-x64" }
-    "appimage" { return "linux-x64" }
-    "dmg" { return "macos" }
+    "appimage" {
+      $configured = $null
+      if ($null -ne $Manifest -and ($Manifest["backends"] -is [System.Collections.IDictionary]) -and
+          ($Manifest["backends"]["appimage"] -is [System.Collections.IDictionary]) -and
+          -not [string]::IsNullOrWhiteSpace([string]$Manifest["backends"]["appimage"]["architecture"])) {
+        $configured = [string]$Manifest["backends"]["appimage"]["architecture"]
+      }
+      if ($null -eq $configured) {
+        return Get-GpHostArchitecture
+      }
+      if ($configured -notin @("x86_64", "aarch64")) {
+        throw "backends.appimage.architecture must be x86_64 or aarch64, not '$configured'."
+      }
+      return $configured
+    }
+    "msi" { return "x64" }
+    default { return $null }
+  }
+}
+
+# The update-feed platform token for a backend and architecture: linux-x64,
+# linux-arm64, windows-x64, windows-arm64, or macos for the DMG backend. The
+# updater matches it exactly against the running machine.
+function Get-GpUpdatePlatform {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Backend,
+    [string]$Architecture
+  )
+
+  if ($Backend -eq "dmg") {
+    return "macos"
+  }
+  if ([string]::IsNullOrWhiteSpace($Architecture)) {
+    $Architecture = Get-GpBackendArchitecture -Backend $Backend
+  }
+  $arch = switch -Regex ([string]$Architecture) {
+    '^(x86_64|x64|amd64)$' { "x64"; break }
+    '^(aarch64|arm64)$' { "arm64"; break }
+    default { throw "Unknown architecture '$Architecture' for update platform." }
+  }
+  switch ($Backend) {
+    "msi" { return "windows-$arch" }
+    "appimage" { return "linux-$arch" }
     default { return $Backend }
   }
+}
+
+# Problems with a feed's assets that would make clients pick the wrong one:
+# two assets with the same backend and platform in a release, and, for
+# clients before v0.1.9 that take the first asset whose backend matches, a
+# non-x64 asset listed before that backend's x64 asset.
+function Test-GpUpdateFeedAssets {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Feed
+  )
+
+  $issues = [System.Collections.Generic.List[string]]::new()
+  foreach ($release in @($Feed["releases"])) {
+    if (-not ($release -is [System.Collections.IDictionary])) { continue }
+    $version = [string]$release["version"]
+    $seen = @{}
+    $firstPlatformByBackend = @{}
+    foreach ($asset in @($release["assets"])) {
+      if (-not ($asset -is [System.Collections.IDictionary])) { continue }
+      $backend = [string]$asset["backend"]
+      $platform = [string]$asset["platform"]
+      $key = "$backend|$platform"
+      if ($seen.ContainsKey($key)) {
+        $issues.Add(("Release {0} has two {1} assets for platform '{2}': {3} and {4}." -f $version, $backend, $platform, $seen[$key], [string]$asset["name"])) | Out-Null
+      } else {
+        $seen[$key] = [string]$asset["name"]
+      }
+      if (-not $firstPlatformByBackend.ContainsKey($backend)) {
+        $firstPlatformByBackend[$backend] = $platform
+      }
+    }
+    foreach ($backend in $firstPlatformByBackend.Keys) {
+      $first = $firstPlatformByBackend[$backend]
+      $hasX64 = @(@($release["assets"]) | Where-Object { $_ -is [System.Collections.IDictionary] -and [string]$_["backend"] -eq $backend -and ([string]$_["platform"]).EndsWith("-x64") }).Count -gt 0
+      if ($hasX64 -and -not ([string]$first).EndsWith("-x64")) {
+        $issues.Add(("Release {0} lists a {1} asset for '{2}' before the x64 one. Updaters before gnustep-packager v0.1.9 install the first {1} asset, so list x64 first." -f $version, $backend, $first)) | Out-Null
+      }
+    }
+  }
+  return [string[]]@($issues.ToArray())
 }
 
 function Get-GpUpdateRuntimeConfigRelativePath {
@@ -2816,7 +2927,7 @@ function Get-GpUpdateSettings {
     StartupDelaySeconds = $(if ($updates.Contains("startupDelaySeconds")) { [int]$updates["startupDelaySeconds"] } else { 15 })
     PublicEDKey = $(if ($updates.Contains("publicEDKey") -and -not [string]::IsNullOrWhiteSpace([string]$updates["publicEDKey"])) { [string]$updates["publicEDKey"] } else { $null })
     Backend = $Backend
-    Platform = Get-GpUpdatePlatform -Backend $Backend
+    Platform = Get-GpUpdatePlatform -Backend $Backend -Architecture (Get-GpBackendArchitecture -Backend $Backend -Manifest $Context.Manifest)
     RuntimeConfigRelativePath = Get-GpUpdateRuntimeConfigRelativePath -MetadataRootRelative ([string]$payload["metadataRoot"])
     GitHub = [pscustomobject]@{
       Owner = $githubOwner
@@ -3047,6 +3158,74 @@ function Move-GpPathEntryToEnd {
   }
 
   return [string]::Join([string]$separator, $kept)
+}
+
+# Whether an app that fetches https can find trusted certificate authorities.
+# gnustep-base takes them from the GSTLSCAFile default, then GS_TLS_CA_FILE, then
+# SSL_CERT_FILE, and otherwise from the system's store, falling back to its own
+# GSTLS/ca-certificates.crt resource. With strict host verification (libs-base
+# 586eba532), a connection fails when it finds none, so this warns before the
+# app reaches users. A warning, not an error: the target's system store may
+# well be enough, and only the target can show that.
+function Get-GpTlsCaBundleStatus {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    # The extracted or installed package.
+    [Parameter(Mandatory = $true)]
+    [string]$RootPath
+  )
+
+  function Get-GpManifestSection {
+    param([object]$Parent, [string[]]$Keys)
+
+    $current = $Parent
+    foreach ($key in $Keys) {
+      if (-not ($current -is [System.Collections.IDictionary]) -or -not $current.Contains($key)) {
+        return $null
+      }
+      $current = $current[$key]
+    }
+    return $current
+  }
+
+  $manifest = $Context.Manifest
+  $declared = Get-GpManifestSection -Parent $manifest -Keys @("validation", "fetchesHttps")
+  $applies = if ($null -ne $declared) {
+    $declared -eq $true
+  } else {
+    (Get-GpManifestSection -Parent $manifest -Keys @("updates", "enabled")) -eq $true
+  }
+  if (-not $applies) {
+    return [pscustomobject]@{ Applies = $false; Source = $null; Warning = $null }
+  }
+
+  foreach ($keys in @(
+    @("backends", "appimage", "gnustepConfig", "globalDefaults", "GSTLSCAFile"),
+    @("packagedDefaults", "appDomain", "values", "GSTLSCAFile")
+  )) {
+    if (Get-GpManifestSection -Parent $manifest -Keys $keys) {
+      return [pscustomobject]@{ Applies = $true; Source = ("default GSTLSCAFile ({0})" -f [string]::Join(".", $keys[0..($keys.Count - 2)])); Warning = $null }
+    }
+  }
+
+  foreach ($name in @("GS_TLS_CA_FILE", "SSL_CERT_FILE")) {
+    if (Get-GpManifestSection -Parent $manifest -Keys @("launch", "env", $name)) {
+      return [pscustomobject]@{ Applies = $true; Source = ("launch environment {0}" -f $name); Warning = $null }
+    }
+  }
+
+  $bundled = @(Get-ChildItem -LiteralPath $RootPath -Recurse -File -Filter "ca-certificates.crt" -ErrorAction SilentlyContinue |
+    Where-Object { (Split-Path -Leaf (Split-Path -Parent $_.FullName)) -eq "GSTLS" -and (Select-String -LiteralPath $_.FullName -SimpleMatch -Quiet -Pattern "BEGIN CERTIFICATE") })
+  if ($bundled.Count -gt 0) {
+    return [pscustomobject]@{ Applies = $true; Source = $bundled[0].FullName; Warning = $null }
+  }
+
+  return [pscustomobject]@{
+    Applies = $true
+    Source = $null
+    Warning = "This app fetches https, but the package has no CA bundle: no GSTLS/ca-certificates.crt from gnustep-base, and no GS_TLS_CA_FILE, SSL_CERT_FILE or GSTLSCAFile setting. It depends on the target's system store, and with strict TLS (gnustep-cli v0.1.5) its connections fail if that store can't be read. Stage gnustep-base's GSTLS resources, or set one of those. If the app doesn't fetch https, set validation.fetchesHttps to false."
+  }
 }
 
 function Get-GpShellCommandPath {
@@ -3566,7 +3745,16 @@ function Get-GpLaunchContract {
   }
 
   $entryPath = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $launch["entryRelativePath"]
-  $workingDirectoryPath = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $launch["workingDirectory"]
+  # {@callerDirectory}: start the app in the directory it was launched from
+  # instead of a directory in the package. Only AppRun supports it.
+  if ([string]$launch["workingDirectory"] -eq "{@callerDirectory}") {
+    if ($Context.TargetPlatform -ne "linux") {
+      throw ("launch.workingDirectory {{@callerDirectory}} is supported for Linux (AppImage) only. Set it under platformOverrides.linux.launch.workingDirectory and keep a package directory for {0}." -f $Context.TargetPlatform)
+    }
+    $workingDirectoryPath = $null
+  } else {
+    $workingDirectoryPath = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $launch["workingDirectory"]
+  }
 
   return [pscustomobject]@{
     StageRoot             = $stageRoot
@@ -4508,12 +4696,16 @@ function Get-GpArtifactPlan {
   $backendConfig = $manifest["backends"][$Backend]
   $outputPaths = Get-GpOutputPaths -Context $Context
   $artifactPattern = [string]$backendConfig["artifactNamePattern"]
-  $artifactName = Resolve-GpPatternTokens -Pattern $artifactPattern -Tokens @{
+  $tokens = @{
     name = $package["name"]
     version = $package["version"]
     packageId = $package["id"]
     backend = $Backend
   }
+  if ($artifactPattern.Contains("{arch}")) {
+    $tokens["arch"] = Get-GpBackendArchitecture -Backend $Backend -Manifest $manifest
+  }
+  $artifactName = Resolve-GpPatternTokens -Pattern $artifactPattern -Tokens $tokens
 
   return [pscustomobject]@{
     Backend      = $Backend

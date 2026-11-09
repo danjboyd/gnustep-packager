@@ -10,11 +10,11 @@
         "embedUpdateInformation": true,
         "updateInformation": "",
         "releaseSelector": "latest",
-        "zsyncArtifactNamePattern": "{name}-{version}-x86_64.AppImage.zsync"
+        "zsyncArtifactNamePattern": "{name}-{version}-{arch}.AppImage.zsync"
       },
-      "artifactNamePattern": "{name}-{version}-x86_64.AppImage",
+      "artifactNamePattern": "{name}-{version}-{arch}.AppImage",
       "toolRoot": "tools/appimage",
-      "downloadUrl": "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage",
+      "downloadUrl": "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-{arch}.AppImage",
       "skipAppStreamValidation": true,
       "gnustepConfig": {
         "systemRoot": ""

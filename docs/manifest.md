@@ -84,7 +84,12 @@ Describes how the packaged app starts from the staged payload.
 
 Important fields:
 - `entryRelativePath`
-- `workingDirectory`
+- `workingDirectory`: a stage-relative directory the app starts in, or
+  `{@callerDirectory}` to start it in the directory it was launched from. Use
+  that for an app whose children should start where the user is, such as a
+  terminal or a file manager. `{@callerDirectory}` is Linux (AppImage) only:
+  set it under `platformOverrides.linux.launch.workingDirectory`, and keep a
+  package directory in `launch.workingDirectory` for Windows and macOS.
 - `pathPrepend`
 - `resourceRoots`
 - `env`
@@ -258,6 +263,12 @@ Important fields:
   after a backend's smoke launch first sees it (default 5). An app that
   throws while initialising is briefly running first.
 - `logs.retainOnSuccess`
+- `fetchesHttps`: whether the app fetches https through GNUstep. It defaults to
+  `updates.enabled`. For such an app, AppImage and MSI validation warn when the
+  package has no `GSTLS/ca-certificates.crt` from gnustep-base and no
+  `GS_TLS_CA_FILE`, `SSL_CERT_FILE` or `GSTLSCAFile` setting. Strict TLS
+  (gnustep-cli v0.1.5) refuses connections when no trusted authorities can be
+  read. It's a warning because the target's system store may be enough.
 - `packageContract.requiredContent`
 - `packageContract.requiredPaths`
 - `packageContract.forbiddenFiles`
@@ -312,8 +323,9 @@ Important fields:
 - `feedUrl`
 - `minimumCheckIntervalHours`
 - `startupDelaySeconds`
-- `publicEDKey` (base64 Ed25519 public key; update payloads must then be
-  signed, see [update-feed-contract.md](update-feed-contract.md))
+- `publicEDKey` (base64 Ed25519 public key, required when `enabled` is true;
+  update payloads must be signed, see
+  [update-feed-contract.md](update-feed-contract.md))
 - `github.owner`
 - `github.repo`
 - `github.tagPattern`
@@ -383,6 +395,13 @@ Important fields:
 
 ### `backends.appimage`
 Important fields:
+- `architecture`: `x86_64` or `aarch64`, the CPU the AppImage is for. It
+  defaults to the build host's. appimagetool and the AppImage runtime run only
+  on their own architecture, so an aarch64 AppImage is built on an aarch64 host
+  (in GitHub Actions, `runs-on-appimage: '["ubuntu-24.04-arm"]'`); a mismatch
+  stops packaging. It sets the `{arch}` token in `artifactNamePattern`,
+  `updates.zsyncArtifactNamePattern` and `downloadUrl` (all default to names
+  with `{arch}`), and the update feed's platform (`linux-x64` or `linux-arm64`).
 - `appDirName`
 - `desktopEntryName`
 - `startupWMClass`

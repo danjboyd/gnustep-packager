@@ -260,7 +260,8 @@ function Resolve-GpAppImageArtifactNamePattern {
     [Parameter(Mandatory = $true)]
     [System.Collections.IDictionary]$Package,
     [Parameter(Mandatory = $true)]
-    [string]$VersionToken
+    [string]$VersionToken,
+    [string]$Architecture = "x86_64"
   )
 
   return (Resolve-GpPatternTokens -Pattern $Pattern -Tokens @{
@@ -268,6 +269,7 @@ function Resolve-GpAppImageArtifactNamePattern {
     version = $VersionToken
     packageId = [string]$Package["id"]
     backend = "appimage"
+    arch = $Architecture
   })
 }
 
@@ -466,10 +468,11 @@ function Get-GpAppImageConfig {
     )
   }
 
-  $downloadUrl = [string]$backend["downloadUrl"]
+  $architecture = Get-GpBackendArchitecture -Backend "appimage" -Manifest $Context.Manifest
+  $downloadUrl = Resolve-GpPatternTokens -Pattern ([string]$backend["downloadUrl"]) -Tokens @{ arch = $architecture }
   $downloadLeaf = Split-Path -Leaf $downloadUrl
   if ([string]::IsNullOrWhiteSpace($downloadLeaf)) {
-    $downloadLeaf = "appimagetool-x86_64.AppImage"
+    $downloadLeaf = "appimagetool-$architecture.AppImage"
   }
   $appDirName = Resolve-GpPatternTokens -Pattern ([string]$backend["appDirName"]) -Tokens @{
     name = $package["name"]
@@ -480,10 +483,10 @@ function Get-GpAppImageConfig {
   $zsyncArtifactPattern = if ($backendUpdates.Contains("zsyncArtifactNamePattern") -and -not [string]::IsNullOrWhiteSpace([string]$backendUpdates["zsyncArtifactNamePattern"])) {
     [string]$backendUpdates["zsyncArtifactNamePattern"]
   } else {
-    "{name}-{version}-x86_64.AppImage.zsync"
+    "{name}-{version}-{arch}.AppImage.zsync"
   }
-  $zsyncArtifactName = Resolve-GpAppImageArtifactNamePattern -Pattern $zsyncArtifactPattern -Package $package -VersionToken ([string]$package["version"])
-  $zsyncLookupPattern = Resolve-GpAppImageArtifactNamePattern -Pattern $zsyncArtifactPattern -Package $package -VersionToken "*"
+  $zsyncArtifactName = Resolve-GpAppImageArtifactNamePattern -Pattern $zsyncArtifactPattern -Package $package -VersionToken ([string]$package["version"]) -Architecture $architecture
+  $zsyncLookupPattern = Resolve-GpAppImageArtifactNamePattern -Pattern $zsyncArtifactPattern -Package $package -VersionToken "*" -Architecture $architecture
   $releaseSelector = if ($backendUpdates.Contains("releaseSelector") -and -not [string]::IsNullOrWhiteSpace([string]$backendUpdates["releaseSelector"])) {
     [string]$backendUpdates["releaseSelector"]
   } else {
@@ -527,6 +530,7 @@ function Get-GpAppImageConfig {
     IconName = $desktopEntryBaseName
     IconExtension = ([System.IO.Path]::GetExtension([string]$backend["iconRelativePath"]).TrimStart(".").ToLowerInvariant())
     AppImageToolRoot = Resolve-GpPathRelativeToBase -BasePath $Context.ToolRoot -Path ([string]$backend["toolRoot"])
+    Architecture = $architecture
     AppImageToolDownloadUrl = $downloadUrl
     AppImageToolFileName = $downloadLeaf
     SkipAppStreamValidation = [bool]$backend["skipAppStreamValidation"]
@@ -939,6 +943,13 @@ function Ensure-GpAppImageTool {
     [string]$LogPath
   )
 
+  # appimagetool, and the runtime taken from it, run only on their own CPU, so
+  # the build host must match the target architecture.
+  $hostArchitecture = Get-GpHostArchitecture
+  if ($Config.Architecture -ne $hostArchitecture) {
+    throw "backends.appimage.architecture is $($Config.Architecture), but this host is $hostArchitecture. Build $($Config.Architecture) AppImages on a $($Config.Architecture) host (for aarch64, a runner such as ubuntu-24.04-arm)."
+  }
+
   $command = Get-Command appimagetool -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($command) {
     return $command.Source
@@ -975,7 +986,9 @@ function Ensure-GpAppImageRuntimeFile {
   }
 
   Ensure-GpDirectory -Path $WorkPaths.DownloadRoot | Out-Null
-  $runtimePath = Join-Path $WorkPaths.DownloadRoot "runtime-x86_64"
+  # Named after the tool it comes from, so an x86_64 and an aarch64 runtime
+  # never share a cached file.
+  $runtimePath = Join-Path $WorkPaths.DownloadRoot ("runtime-" + [System.IO.Path]::GetFileNameWithoutExtension((Split-Path -Leaf $ToolPath)))
   if (Test-Path $runtimePath) {
     Set-GpUnixExecutable -Path $runtimePath
     return $runtimePath
@@ -1527,6 +1540,36 @@ function Get-GpAppImageMissingGuiTools {
   return [string[]]@($missing)
 }
 
+# The AppImage carries its own fontconfig or cairo but no font file. gnustep-back
+# then falls back to DejaVu Sans from the host, and a host without it (Fedora
+# installs Cantarell and Noto) leaves the app with no font: depending on the app
+# it draws no text, exits or crashes. Packaging can't tell whether the host's
+# fonts will do, so this is a warning that names the check that can.
+function Get-GpAppImageFontGap {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$AppDirRoot,
+    [AllowEmptyCollection()]
+    [object[]]$BundledFonts = @()
+  )
+
+  if (@($BundledFonts).Count -gt 0) {
+    return $null
+  }
+  $usrRoot = Join-Path $AppDirRoot "usr"
+  $fontLibraries = @(Get-ChildItem -Path $usrRoot -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^lib(fontconfig|cairo)\.so' } | ForEach-Object { $_.Name } | Sort-Object -Unique)
+  if ($fontLibraries.Count -eq 0) {
+    return $null
+  }
+  $fontFiles = @(Get-ChildItem -Path $usrRoot -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in @(".ttf", ".otf", ".ttc") } | Select-Object -First 1)
+  if ($fontFiles.Count -gt 0) {
+    return $null
+  }
+  return ("the AppImage bundles {0} but no font file and no backends.appimage.fonts.bundle. gnustep-back falls back to DejaVu Sans from the host; on a host without it (Fedora, for one) the app can draw no text, exit or crash. Bundle a font with backends.appimage.fonts.bundle, or check the result with the reusable workflow's appimage-clean-smoke-image (for example ""ubuntu:24.04 fedora:42"")." -f ($fontLibraries -join ", "))
+}
+
 function Write-GpAppImageGnustepConfig {
   param(
     [Parameter(Mandatory = $true)]
@@ -1716,11 +1759,32 @@ function Write-GpAppImageAppRun {
   $lines.Add("set -eu") | Out-Null
   $lines.Add('APPDIR="${APPDIR:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)}"') | Out-Null
   $lines.Add('USR="${APPDIR}/usr"') | Out-Null
+  # Save the caller's value of every variable this script changes, before it
+  # changes any, so gp-bin/xdg-open can start host programs (a browser, a file
+  # viewer) with the host's environment instead of the bundled libraries and
+  # GNUstep. A relaunch from inside the AppImage keeps the first launch's values.
+  $hostVariables = [System.Collections.Generic.List[string]]::new()
+  foreach ($name in @("PATH", "LD_LIBRARY_PATH", "GNUSTEP_CONFIG_FILE", "FONTCONFIG_FILE", "FONTCONFIG_PATH") + @($environment.Keys | Sort-Object)) {
+    if (-not $hostVariables.Contains([string]$name)) { $hostVariables.Add([string]$name) | Out-Null }
+  }
+  $lines.Add('if [ -z "${GP_HOST_VARS+x}" ]; then') | Out-Null
+  $lines.Add('  GP_HOST_UNSET=""') | Out-Null
+  foreach ($name in $hostVariables) {
+    $lines.Add(('  if [ -n "${' + $name + '+x}" ]; then export GP_HOST_' + $name + '="${' + $name + '}"; else GP_HOST_UNSET="$GP_HOST_UNSET ' + $name + '"; fi')) | Out-Null
+  }
+  $lines.Add(('  export GP_HOST_VARS="' + [string]::Join(" ", $hostVariables) + '" GP_HOST_UNSET')) | Out-Null
+  $lines.Add('  export GP_HOST_PWD="$(pwd)"') | Out-Null
+  $lines.Add('fi') | Out-Null
   $lines.Add(("APP_ROOT={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $Config.AppRootRelative))) | Out-Null
   $lines.Add(("RUNTIME_ROOT={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $Config.RuntimeRootRelative))) | Out-Null
   $lines.Add(("METADATA_ROOT={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $Config.MetadataRootRelative))) | Out-Null
   $lines.Add(("ENTRY_PATH={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $launch.EntryRelativePath))) | Out-Null
-  $lines.Add(("WORKING_DIRECTORY={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $launch.WorkingDirectory))) | Out-Null
+  if ($launch.WorkingDirectory -eq "{@callerDirectory}") {
+    # Stay in the caller's directory: an empty value skips the cd below.
+    $lines.Add('WORKING_DIRECTORY=""') | Out-Null
+  } else {
+    $lines.Add(("WORKING_DIRECTORY={0}" -f (Convert-GpAppImageStagePathToShellExpression -RelativePath $launch.WorkingDirectory))) | Out-Null
+  }
   # The cd below would make a relative argument such as Pictures/x.png resolve
   # inside the bundle, so make it absolute against the caller's directory
   # first. An argument is resolved when it exists there, or when it contains a
@@ -1817,6 +1881,7 @@ function Write-GpAppImageAppRun {
       $lines.Add(('PATH="' + $pathExpression + ':${PATH:-}"')) | Out-Null
     }
   }
+  $lines.Add('PATH="${APPDIR}/gp-bin:${PATH:-}"') | Out-Null
   $lines.Add('export PATH') | Out-Null
 
   $usesUserRuntimeDir = @(
@@ -1943,8 +2008,58 @@ function Write-GpAppImageAppRun {
 
   Set-Content -Path $appRunPath -Value $lines -Encoding ascii
   Set-GpUnixExecutable -Path $appRunPath
+  Write-GpAppImageHostToolWrappers -AppDirRoot $AppDirRoot -LogPath $LogPath
   Write-GpAppImageLogLine -LogPath $LogPath -Message ("Generated AppRun: {0}" -f $appRunPath)
   return $appRunPath
+}
+
+# gp-bin/xdg-open: AppRun puts gp-bin first on PATH, so a GNUstep app that
+# opens a URL or an unknown file (NSWorkspace falls back to xdg-open) reaches
+# this wrapper. It restores what AppRun saved as GP_HOST_*, leaves the
+# directory the app was started from as the working directory, drops the
+# AppImage runtime's variables and runs the host's xdg-open.
+function Write-GpAppImageHostToolWrappers {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$AppDirRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  $binRoot = Join-Path $AppDirRoot "gp-bin"
+  New-Item -ItemType Directory -Force -Path $binRoot | Out-Null
+  $wrapperPath = Join-Path $binRoot "xdg-open"
+  $wrapper = @(
+    '#!/bin/sh'
+    '# Generated by gnustep-packager: run the host''s xdg-open with the host''s'
+    '# environment, not the AppImage''s bundled libraries and GNUstep.'
+    'self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)'
+    'for gp_var in ${GP_HOST_VARS:-}; do'
+    '  case "$gp_var" in ""|*[!A-Za-z0-9_]*) continue ;; esac'
+    '  eval "if [ -n \"\${GP_HOST_${gp_var}+x}\" ]; then export ${gp_var}=\"\${GP_HOST_${gp_var}}\"; fi"'
+    'done'
+    'for gp_var in ${GP_HOST_UNSET:-}; do'
+    '  case "$gp_var" in ""|*[!A-Za-z0-9_]*) continue ;; esac'
+    '  unset "$gp_var"'
+    'done'
+    'if [ -n "${GP_HOST_PWD:-}" ]; then cd "$GP_HOST_PWD" 2>/dev/null || cd "${HOME:-/}" 2>/dev/null || cd /; fi'
+    'for gp_var in $(env | sed -n ''s/^\(GP_HOST_[A-Za-z0-9_]*\)=.*/\1/p''); do unset "$gp_var"; done'
+    'unset GP_HOST_VARS GP_HOST_UNSET GP_HOST_PWD APPDIR APPIMAGE ARGV0 OWD gp_var'
+    'gp_ifs=$IFS; IFS=:'
+    'for gp_dir in ${PATH:-/usr/local/bin:/usr/bin:/bin}; do'
+    '  IFS=$gp_ifs'
+    '  [ -n "$gp_dir" ] || continue'
+    '  [ -x "$gp_dir/xdg-open" ] || continue'
+    '  [ "$(CDPATH= cd -- "$gp_dir" 2>/dev/null && pwd -P)" = "$self_dir" ] && continue'
+    '  exec "$gp_dir/xdg-open" "$@"'
+    'done'
+    'IFS=$gp_ifs'
+    'printf ''xdg-open: not found on the host PATH\n'' >&2'
+    'exit 3'
+  )
+  Set-Content -Path $wrapperPath -Value $wrapper -Encoding ascii
+  Set-GpUnixExecutable -Path $wrapperPath
+  Write-GpAppImageLogLine -LogPath $LogPath -Message ("Generated host tool wrapper: {0}" -f $wrapperPath)
 }
 
 function Assert-GpAppImageAppDefaultsPrerequisites {
@@ -2004,6 +2119,11 @@ function Prepare-GpAppDir {
   $iconAssets = Copy-GpAppImageIconAssets -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
   $gnustepConfig = Write-GpAppImageGnustepConfig -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
   $fontNotices = @(Write-GpAppImageBundledFonts -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath)
+  $fontGap = Get-GpAppImageFontGap -AppDirRoot $WorkPaths.AppDirRoot -BundledFonts @($Config.BundledFonts)
+  if ($null -ne $fontGap) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("WARNING: " + $fontGap)
+    Write-Warning $fontGap
+  }
   $appRunPath = Write-GpAppImageAppRun -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath
   $noticeReport = Write-GpAppImageNoticeReport -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -LogPath $LogPath -AdditionalEntries $fontNotices
   $metadataRoot = Ensure-GpDirectory -Path (Join-Path (Join-Path $WorkPaths.AppDirRoot "usr") ($Config.MetadataRootRelative -replace "/", [System.IO.Path]::DirectorySeparatorChar))
@@ -2053,7 +2173,7 @@ function Build-GpAppImageArtifact {
   }
 
   $toolEnvironment = @{
-    ARCH = "x86_64"
+    ARCH = $Config.Architecture
     VERSION = $Config.Version
   }
   if ($ToolPath.EndsWith(".AppImage", [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -3050,6 +3170,29 @@ function Get-GpAppImageSmokeProcessIds {
 
 # Ends a smoke launch and everything it started: TERM, a short wait, then
 # KILL. Returns the processes still alive afterwards.
+# A process counts as running while /proc has it and it isn't a zombie. In a
+# container with no init to reap them, killed orphans stay as zombies, which
+# are already dead.
+function Test-GpProcessAlive {
+  param(
+    [Parameter(Mandatory = $true)]
+    [int]$ProcessId
+  )
+
+  $statPath = "/proc/{0}/stat" -f $ProcessId
+  if (-not (Test-Path $statPath)) {
+    return $false
+  }
+  try {
+    $stat = Get-Content -Raw -Path $statPath -ErrorAction Stop
+  } catch {
+    return $false
+  }
+  # The state follows the command name, which is in parentheses and may hold spaces.
+  $afterName = $stat.Substring($stat.LastIndexOf(")") + 1).TrimStart()
+  return -not $afterName.StartsWith("Z")
+}
+
 function Stop-GpAppImageSmokeProcess {
   param(
     [AllowNull()]
@@ -3064,13 +3207,13 @@ function Stop-GpAppImageSmokeProcess {
   }
 
   foreach ($signal in @("TERM", "KILL")) {
-    $alive = @($targets | Where-Object { Test-Path ("/proc/{0}" -f $_) })
+    $alive = @($targets | Where-Object { (Test-GpProcessAlive -ProcessId $_) })
     if ($alive.Count -eq 0) {
       break
     }
     & env kill ("-" + $signal) @($alive | ForEach-Object { [string]$_ }) 2>$null
     $deadline = (Get-Date).AddSeconds(3)
-    while ((Get-Date) -lt $deadline -and @($alive | Where-Object { Test-Path ("/proc/{0}" -f $_) }).Count -gt 0) {
+    while ((Get-Date) -lt $deadline -and @($alive | Where-Object { (Test-GpProcessAlive -ProcessId $_) }).Count -gt 0) {
       Start-Sleep -Milliseconds 100
     }
     # Pick up anything started while the first ones were stopping.
@@ -3084,7 +3227,7 @@ function Stop-GpAppImageSmokeProcess {
     }
   }
 
-  return [int[]]@($targets | Where-Object { Test-Path ("/proc/{0}" -f $_) })
+  return [int[]]@($targets | Where-Object { (Test-GpProcessAlive -ProcessId $_) })
 }
 
 function Complete-GpAppImageSmokeProcess {
@@ -3372,6 +3515,13 @@ function Invoke-GpAppImageValidation {
   }
 
   $runtimeClosureResult = Invoke-GpAppImageRuntimeClosureValidation -Config $config -ExpandedRoot $expandedRoot -LogPath $runtimeClosureLog
+  $caBundleStatus = Get-GpTlsCaBundleStatus -Context $Context -RootPath $expandedRoot
+  if ($caBundleStatus.Warning) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("WARNING: {0}" -f $caBundleStatus.Warning)
+    Write-Warning $caBundleStatus.Warning
+  } elseif ($caBundleStatus.Source) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("CA bundle: {0}" -f $caBundleStatus.Source)
+  }
   $installedContract = Invoke-GpPackageContractAssertions -Context $Context -Scope "installed" -Backend "appimage" -RootPath $expandedRoot
   foreach ($line in @($installedContract.Lines)) {
     Write-GpAppImageLogLine -LogPath $LogPath -Message ("Installed contract: {0}" -f $line)

@@ -1,0 +1,130 @@
+{
+  "$schema": "https://raw.githubusercontent.com/danjboyd/gnustep-packager/v0.1.10/schemas/gnustep-packager.schema.json",
+  "schemaVersion": 1,
+  "profiles": [
+    "gnustep-gui"
+  ],
+  "hostDependencies": {
+    "linux": {
+      "aptPackages": [
+        "imagemagick",
+        "file",
+        "fonts-dejavu-core"
+      ]
+    }
+  },
+  "package": {
+    "id": "org.gnustep.SystemPreferences",
+    "name": "SystemPreferences",
+    "displayName": "System Preferences",
+    "version": "1.2.1",
+    "manufacturer": "GNUstep",
+    "summary": "Preference panes for GNUstep.",
+    "license": "GPL-2.0-or-later",
+    "homepage": "https://github.com/gnustep/apps-SystemPreferences"
+  },
+  "pipeline": {
+    "workingDirectory": ".",
+    "shell": {
+      "kind": "bash",
+      "bootstrapCommands": [
+        ". \"${GP_GNUSTEP_CLI_ROOT:-/usr/GNUstep}/System/Library/Makefiles/GNUstep.sh\""
+      ],
+      "environment": {}
+    },
+    "build": {
+      "command": "./build-app.sh https://github.com/gnustep/apps-SystemPreferences.git systempreferences-1_2_1"
+    },
+    "stage": {
+      "command": "./stage-app.sh SystemPreferences dist/stage",
+      "outputRoot": "dist/stage"
+    }
+  },
+  "payload": {
+    "layoutVersion": 1,
+    "stageRoot": "dist/stage",
+    "appRoot": "app",
+    "runtimeRoot": "runtime",
+    "metadataRoot": "metadata"
+  },
+  "launch": {
+    "entryRelativePath": "app/SystemPreferences.app/SystemPreferences",
+    "workingDirectory": "app/SystemPreferences.app",
+    "arguments": [],
+    "pathPrepend": [
+      "runtime/bin",
+      "runtime/System/Tools"
+    ],
+    "env": {
+      "LD_LIBRARY_PATH": {
+        "value": "{@runtimeRoot}/lib:{@runtimeRoot}/System/Library/Libraries",
+        "policy": "prepend"
+      }
+    }
+  },
+  "outputs": {
+    "root": "dist",
+    "packageRoot": "dist/packages",
+    "logRoot": "dist/logs",
+    "tempRoot": "dist/tmp",
+    "validationRoot": "dist/validation"
+  },
+  "validation": {
+    "smoke": {
+      "enabled": true,
+      "kind": "staged-layout",
+      "requiredPaths": [
+        "metadata/icons/app.png"
+      ],
+      "timeoutSeconds": 30
+    },
+    "logs": {
+      "retainOnSuccess": true
+    }
+  },
+  "integrations": {
+    "shortcutName": "SystemPreferences",
+    "fileAssociations": []
+  },
+  "compliance": {
+    "runtimeNotices": [
+      {
+        "name": "SystemPreferences",
+        "license": "GPL-2.0-or-later",
+        "stageRelativePath": "metadata/licenses/SystemPreferences.txt"
+      }
+    ]
+  },
+  "backends": {
+    "msi": {
+      "enabled": false
+    },
+    "appimage": {
+      "enabled": true,
+      "desktopEntryName": "org.gnustep.SystemPreferences.desktop",
+      "iconRelativePath": "metadata/icons/app.png",
+      "gnustepConfig": {
+        "systemRoot": "runtime/System"
+      },
+      "smoke": {
+        "mode": "launch-only"
+      },
+      "fonts": {
+        "bundle": [
+          {
+            "name": "DejaVu",
+            "files": [
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+            ],
+            "licenseFile": "/usr/share/doc/fonts-dejavu-core/copyright",
+            "license": "Bitstream-Vera AND LicenseRef-DejaVu-public-domain",
+            "homepage": "https://dejavu-fonts.github.io/"
+          }
+        ]
+      }
+    }
+  }
+}

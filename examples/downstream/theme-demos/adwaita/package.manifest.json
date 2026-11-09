@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/danjboyd/gnustep-packager/v0.1.7/schemas/gnustep-packager.schema.json",
+  "$schema": "https://raw.githubusercontent.com/danjboyd/gnustep-packager/v0.1.10/schemas/gnustep-packager.schema.json",
   "schemaVersion": 1,
   "profiles": [
     "gnustep-gui"
@@ -112,7 +112,31 @@
       },
       "smoke": {
         "mode": "launch-only"
+      },
+      "fonts": {
+        "bundle": [
+          {
+            "name": "DejaVu",
+            "files": [
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+            ],
+            "licenseFile": "/usr/share/doc/fonts-dejavu-core/copyright",
+            "license": "Bitstream-Vera AND LicenseRef-DejaVu-public-domain",
+            "homepage": "https://dejavu-fonts.github.io/"
+          }
+        ]
       }
+    }
+  },
+  "hostDependencies": {
+    "linux": {
+      "aptPackages": [
+        "imagemagick",
+        "fonts-dejavu-core"
+      ]
     }
   }
 }

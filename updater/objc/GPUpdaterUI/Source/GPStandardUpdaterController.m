@@ -34,6 +34,7 @@ static NSString * const GPUpdaterHelperStatusManualActionRequired = @"manualActi
 - (void)_runRestartToFinishAlert:(id)unused;
 - (void)_runManualUpdateAlert:(NSDictionary *)info;
 - (void)_presentPreviousInstallOutcome;
+- (void)_discardUnappliedUpdate;
 - (void)_runInstallFailedAlert:(GPUpdaterApplyOutcome *)outcome;
 - (void)_openReleaseNotesURL:(NSURL *)releaseNotesURL;
 - (void)_beginPrepareForResult:(GPUpdateCheckResult *)result;
@@ -73,8 +74,32 @@ static BOOL GPUpdaterUIWriteJSONObject(NSDictionary *dictionary, NSString *path)
   return [data writeToFile:path atomically:YES];
 }
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+// The first executable xdg-open on PATH. In an AppImage that is the bundled
+// gp-bin/xdg-open, which restores the caller's environment before running
+// the host's.
+static NSString *GPUpdaterUIXDGOpenPath(void) {
+  NSString *path = [[[NSProcessInfo processInfo] environment] objectForKey:@"PATH"];
+  NSEnumerator *enumerator = [[path componentsSeparatedByString:@":"] objectEnumerator];
+  NSString *directory = nil;
+  while ((directory = [enumerator nextObject]) != nil) {
+    if ([directory length] == 0) {
+      continue;
+    }
+    NSString *candidate = [directory stringByAppendingPathComponent:@"xdg-open"];
+    if ([[NSFileManager defaultManager] isExecutableFileAtPath:candidate]) {
+      return candidate;
+    }
+  }
+  return nil;
+}
+#endif
+
 // Opens a URL with the system's handler. On win32, GNUstep's NSWorkspace
-// can't open http(s) URLs, so ShellExecuteW does it.
+// can't open http(s) URLs, so ShellExecuteW does it. Elsewhere outside
+// macOS it can't either: it looks for a GNUstep application or service for
+// the URL, finds none, and shows "Unable to use Application or Service to
+// open URL". xdg-open hands the URL to the desktop's browser instead.
 static BOOL GPUpdaterUIOpenURL(NSURL *url) {
   if (url == nil) {
     return NO;
@@ -90,7 +115,18 @@ static BOOL GPUpdaterUIOpenURL(NSURL *url) {
   int opened = GPUpdaterUIShellOpen((const wchar_t *)buffer);
   free(buffer);
   return opened != 0;
+#elif defined(__APPLE__)
+  return [[NSWorkspace sharedWorkspace] openURL:url];
 #else
+  NSString *xdgOpen = GPUpdaterUIXDGOpenPath();
+  if (xdgOpen != nil) {
+    @try {
+      [NSTask launchedTaskWithLaunchPath:xdgOpen arguments:[NSArray arrayWithObject:[url absoluteString]]];
+      return YES;
+    } @catch (NSException *exception) {
+      NSLog(@"GPUpdaterUI: could not run %@: %@", xdgOpen, [exception reason]);
+    }
+  }
   return [[NSWorkspace sharedWorkspace] openURL:url];
 #endif
 }
@@ -168,6 +204,7 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
 
 - (void)start {
   [self _presentPreviousInstallOutcome];
+  [self _discardUnappliedUpdate];
   [[self updater] start];
 }
 
@@ -317,6 +354,9 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
   }
   if ([asset edSignature] != nil) {
     [assetDictionary setObject:[asset edSignature] forKey:@"edSignature"];
+  }
+  if ([asset versionSignature] != nil) {
+    [assetDictionary setObject:[asset versionSignature] forKey:@"versionSignature"];
   }
   if ([asset zsyncURL] != nil) {
     NSDictionary *zsync = [NSDictionary dictionaryWithObject:[[asset zsyncURL] absoluteString] forKey:@"url"];
@@ -684,6 +724,27 @@ static NSDictionary *GPUpdaterUILoadJSONObject(NSString *path) {
   }
 
   [self _presentAlertDeferred:@selector(_runInstallFailedAlert:) withObject:outcome];
+}
+
+// An update prepared in an earlier session but not installed: the user chose
+// Later on "Restart to Finish Updating" and then quit. It isn't offered for
+// restart now. The launch checks the feed again, so a newer release is
+// picked up and the download is verified against the feed just before it's
+// installed. So the old download and its state go. A recorded apply request
+// means the app quit to install it; that is _presentPreviousInstallOutcome's.
+- (void)_discardUnappliedUpdate {
+  NSString *stateRoot = [self _helperStateRoot];
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  if ([fileManager fileExistsAtPath:[stateRoot stringByAppendingPathComponent:@"apply-request.json"]]) {
+    return;
+  }
+  NSDictionary *state = GPUpdaterUILoadJSONObject([stateRoot stringByAppendingPathComponent:@"update-state.json"]);
+  if (![GPUpdaterUIStringValue([state objectForKey:@"status"]) isEqualToString:GPUpdaterHelperStatusReadyToApply]) {
+    return;
+  }
+  [GPUpdaterApplyOutcome clearDirectory:stateRoot];
+  [fileManager removeItemAtPath:[stateRoot stringByAppendingPathComponent:@"downloads"] error:NULL];
+  [fileManager removeItemAtPath:[stateRoot stringByAppendingPathComponent:@"apply-appimage.sh"] error:NULL];
 }
 
 - (void)_runInstallFailedAlert:(GPUpdaterApplyOutcome *)outcome {
