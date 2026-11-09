@@ -86,7 +86,9 @@ $manifest = [ordered]@{
 $manifestPath = Join-Path $projectRoot "package.manifest.json"
 $manifest | ConvertTo-Json -Depth 30 | Set-Content -Path $manifestPath -Encoding utf8
 
-& (Join-Path $repoRoot "scripts\run-packaging-pipeline.ps1") -Manifest $manifestPath -Backend msi
+# The backend's own smoke check expects a GUI app that keeps running; this tool
+# fetches once and exits, so it's skipped. The cases below are the real check.
+& (Join-Path $repoRoot "scripts\run-packaging-pipeline.ps1") -Manifest $manifestPath -Backend msi -SkipBackendValidation
 if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) { throw "packaging failed" }
 $msi = Get-ChildItem (Join-Path $projectRoot "dist\packages") -Filter "*.msi" | Select-Object -First 1
 if ($null -eq $msi) { throw "no MSI was built" }
