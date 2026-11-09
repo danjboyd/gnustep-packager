@@ -1,0 +1,79 @@
+name: windows-tls-fresh-host
+
+# docs/windows-tls-fresh-host-check.md: an installed MSI fetches https after
+# the server's root is removed from the Windows store. It changes the runner's
+# trust store, so it runs only on this branch or by hand, never in default CI.
+on:
+  push:
+    branches:
+      - windows-tls-fresh-host
+  workflow_dispatch:
+
+jobs:
+  tls-fresh-host:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MSYS2 CLANG64 Prerequisites
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            curl
+            tar
+            gzip
+            make
+            mingw-w64-clang-x86_64-clang
+
+      - name: Expose MSYS2 Toolchain
+        run: |
+          "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          (Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'clang64\bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          (Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'usr\bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Bootstrap gnustep-cli-new (default pin)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          export GP_GNUSTEP_CLI_ROOT="$(cygpath -u '${{ runner.temp }}')/gnustep-cli-new"
+          export GP_GNUSTEP_CLI_LOG_ROOT="$(cygpath -u '${{ github.workspace }}')/dist/logs/gnustep-cli-new"
+          export GP_GNUSTEP_CLI_SMOKE_ROOT="$(cygpath -u '${{ runner.temp }}')/gnustep-cli-new-smoke"
+          export GP_GNUSTEP_CLI_HOST_KIND="windows-msys2-clang64"
+          ./scripts/ci/gnustep-cli-new-bootstrap-smoke.sh
+          echo "GP_GNUSTEP_CLI_ROOT=$(cygpath -w "${GP_GNUSTEP_CLI_ROOT}")" >> "$GITHUB_ENV"
+
+      - name: Build gp-tls-fetch
+        # In the toolchain's own MSYS2 root, where GNUstep.sh finds /clang64.
+        run: |
+          $root = $env:GP_GNUSTEP_CLI_ROOT
+          $envExe = Join-Path $root "usr\bin\env.exe"
+          if (-not (Test-Path $envExe)) { throw "No env.exe in the toolchain root $root" }
+          $repo = (Resolve-Path .).Path
+          $bootstrap = "if [ -f /etc/profile ]; then source /etc/profile; fi; source /clang64/share/GNUstep/Makefiles/GNUstep.sh; cd `"`$(cygpath -u '$repo')`" && make -C tests/fixtures/windows-tls-fetch && ls -l tests/fixtures/windows-tls-fetch/obj"
+          & $envExe MSYSTEM=CLANG64 CHERE_INVOKING=1 /usr/bin/bash -lc $bootstrap
+          if ($LASTEXITCODE -ne 0) { throw "gp-tls-fetch did not build (exit $LASTEXITCODE)" }
+
+      - name: Run the fresh-host cases
+        run: |
+          $tool = Get-ChildItem tests/fixtures/windows-tls-fetch/obj -Recurse -Filter "gp-tls-fetch.exe" | Select-Object -First 1
+          if (-not $tool) { throw "gp-tls-fetch.exe was not built" }
+          ./scripts/ci/windows-tls-fresh-host.ps1 -ToolPath $tool.FullName -ToolchainClangRoot (Join-Path $env:GP_GNUSTEP_CLI_ROOT "clang64") -WorkRoot (Join-Path $env:RUNNER_TEMP "gp-tls")
+
+      - name: Upload results and logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-tls-fresh-host
+          path: |
+            ${{ runner.temp }}/gp-tls/results.json
+            ${{ runner.temp }}/gp-tls/install.log
+            ${{ runner.temp }}/gp-tls/project/dist/logs/**
+          if-no-files-found: ignore
