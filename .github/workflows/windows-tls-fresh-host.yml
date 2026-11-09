@@ -62,6 +62,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "gp-tls-fetch did not build (exit $LASTEXITCODE)" }
 
       - name: Run the fresh-host cases
+        # Shorter than the job, so the results and logs still upload on a hang.
+        timeout-minutes: 30
         run: |
           $tool = Get-ChildItem tests/fixtures/windows-tls-fetch/obj -Recurse -Filter "gp-tls-fetch.exe" | Select-Object -First 1
           if (-not $tool) { throw "gp-tls-fetch.exe was not built" }
@@ -74,6 +76,8 @@ jobs:
           name: windows-tls-fresh-host
           path: |
             ${{ runner.temp }}/gp-tls/results.json
+            ${{ runner.temp }}/gp-tls/progress.log
+            ${{ runner.temp }}/gp-tls/result-*.txt
             ${{ runner.temp }}/gp-tls/install.log
             ${{ runner.temp }}/gp-tls/project/dist/logs/**
           if-no-files-found: ignore
