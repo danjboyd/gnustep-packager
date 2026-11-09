@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+- Docs: the AppImage's `GP_HOST_*` variables (the caller's environment, saved
+  by `AppRun` since v0.1.9) are now a documented interface, in "AppImage: the
+  Caller's Environment" in `docs/launch-contract.md`. It covers which variables
+  are saved, set versus empty versus unset, relaunching, and how to restore the
+  caller's environment for a child process. Behavior is unchanged; a new test
+  checks what the app itself receives.
+
 ## v0.1.10
 
 ### Upgrading
