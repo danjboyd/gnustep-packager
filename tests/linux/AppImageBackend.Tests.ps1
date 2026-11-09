@@ -527,6 +527,74 @@ Describe "AppImage backend" {
       }
     }
 
+    It "passes the caller's environment to the app as GP_HOST_*" {
+      # docs/launch-contract.md describes this as a stable interface: set
+      # (even empty) becomes GP_HOST_<name>, unset goes into GP_HOST_UNSET, a
+      # prepend key that was unset also gets an empty GP_HOST_<name>, and a
+      # relaunch from inside the AppImage keeps the first launch's values.
+      $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-host-contract-" + [guid]::NewGuid().ToString("N"))
+      try {
+        $appDir = Join-Path $tempRoot "AppDir"
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        & cp -a $script:packageResult.AppDirRoot $appDir
+        $appRun = Join-Path $appDir "AppRun"
+        $entryPath = Join-Path $appDir "usr/app/SampleGNUstepLinuxApp.app/SampleGNUstepLinuxApp"
+        Set-Content -Path $entryPath -Value @(
+          '#!/bin/sh'
+          'if [ "${GP_TEST_RELAUNCH:-}" = 1 ]; then GP_TEST_RELAUNCH=2 GNUSTEP_CONFIG_FILE=/inner/GNUstep.conf exec "$GP_TEST_APPRUN"; fi'
+          'printf ''conf=%s\n'' "${GNUSTEP_CONFIG_FILE-<unset>}"'
+          'printf ''host_conf=%s\n'' "${GP_HOST_GNUSTEP_CONFIG_FILE-<unset>}"'
+          'printf ''host_xdg=%s\n'' "${GP_HOST_XDG_DATA_DIRS-<unset>}"'
+          'printf ''unset=%s\n'' "$(echo ${GP_HOST_UNSET-<unset>})"'
+          'printf ''vars=%s\n'' "${GP_HOST_VARS-<unset>}"'
+          'printf ''pwd=%s\n'' "${GP_HOST_PWD-<unset>}"'
+        )
+        Set-GpUnixExecutable -Path $entryPath
+
+        $callerDir = Join-Path $tempRoot "home"
+        New-Item -ItemType Directory -Force -Path $callerDir | Out-Null
+
+        function Invoke-GpContractAppRun {
+          param([string[]]$Environment)
+          $envArgs = @("-i", "HOME=$tempRoot", "PATH=/usr/bin:/bin", "GP_TEST_APPRUN=$appRun") + $Environment
+          $output = @(& env @envArgs sh -c 'cd "$1" && shift && exec "$@"' sh $callerDir $appRun 2>&1 | ForEach-Object { [string]$_ })
+          Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message ("AppRun should succeed. Output: " + [string]::Join("`n", $output))
+          $values = @{}
+          foreach ($line in $output) {
+            if ($line -match '^(conf|host_conf|host_xdg|unset|vars|pwd)=(.*)$') { $values[$Matches[1]] = $Matches[2] }
+          }
+          return $values
+        }
+
+        $set = Invoke-GpContractAppRun -Environment @("GNUSTEP_CONFIG_FILE=/host/GNUstep.conf", "XDG_DATA_DIRS=/host/share")
+        Assert-GpTrue -Condition ($set.conf -like "$appDir/*") -Message "The app should run with the bundled GNUstep.conf. Got: $($set.conf)"
+        Assert-GpEqual -Actual $set.host_conf -Expected "/host/GNUstep.conf" -Message "GP_HOST_GNUSTEP_CONFIG_FILE should hold the caller's value."
+        Assert-GpEqual -Actual $set.host_xdg -Expected "/host/share" -Message "A prepend key should keep the caller's value in GP_HOST_<key>."
+        Assert-GpTrue -Condition (-not (" $($set.unset) " -match ' (GNUSTEP_CONFIG_FILE|XDG_DATA_DIRS) ')) -Message "Set variables shouldn't be in GP_HOST_UNSET. Got: $($set.unset)"
+        foreach ($name in @("PATH", "LD_LIBRARY_PATH", "GNUSTEP_CONFIG_FILE", "FONTCONFIG_FILE", "FONTCONFIG_PATH", "XDG_DATA_DIRS", "GSTheme")) {
+          Assert-GpTrue -Condition ((" " + $set.vars + " ") -like "* $name *") -Message "GP_HOST_VARS should list $name. Got: $($set.vars)"
+        }
+        Assert-GpEqual -Actual $set.pwd -Expected $callerDir -Message "GP_HOST_PWD should be the caller's directory."
+
+        $empty = Invoke-GpContractAppRun -Environment @("GNUSTEP_CONFIG_FILE=")
+        Assert-GpEqual -Actual $empty.host_conf -Expected "" -Message "An empty caller value should be saved as an empty GP_HOST_<name>, not as unset."
+        Assert-GpTrue -Condition (-not (" $($empty.unset) " -like "* GNUSTEP_CONFIG_FILE *")) -Message "An empty caller value shouldn't be in GP_HOST_UNSET. Got: $($empty.unset)"
+
+        $unset = Invoke-GpContractAppRun -Environment @()
+        Assert-GpEqual -Actual $unset.host_conf -Expected "<unset>" -Message "An unset caller value should leave GP_HOST_<name> unset."
+        Assert-GpTrue -Condition ((" $($unset.unset) " -like "* GNUSTEP_CONFIG_FILE *") -and (" $($unset.unset) " -like "* XDG_DATA_DIRS *")) -Message "Unset caller values should be in GP_HOST_UNSET. Got: $($unset.unset)"
+        Assert-GpEqual -Actual $unset.host_xdg -Expected "" -Message "An unset prepend key also gets an empty GP_HOST_<key>, which is why GP_HOST_UNSET is read first."
+
+        $relaunch = Invoke-GpContractAppRun -Environment @("GNUSTEP_CONFIG_FILE=/host/GNUstep.conf", "GP_TEST_RELAUNCH=1")
+        Assert-GpEqual -Actual $relaunch.host_conf -Expected "/host/GNUstep.conf" -Message "A relaunch from inside the AppImage should keep the first launch's GP_HOST_* values."
+        Assert-GpTrue -Condition ($relaunch.conf -like "$appDir/*") -Message "The relaunched app should still run with the bundled GNUstep.conf. Got: $($relaunch.conf)"
+      } finally {
+        if (Test-Path $tempRoot) {
+          Remove-Item -Recurse -Force $tempRoot
+        }
+      }
+    }
+
     It "resolves relative path arguments against the caller's directory, not the working directory" {
       $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-appimage-relative-args-" + [guid]::NewGuid().ToString("N"))
       try {
