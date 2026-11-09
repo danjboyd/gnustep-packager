@@ -2459,6 +2459,13 @@ function Invoke-GpMsiValidation {
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed launcher path: {0}" -f $launcherPath)
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed app path: {0}" -f $appPath)
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed runtime path: {0}" -f $runtimePath)
+  $caBundleStatus = Get-GpTlsCaBundleStatus -Context $Context -RootPath $installPath
+  if ($caBundleStatus.Warning) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("WARNING: {0}" -f $caBundleStatus.Warning)
+    Write-Warning $caBundleStatus.Warning
+  } elseif ($caBundleStatus.Source) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("CA bundle: {0}" -f $caBundleStatus.Source)
+  }
   $installedContract = Invoke-GpPackageContractAssertions -Context $Context -Scope "installed" -Backend "msi" -RootPath $installPath
   foreach ($line in @($installedContract.Lines)) {
     Write-GpMsiLogLine -LogPath $LogPath -Message ("Installed contract: {0}" -f $line)

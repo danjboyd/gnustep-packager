@@ -17,19 +17,35 @@ Change `@v0.1.9` to `@v0.1.10` in your `uses:` lines. Then:
 - **A new packaging warning: no fonts.** An AppImage that bundles fontconfig
   or cairo but no font now warns. Set `backends.appimage.fonts.bundle`, or
   check the result with `appimage-clean-smoke-image: "ubuntu:24.04 fedora:42"`.
-- **(With #96/#102, once gnustep-cli v0.1.5 publishes.)** The default toolchain
-  moves to gnustep-cli-new v0.1.5, whose gnustep-base verifies TLS hosts
-  strictly. An app that fetches https needs a CA bundle in the package, or
-  `GS_TLS_CA_FILE`. Validation warns when neither is there; see "Strict TLS" in
-  `docs/gnustep-cli-new-integration.md`.
+- **The default toolchain is gnustep-cli-new v0.1.5, whose gnustep-base
+  verifies TLS hosts strictly.** An app that fetches https needs a CA bundle in
+  the package, or `GS_TLS_CA_FILE`. Validation now warns when neither is there;
+  see "Strict TLS" in `docs/gnustep-cli-new-integration.md`.
+
+### Changed
+- The default toolchain is gnustep-cli-new v0.1.5 (was v0.1.3): the reusable
+  workflow's manifest and bootstrap defaults (with the new bootstrap digests),
+  the repo's CI, the examples and the docs. Its gnustep-base verifies TLS hosts
+  strictly, so an app that fetches https needs trusted authorities it can read:
+  see "Strict TLS" in `docs/gnustep-cli-new-integration.md`. The arm64
+  toolchain is still published for Debian only (ICU 76, glibc 2.41).
 
 ### Added
+- AppImage and MSI validation warn when an app that fetches https has no CA
+  bundle in the package and no `GS_TLS_CA_FILE`, `SSL_CERT_FILE` or `GSTLSCAFile`
+  setting. `validation.fetchesHttps` declares whether an app does; it defaults
+  to `updates.enabled`.
+- Reusable workflow: `container-appimage` now works with a plain Debian or
+  Ubuntu image, such as `debian:trixie` for aarch64 AppImages on
+  `ubuntu-24.04-arm`. When the image has no PowerShell, a first step installs
+  it with git, ICU and the AppImage tools, and apt runs without `sudo` as root.
+  See "aarch64 (arm64) AppImages" in `docs/github-actions.md`.
 - AppImage backend: aarch64 AppImages. `backends.appimage.architecture`
   (`x86_64` or `aarch64`, defaulting to the build host's) picks the
   appimagetool and runtime, `ARCH`, the `{arch}` token in the artifact, zsync
   and download names, and the update feed's platform (`linux-arm64`). Build an
   aarch64 AppImage on an aarch64 host; a mismatch stops packaging. The
-  gnustep-cli-new arm64 toolchain (v0.1.3 and v0.1.4) is published for Debian
+  gnustep-cli-new arm64 toolchain (v0.1.3 to v0.1.5) is published for Debian
   only (ICU 76, glibc 2.41), so CI builds in a `debian:trixie` container on
   `ubuntu-24.04-arm`. The result needs at least the glibc it was built against.
 - AppImage backend: packaging warns when the AppImage bundles libfontconfig or
@@ -39,6 +55,12 @@ Change `@v0.1.9` to `@v0.1.10` in your `uses:` lines. Then:
   `fonts.bundle` and to the `appimage-clean-smoke-image` check.
 
 ### Fixed
+- Updater UI on Linux: View Changes in the update dialog now opens the release
+  notes in the desktop's browser with `xdg-open`. Every release before this one
+  called `-[NSWorkspace openURL:]`, which in an AppImage finds no GNUstep
+  application for the URL and shows "Unable to use Application or Service to
+  open URL". In an AppImage built with v0.1.9 or later, `xdg-open` is the
+  bundled wrapper, which runs the host's with the host's environment.
 - Examples: the gnustep-apps and Adwaita theme-demo AppImages now start on hosts
   without DejaVu Sans (Fedora): their manifests bundle DejaVu Sans and Sans Mono
   through `backends.appimage.fonts.bundle`. The Adwaita stage script no longer

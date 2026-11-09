@@ -3515,6 +3515,13 @@ function Invoke-GpAppImageValidation {
   }
 
   $runtimeClosureResult = Invoke-GpAppImageRuntimeClosureValidation -Config $config -ExpandedRoot $expandedRoot -LogPath $runtimeClosureLog
+  $caBundleStatus = Get-GpTlsCaBundleStatus -Context $Context -RootPath $expandedRoot
+  if ($caBundleStatus.Warning) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("WARNING: {0}" -f $caBundleStatus.Warning)
+    Write-Warning $caBundleStatus.Warning
+  } elseif ($caBundleStatus.Source) {
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("CA bundle: {0}" -f $caBundleStatus.Source)
+  }
   $installedContract = Invoke-GpPackageContractAssertions -Context $Context -Scope "installed" -Backend "appimage" -RootPath $expandedRoot
   foreach ($line in @($installedContract.Lines)) {
     Write-GpAppImageLogLine -LogPath $LogPath -Message ("Installed contract: {0}" -f $line)
