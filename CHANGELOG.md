@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## v0.1.10
+
+### Upgrading
+Change `@v0.1.9` to `@v0.1.10` in your `uses:` lines. Then:
+
+- **The update dialog's View Changes button now works on Linux.** It needs no
+  change in your app, only a rebuild with this release. Copies built before it
+  still show "Unable to use Application or Service to open URL".
+- **aarch64 AppImages.** Build on an aarch64 runner. gnustep-cli-new's arm64
+  toolchain is Debian-only, so use `runs-on-appimage: '["ubuntu-24.04-arm"]'`
+  and `container-appimage: debian:trixie`. Feeds with both architectures go
+  through `scripts/merge-update-feeds.ps1`, x64 first.
+- **A new packaging warning: no fonts.** An AppImage that bundles fontconfig
+  or cairo but no font now warns. Set `backends.appimage.fonts.bundle`, or
+  check the result with `appimage-clean-smoke-image: "ubuntu:24.04 fedora:42"`.
+- **The default toolchain is gnustep-cli-new v0.1.5, whose gnustep-base
+  verifies TLS hosts strictly.** An app that fetches https needs a CA bundle in
+  the package, or `GS_TLS_CA_FILE`. Validation now warns when neither is there;
+  see "Strict TLS" in `docs/gnustep-cli-new-integration.md`.
+
 ### Changed
 - The default toolchain is gnustep-cli-new v0.1.5 (was v0.1.3): the reusable
   workflow's manifest and bootstrap defaults (with the new bootstrap digests),
