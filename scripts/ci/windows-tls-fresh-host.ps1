@@ -144,8 +144,11 @@ function Get-GpChainRoot {
     if (-not $client.ConnectAsync($uri.Host, 443).Wait(20000)) { throw "connect timed out" }
     $client.ReceiveTimeout = 20000
     $client.SendTimeout = 20000
-    $ssl = [System.Net.Security.SslStream]::new($client.GetStream(), $false, { param($s, $c, $ch, $e) $true })
-    if (-not $ssl.AuthenticateAsClientAsync($uri.Host).Wait(20000)) { throw "TLS handshake timed out" }
+    # No validation callback: a PowerShell script block can't run on the thread
+    # .NET calls it from. The probe runs before the root is removed, so the
+    # default validation passes. The socket timeouts above bound the handshake.
+    $ssl = [System.Net.Security.SslStream]::new($client.GetStream(), $false)
+    $ssl.AuthenticateAsClient($uri.Host)
     $leaf = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($ssl.RemoteCertificate)
     $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
     $chain.ChainPolicy.RevocationMode = "NoCheck"
@@ -271,7 +274,7 @@ foreach ($url in $CandidateUrls) {
 $results | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $WorkRoot "results.json") -Encoding utf8
 $results | Format-List | Out-String -Width 400 | Write-Host
 
-if (-not $isolated) { Write-GpStep "No candidate URL isolated a root: every control case passed or no root was in the bundle."; exit 1 }
+if (-not $isolated) { Write-GpStep "No candidate URL isolated a root (see the lines above: no chain, root not in the bundle, or the control case passed)."; exit 1 }
 $last = $results[$results.Count - 1]
 if ($last.Bundled.StartsWith("PASS") -and $last.EnvFile.StartsWith("PASS")) {
   Write-GpStep "RESULT: the bundled CA file let the installed app fetch $($last.Url) with its root removed from the store."
