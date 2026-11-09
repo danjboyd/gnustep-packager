@@ -65,7 +65,7 @@ $noop = "Write-Host 'prebuilt by windows-tls-fresh-host.ps1'"
 $manifest = [ordered]@{
   schemaVersion = 1
   package = [ordered]@{ id = "org.gnustep-packager.TlsFetchCheck"; name = "GpTlsFetch"; displayName = "GP TLS Fetch Check"; version = "0.1.0"; manufacturer = "gnustep-packager tests"; summary = "Fetches one https URL (fresh-host TLS check)."; license = "LGPL-2.1-or-later" }
-  pipeline = [ordered]@{ workingDirectory = "."; shell = [ordered]@{ kind = "pwsh"; bootstrapCommands = @() }; build = [ordered]@{ command = $noop }; stage = [ordered]@{ command = $noop; outputRoot = "dist/stage" } }
+  pipeline = [ordered]@{ workingDirectory = "."; shell = [ordered]@{ kind = "pwsh"; bootstrapCommands = @(); environment = [ordered]@{} }; build = [ordered]@{ command = $noop }; stage = [ordered]@{ command = $noop; outputRoot = "dist/stage" } }
   payload = [ordered]@{ layoutVersion = 1; stageRoot = "dist/stage"; appRoot = "app"; runtimeRoot = "runtime"; metadataRoot = "metadata" }
   launch = [ordered]@{ entryRelativePath = "app/gp-tls-fetch.exe"; workingDirectory = "."; arguments = @(); pathPrepend = @("runtime/bin"); env = [ordered]@{} }
   outputs = [ordered]@{ root = "dist"; packageRoot = "dist/packages"; logRoot = "dist/logs"; tempRoot = "dist/tmp"; validationRoot = "dist/validation" }
