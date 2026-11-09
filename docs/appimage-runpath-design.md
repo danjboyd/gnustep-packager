@@ -1,6 +1,6 @@
 # AppImage RUNPATH Design (proposed)
 
-Status: agreed as an opt-in for after v0.1.9. Not implemented.
+Status: proposed as an opt-in. Not scheduled and not implemented.
 
 ## Problem
 
@@ -12,9 +12,11 @@ the libraries that do the most harm there: `libssl`, `libgnutls`,
 `libp11-kit`, `libGL`/`libGLX`/`libGLdispatch`, `libdrm`, `libstdc++`,
 `libgcc_s` and ICU.
 
-The near-term fix is in `AppRun`: it saves the caller's environment as
-`GP_HOST_*`, and an `xdg-open` wrapper restores it. That covers opening URLs
-and files, but not every process an app may start. This document is about
+Since v0.1.9, `AppRun` saves the caller's environment as `GP_HOST_*`, and
+the bundled `gp-bin/xdg-open` restores it (see "AppImage: the Caller's
+Environment" in `launch-contract.md`). That covers opening URLs and files, and
+an app can restore the same way for programs it starts itself, but nothing
+does it for them automatically. This document is about
 removing the bundled paths from the environment altogether.
 
 ## Proposal
@@ -79,7 +81,7 @@ Setting it on the executable alone isn't enough.
   `scripts/run-gui-isolated.sh`.
 - Clean-smoke containers (`ubuntu:24.04`, `fedora:42`) through
   `appimage-clean-smoke-image`, including GL on Fedora.
-- The `xdg-open` test from the near-term fix: no bundled paths in the child's
+- The `xdg-open` test from v0.1.9: no bundled paths in the child's
   `LD_LIBRARY_PATH`.
 - A startup with `LD_DEBUG=libs`, to confirm libraries resolve through
   RUNPATH.
