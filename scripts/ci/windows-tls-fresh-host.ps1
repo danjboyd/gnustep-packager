@@ -206,6 +206,12 @@ function Invoke-GpCase {
   $resultFile = Join-Path $WorkRoot "result-$tag.txt"
   $stdout = Join-Path $WorkRoot "result-$tag.stdout.txt"
   $stderr = Join-Path $WorkRoot "result-$tag.stderr.txt"
+  # The launcher starts the app and exits without waiting; its own errors go
+  # to this file.
+  $launcherLog = Join-Path $WorkRoot "result-$tag.launcher.txt"
+  $Environment = @{} + $Environment
+  $Environment["GP_LAUNCHER_ERROR_LOG"] = $launcherLog
+  $Environment["GP_LAUNCHER_NONINTERACTIVE"] = "1"
   $saved = @{}
   foreach ($k in $Environment.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $Environment[$k]) }
   $proc = $null
@@ -219,10 +225,14 @@ function Invoke-GpCase {
   } finally {
     foreach ($k in $Environment.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
   }
-  $state = if ($proc.HasExited) { "exit $($proc.ExitCode)" } else { "still running at 120 s" }
+  $state = if ($proc.HasExited) { "$(Split-Path -Leaf $Executable) exit $($proc.ExitCode)" } else { "still running at 120 s" }
   Stop-GpCaseProcesses -Proc $proc
-  if (Test-Path $resultFile) { return (Get-Content -Raw $resultFile).Trim() }
-  $err = if (Test-Path $stderr) { ((Get-Content -Raw $stderr) -replace "\s+", " ").Trim() } else { "" }
+  if (Test-Path $resultFile) { return ([string](Get-Content -Raw $resultFile)).Trim() }
+  $err = ""
+  foreach ($f in @($stderr, $launcherLog)) {
+    if (Test-Path $f) { $err += " " + ([string](Get-Content -Raw $f) -replace "\s+", " ") }
+  }
+  $err = $err.Trim()
   if ($err.Length -gt 300) { $err = $err.Substring(0, 300) }
   return "FAIL no result ($state; stderr: $err)"
 }
