@@ -69,6 +69,29 @@ $baseDll = Get-ChildItem -Path (Join-Path $ToolchainClangRoot "bin") -Filter "gn
 if ($null -eq $baseDll) { throw "No gnustep-base DLL in $ToolchainClangRoot\bin" }
 Copy-Item -Force $baseDll.FullName (Join-Path $stageRoot "runtime\bin")
 Write-GpStep "staged $($baseDll.Name)"
+# gnustep-base starts gdnc when the URL loading system first posts a
+# distributed notification, and throws "Unable to find the gdnc tool" without
+# it. Stage it as a real Windows package does (runtime\System\Tools), with a
+# GNUstep.conf next to the DLL that points the tools and libraries into the
+# package. The closure analysis copies gdnc's DLLs as it does the app's.
+$systemTools = Join-Path $stageRoot "runtime\System\Tools"
+New-Item -ItemType Directory -Force -Path $systemTools | Out-Null
+$gdnc = Join-Path $ToolchainClangRoot "bin\gdnc.exe"
+if (-not (Test-Path $gdnc)) { throw "No gdnc.exe in $ToolchainClangRoot\bin" }
+Copy-Item -Force $gdnc $systemTools
+Set-Content -Path (Join-Path $stageRoot "runtime\bin\GNUstep.conf") -Encoding ascii -Value @(
+  "GNUSTEP_USER_CONFIG_FILE=",
+  "GNUSTEP_SYSTEM_ROOT=../System",
+  "GNUSTEP_LOCAL_ROOT=../System",
+  "GNUSTEP_NETWORK_ROOT=../System",
+  "GNUSTEP_SYSTEM_LIBRARY=../lib/GNUstep",
+  "GNUSTEP_NETWORK_LIBRARY=../lib/GNUstep",
+  "GNUSTEP_LOCAL_LIBRARY=../lib/GNUstep",
+  "GNUSTEP_SYSTEM_TOOLS=../System/Tools",
+  "GNUSTEP_NETWORK_TOOLS=../System/Tools",
+  "GNUSTEP_LOCAL_TOOLS=../System/Tools"
+)
+Write-GpStep "staged gdnc.exe and runtime\bin\GNUstep.conf"
 Set-Content -Path (Join-Path $stageRoot "metadata\licenses\gp-tls-fetch.txt") -Value "gp-tls-fetch test fixture. GNUstep libraries: LGPL-2.1-or-later."
 
 $stagedBundle = Get-ChildItem -Path (Join-Path $stageRoot "runtime\lib\GNUstep") -Recurse -Filter "ca-certificates.crt" |
@@ -89,7 +112,7 @@ $manifest = [ordered]@{
   payload = [ordered]@{ layoutVersion = 1; stageRoot = "dist/stage"; appRoot = "app"; runtimeRoot = "runtime"; metadataRoot = "metadata" }
   launch = [ordered]@{ entryRelativePath = "app/gp-tls-fetch.exe"; workingDirectory = "."; arguments = @(); pathPrepend = @("runtime/bin"); env = [ordered]@{} }
   outputs = [ordered]@{ root = "dist"; packageRoot = "dist/packages"; logRoot = "dist/logs"; tempRoot = "dist/tmp"; validationRoot = "dist/validation" }
-  validation = [ordered]@{ fetchesHttps = $true; smoke = [ordered]@{ enabled = $false; kind = "staged-layout"; requiredPaths = @("app/gp-tls-fetch.exe"); timeoutSeconds = 30 }; logs = [ordered]@{ retainOnSuccess = $true } }
+  validation = [ordered]@{ fetchesHttps = $true; smoke = [ordered]@{ enabled = $false; kind = "staged-layout"; requiredPaths = @("app/gp-tls-fetch.exe", "runtime/System/Tools/gdnc.exe", "runtime/bin/GNUstep.conf"); timeoutSeconds = 30 }; logs = [ordered]@{ retainOnSuccess = $true } }
   compliance = [ordered]@{ runtimeNotices = @([ordered]@{ name = "gp-tls-fetch"; license = "LGPL-2.1-or-later"; source = "tests/fixtures/windows-tls-fetch"; stageRelativePath = "metadata/licenses/gp-tls-fetch.txt" }) }
   backends = [ordered]@{
     msi = [ordered]@{ enabled = $true; upgradeCode = "5b0e6f0e-3a43-4d55-9c55-7d2f1a6e0c11"; installScope = "perUser"; productName = "GP TLS Fetch Check"; installDirectoryName = "GpTlsFetch"; launcherFileName = "GpTlsFetch.exe"; runtimeSearchRoots = @((Join-Path $ToolchainClangRoot "bin")) }
