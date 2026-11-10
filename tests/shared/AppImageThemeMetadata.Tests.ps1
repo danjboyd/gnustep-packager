@@ -312,6 +312,23 @@ Describe "AppImage theme metadata" {
   }
 
   Context "the seeding AppRun does on every launch" {
+    It "hands AppRun one line per shell statement" {
+      $defaults = [pscustomobject]@{
+        Domain = "org.example.App"
+        Entries = @(
+          [pscustomobject]@{ Key = "GSTheme"; Type = "string"; Value = "Adwaita"; SerializedValue = '"Adwaita"' },
+          [pscustomobject]@{ Key = "Other"; Type = "bool"; Value = $true; SerializedValue = "YES" }
+        )
+      }
+      # Enumerated the way Write-GpAppImageAppRun does.
+      $collected = [System.Collections.Generic.List[string]]::new()
+      foreach ($line in @(Get-GpAppImageDefaultsSeedLines -AppDefaults $defaults)) { $collected.Add($line) | Out-Null }
+      $collected.Count | Should -Be 6
+      $collected[0] | Should -Match '^if ! "\$APP_DEFAULTS_TOOL" read .*GSTheme.* >/dev/null 2>&1; then$'
+      $collected[1] | Should -Match '^  "\$APP_DEFAULTS_TOOL" write .*"GSTheme" "\\"Adwaita\\""'
+      $collected[2] | Should -Be "fi"
+    }
+
     It "writes GSTheme only when absent: kept when the user changes it, back after the user removes it" -Skip:($IsWindows) {
       $store = Join-Path $script:root "defaults-store"
       New-Item -ItemType Directory -Force -Path $store | Out-Null

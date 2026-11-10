@@ -1157,7 +1157,9 @@ function Get-GpAppImageDefaultsSeedLines {
     $lines.Add(('  "$APP_DEFAULTS_TOOL" write ' + $domainLiteral + ' ' + $keyLiteral + ' ' + $valueLiteral + ' >/dev/null 2>&1')) | Out-Null
     $lines.Add('fi') | Out-Null
   }
-  return ,[string[]]$lines.ToArray()
+  # Plain array: callers enumerate it (AppRun adds each line). A leading comma
+  # here would hand them one string[] item, which joins into a single line.
+  return [string[]]$lines.ToArray()
 }
 
 function Assert-GpAppImageEnvironmentKeys {
