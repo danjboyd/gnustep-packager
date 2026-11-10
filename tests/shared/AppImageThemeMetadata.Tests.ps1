@@ -277,6 +277,19 @@ Describe "AppImage theme metadata" {
     }
   }
 
+  Context "the package contract's provisioned themes" {
+    It "counts themeInputs and v1 entries as provisioned, not themes a stage script copied in" {
+      $report = [ordered]@{ formatVersion = 2; themes = @(
+        [ordered]@{ name = "FromInputs"; origin = "themeInputs" },
+        [ordered]@{ name = "FromStage"; origin = "stage" },
+        [ordered]@{ name = "OldEntry" }
+      ) }
+      New-GpTestFile -Path (Join-Path $script:payload "metadata/gnustep-packager-theme-report.json") -Text ($report | ConvertTo-Json -Depth 5)
+      $names = @(Get-GpProvisionedThemeNamesFromPayload -Manifest @{ payload = @{ metadataRoot = "metadata" } } -PayloadRoot $script:payload)
+      $names | Should -Be @("FromInputs", "OldEntry")
+    }
+  }
+
   Context "the sidecar" {
     It "binds to the exact AppImage by name and sha256" {
       New-GpTestTheme -ThemesDir $script:systemThemes -Name "Adwaita" -InfoText "{ }" -SettingsText $null | Out-Null
