@@ -164,12 +164,13 @@ function Get-GpChainRoot {
 function Remove-GpRoot {
   param([string]$Thumbprint)
   $removed = @()
-  foreach ($storeName in @("Root", "AuthRoot")) {
-    $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($storeName, "LocalMachine")
+  foreach ($loc in @(@("Root", "LocalMachine"), @("AuthRoot", "LocalMachine"), @("Root", "CurrentUser"))) {
+    $storeName = $loc[0]
+    $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($storeName, $loc[1])
     $store.Open("ReadWrite")
     foreach ($c in @($store.Certificates.Find("FindByThumbprint", $Thumbprint, $false))) {
       $store.Remove($c)
-      $removed += $storeName
+      $removed += "$($loc[1])\$storeName"
     }
     $store.Close()
   }
@@ -187,23 +188,63 @@ function Test-GpHostFetch {
 }
 
 # Runs the installed launcher with the tool's arguments and returns its line.
+# Its output goes to files, so no child holds the step's console pipes open,
+# and a case that writes no result reports the exit code and stderr instead.
+$caseNumber = 0
+function Stop-GpCaseProcesses {
+  param($Proc)
+  if ($Proc -and -not $Proc.HasExited) { & taskkill.exe /T /F /PID $Proc.Id 2>&1 | Out-Null }
+  Get-Process -ErrorAction SilentlyContinue | Where-Object {
+    ($_.Path -and $_.Path.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase)) -or $_.ProcessName -in @("WerFault", "WerFaultSecure")
+  } | Stop-Process -Force -ErrorAction SilentlyContinue
+}
 function Invoke-GpCase {
-  param([string]$Url, [hashtable]$Environment = @{})
-  Write-GpStep ("case start: {0} env={1}" -f $Url, [string]::Join(",", @($Environment.Keys)))
-  $resultFile = Join-Path $WorkRoot ("result-" + [guid]::NewGuid().ToString("N") + ".txt")
+  param([string]$Url, [hashtable]$Environment = @{}, [string]$Executable = $launcher.FullName)
+  $script:caseNumber++
+  $tag = "case{0}" -f $script:caseNumber
+  Write-GpStep ("{0} start: {1} via {2} env={3}" -f $tag, $Url, (Split-Path -Leaf $Executable), [string]::Join(",", @($Environment.Keys)))
+  $resultFile = Join-Path $WorkRoot "result-$tag.txt"
+  $stdout = Join-Path $WorkRoot "result-$tag.stdout.txt"
+  $stderr = Join-Path $WorkRoot "result-$tag.stderr.txt"
   $saved = @{}
   foreach ($k in $Environment.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $Environment[$k]) }
+  $proc = $null
   try {
-    $proc = Start-Process -FilePath $launcher.FullName -ArgumentList @($Url, "`"$resultFile`"") -PassThru
+    $proc = Start-Process -FilePath $Executable -ArgumentList @($Url, "`"$resultFile`"") -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
     $deadline = (Get-Date).AddSeconds(120)
-    while (-not (Test-Path $resultFile) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    while (-not (Test-Path $resultFile) -and -not $proc.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    # The launcher may exit before its child writes the file.
+    while (-not (Test-Path $resultFile) -and (Get-Date) -lt $deadline -and @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) { Start-Sleep -Milliseconds 500 }
     Start-Sleep -Milliseconds 500
   } finally {
     foreach ($k in $Environment.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
   }
-  Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue
-  if (-not (Test-Path $resultFile)) { return "FAIL no result within 120 s" }
-  return (Get-Content -Raw $resultFile).Trim()
+  $state = if ($proc.HasExited) { "exit $($proc.ExitCode)" } else { "still running at 120 s" }
+  Stop-GpCaseProcesses -Proc $proc
+  if (Test-Path $resultFile) { return (Get-Content -Raw $resultFile).Trim() }
+  $err = if (Test-Path $stderr) { ((Get-Content -Raw $stderr) -replace "\s+", " ").Trim() } else { "" }
+  if ($err.Length -gt 300) { $err = $err.Substring(0, 300) }
+  return "FAIL no result ($state; stderr: $err)"
+}
+
+# Windows Error Reporting would hold a crashed process open behind a dialog.
+$werKey = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting"
+New-Item -Path $werKey -Force | Out-Null
+Set-ItemProperty -Path $werKey -Name "DontShowUI" -Value 1 -Type DWord
+Set-ItemProperty -Path $werKey -Name "Disabled" -Value 1 -Type DWord
+
+# Sanity: before any root is removed, the installed app must fetch the first
+# candidate. If it doesn't, the cases below can't mean anything, so stop here
+# with the launcher's and the bare tool's output.
+$sanity = Invoke-GpCase -Url $CandidateUrls[0]
+Write-GpStep "sanity (store intact, bundle in place): $sanity"
+if (-not $sanity.StartsWith("PASS")) {
+  $env:PATH = (Join-Path $installRoot "runtime\bin") + ";" + $env:PATH
+  $bare = Invoke-GpCase -Url $CandidateUrls[0] -Executable (Join-Path $installRoot "app\gp-tls-fetch.exe")
+  Write-GpStep "sanity, tool run directly with runtime\bin on PATH: $bare"
+  @([pscustomobject]@{ Url = $CandidateUrls[0]; Sanity = $sanity; SanityDirect = $bare; Isolated = $false }) | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $WorkRoot "results.json") -Encoding utf8
+  Write-GpStep "RESULT: the installed app can't fetch https with the store intact; no TLS case was run."
+  exit 1
 }
 
 # --- 2. Isolate a root -------------------------------------------------------

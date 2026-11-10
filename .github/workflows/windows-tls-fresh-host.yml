@@ -77,7 +77,7 @@ jobs:
           path: |
             ${{ runner.temp }}/gp-tls/results.json
             ${{ runner.temp }}/gp-tls/progress.log
-            ${{ runner.temp }}/gp-tls/result-*.txt
+            ${{ runner.temp }}/gp-tls/result-*
             ${{ runner.temp }}/gp-tls/install.log
             ${{ runner.temp }}/gp-tls/project/dist/logs/**
           if-no-files-found: ignore
