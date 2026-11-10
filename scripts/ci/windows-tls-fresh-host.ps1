@@ -57,12 +57,9 @@ $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 if (Test-Path $WorkRoot) { Remove-Item -Recurse -Force $WorkRoot }
 New-Item -ItemType Directory -Force -Path $WorkRoot | Out-Null
 $progressLog = Join-Path $WorkRoot "progress.log"
-function Write-GpStep {
-  param([string]$Message)
-  $line = "[{0:HH:mm:ss}] {1}" -f (Get-Date), $Message
-  Write-Host $line
-  Add-Content -Path $progressLog -Value $line
-}
+. (Join-Path $PSScriptRoot "windows-tls-fresh-host-helpers.ps1")
+$script:WorkRoot = $WorkRoot
+$script:progressLog = $progressLog
 
 # --- 1. Stage, package and install ------------------------------------------
 
@@ -139,6 +136,8 @@ $msi = Get-ChildItem (Join-Path $projectRoot "dist\packages") -Filter "*.msi" | 
 if ($null -eq $msi) { throw "no MSI was built" }
 
 $installLog = Join-Path $WorkRoot "install.log"
+# Processes from the install root that started after this point are ours.
+$script:installSince = Get-Date
 Write-GpStep "installing $($msi.Name)"
 $p = Start-Process msiexec.exe -ArgumentList @("/i", "`"$($msi.FullName)`"", "/qn", "/l*v", "`"$installLog`"") -PassThru
 if (-not $p.WaitForExit(300000)) { throw "msiexec did not finish within 5 minutes, see $installLog" }
@@ -154,213 +153,11 @@ $bundleCopy = Join-Path $WorkRoot "ca-certificates.copy.crt"
 Copy-Item -Force $bundle.FullName $bundleCopy
 $bundleAside = "$($bundle.FullName).aside"
 
-# --- Certificate helpers ----------------------------------------------------
-
-function Get-GpPemThumbprints {
-  param([string]$Path)
-  $text = Get-Content -Raw $Path
-  $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-  foreach ($m in [regex]::Matches($text, "-----BEGIN CERTIFICATE-----(.+?)-----END CERTIFICATE-----", "Singleline")) {
-    $der = [Convert]::FromBase64String(($m.Groups[1].Value -replace "\s", ""))
-    $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($der)
-    $set.Add($cert.Thumbprint) | Out-Null
-  }
-  return ,$set
-}
-
-# The root the server's chain ends in, as this machine builds it now.
-function Get-GpChainRoot {
-  param([string]$Url)
-  $uri = [Uri]$Url
-  $client = [System.Net.Sockets.TcpClient]::new()
-  try {
-    if (-not $client.ConnectAsync($uri.Host, 443).Wait(20000)) { throw "connect timed out" }
-    $client.ReceiveTimeout = 20000
-    $client.SendTimeout = 20000
-    # No validation callback: a PowerShell script block can't run on the thread
-    # .NET calls it from. The probe runs before the root is removed, so the
-    # default validation passes. The socket timeouts above bound the handshake.
-    $ssl = [System.Net.Security.SslStream]::new($client.GetStream(), $false)
-    $ssl.AuthenticateAsClient($uri.Host)
-    $leaf = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($ssl.RemoteCertificate)
-    $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
-    $chain.ChainPolicy.RevocationMode = "NoCheck"
-    $chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromSeconds(15)
-    $null = $chain.Build($leaf)
-    $elements = @($chain.ChainElements)
-    return $elements[$elements.Count - 1].Certificate
-  } finally {
-    $client.Dispose()
-  }
-}
-
-# Everything Remove-GpRoot took out, so Restore-GpCertificates can put it back.
-# Each was present before (that's why it was removed), so putting it back is
-# the prior state. The runner agent itself may talk to GitHub through this
-# store, so it must not be left changed.
-$script:removedCerts = [System.Collections.Generic.List[psobject]]::new()
-function Restore-GpCertificates {
-  foreach ($r in $script:removedCerts) {
-    try {
-      $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($r.Store, $r.Location)
-      $store.Open("ReadWrite")
-      $store.Add($r.Certificate)
-      $store.Close()
-    } catch {
-      $script:restoreProblems.Add("could not re-add $($r.Certificate.Thumbprint) to $($r.Location)\$($r.Store): $($_.Exception.Message)") | Out-Null
-    }
-  }
-}
-function Test-GpCertificatesRestored {
-  $out = @()
-  foreach ($r in $script:removedCerts) {
-    $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($r.Store, $r.Location)
-    $store.Open("ReadOnly")
-    $present = @($store.Certificates.Find("FindByThumbprint", $r.Certificate.Thumbprint, $false)).Count -gt 0
-    $store.Close()
-    $out += [pscustomobject]@{ Store = "$($r.Location)\$($r.Store)"; Thumbprint = $r.Certificate.Thumbprint; Present = $present }
-  }
-  return ,$out
-}
-
-# Registry values this script changes, captured before the change and put
-# back exactly: the key's and the value's presence, the value's kind and data.
-function Get-GpRegSnapshot {
-  param([string]$Key, [string]$Name)
-  $snap = [ordered]@{ Key = $Key; Name = $Name; KeyExisted = (Test-Path $Key); ValueExisted = $false; Kind = $null; Data = $null }
-  if ($snap.KeyExisted) {
-    $k = Get-Item -Path $Key
-    if ($k.GetValueNames() -contains $Name) {
-      $snap.ValueExisted = $true
-      $snap.Kind = $k.GetValueKind($Name).ToString()
-      $snap.Data = $k.GetValue($Name, $null, "DoNotExpandEnvironmentNames")
-    }
-  }
-  return [pscustomobject]$snap
-}
-function Restore-GpRegSnapshot {
-  param($Snap)
-  try {
-    if ($Snap.ValueExisted) {
-      Set-ItemProperty -Path $Snap.Key -Name $Snap.Name -Value $Snap.Data -Type $Snap.Kind
-    } elseif (Test-Path $Snap.Key) {
-      Remove-ItemProperty -Path $Snap.Key -Name $Snap.Name -ErrorAction SilentlyContinue
-      # A key this script created goes too, if nothing else was put in it.
-      if (-not $Snap.KeyExisted) {
-        $k = Get-Item -Path $Snap.Key
-        if ($k.ValueCount -eq 0 -and $k.SubKeyCount -eq 0) { Remove-Item -Path $Snap.Key }
-      }
-    }
-  } catch {
-    $script:restoreProblems.Add("could not restore $($Snap.Key)\$($Snap.Name): $($_.Exception.Message)") | Out-Null
-  }
-}
-function Test-GpRegRestored {
-  param($Snap)
-  $now = Get-GpRegSnapshot -Key $Snap.Key -Name $Snap.Name
-  $same = ($now.ValueExisted -eq $Snap.ValueExisted) -and ($now.Kind -eq $Snap.Kind) -and ("$($now.Data)" -eq "$($Snap.Data)")
-  if (-not $Snap.KeyExisted -and $Snap.ValueExisted -eq $false) { $same = $same -and -not ($now.KeyExisted -and @(Get-Item $Snap.Key).ValueCount -eq 0) }
-  return [pscustomobject]@{ Key = $Snap.Key; Name = $Snap.Name; Before = "existed=$($Snap.ValueExisted) kind=$($Snap.Kind) data=$($Snap.Data) keyExisted=$($Snap.KeyExisted)"; After = "existed=$($now.ValueExisted) kind=$($now.Kind) data=$($now.Data) keyExisted=$($now.KeyExisted)"; Restored = $same }
-}
-$script:restoreProblems = [System.Collections.Generic.List[string]]::new()
-
-function Remove-GpRoot {
-  param([string]$Thumbprint)
-  $removed = @()
-  foreach ($loc in @(@("Root", "LocalMachine"), @("AuthRoot", "LocalMachine"), @("Root", "CurrentUser"))) {
-    $storeName = $loc[0]
-    $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($storeName, $loc[1])
-    $store.Open("ReadWrite")
-    foreach ($c in @($store.Certificates.Find("FindByThumbprint", $Thumbprint, $false))) {
-      $store.Remove($c)
-      $removed += "$($loc[1])\$storeName"
-      $script:removedCerts.Add([pscustomobject]@{ Store = $storeName; Location = $loc[1]; Certificate = $c }) | Out-Null
-    }
-    $store.Close()
-  }
-  return $removed
-}
-
-function Test-GpHostFetch {
-  param([string]$Url)
-  try {
-    $null = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 30
-    return "PASS"
-  } catch {
-    return "FAIL $($_.Exception.Message)"
-  }
-}
-
-# Runs the installed launcher with the tool's arguments and returns its line.
-# Its output goes to files, so no child holds the step's console pipes open,
-# and a case that writes no result reports the exit code and stderr instead.
-$caseNumber = 0
-# Ends only what this script started: the case's process tree, and anything
-# still running from the install root (the app, and gdnc from
-# runtime\System\Tools). Then checks nothing owned is left, and lists helpers
-# running from elsewhere without touching them.
-$script:cleanup = [System.Collections.Generic.List[psobject]]::new()
-function Get-GpOwnedProcesses {
-  return ,@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase) })
-}
-function Stop-GpCaseProcesses {
-  param($Proc, [string]$Tag)
-  $errors = @()
-  if ($Proc -and -not $Proc.HasExited) {
-    $out = & taskkill.exe /T /F /PID $Proc.Id 2>&1
-    # A tree that ended on its own between the check and the kill isn't an error.
-    if ($LASTEXITCODE -ne 0 -and -not $Proc.HasExited) { $errors += "taskkill $($Proc.Id): $out" }
-  }
-  foreach ($p in (Get-GpOwnedProcesses)) {
-    try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { $errors += "stop $($p.ProcessName)[$($p.Id)]: $($_.Exception.Message)" }
-  }
-  Start-Sleep -Milliseconds 500
-  $owned = @((Get-GpOwnedProcesses) | ForEach-Object { "$($_.ProcessName)[$($_.Id)] $($_.Path)" })
-  $other = @(Get-Process -Name gdnc, gdomap, gpbs -ErrorAction SilentlyContinue | Where-Object { -not ($_.Path -and $_.Path.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase)) } | ForEach-Object { "$($_.ProcessName)[$($_.Id)] $($_.Path)" })
-  $script:cleanup.Add([pscustomobject]@{ Case = $Tag; OwnedLeft = $owned; CleanupErrors = $errors; UnownedHelpersSeen = $other }) | Out-Null
-  $msg = if ($owned.Count -eq 0) { "  cleanup ${Tag}: nothing left from the install root" } else { "  cleanup ${Tag}: OWNED PROCESS LEFT " + [string]::Join(", ", $owned) }
-  if ($errors.Count -gt 0) { $msg += "; errors: " + [string]::Join("; ", $errors) }
-  if ($other.Count -gt 0) { $msg += "; (observed, not ours, left alone: " + [string]::Join(", ", $other) + ")" }
-  Write-GpStep $msg
-}
-function Invoke-GpCase {
-  param([string]$Url, [hashtable]$Environment = @{}, [string]$Executable = $launcher.FullName)
-  $script:caseNumber++
-  $tag = "case{0}" -f $script:caseNumber
-  Write-GpStep ("{0} start: {1} via {2} env={3}" -f $tag, $Url, (Split-Path -Leaf $Executable), [string]::Join(",", @($Environment.Keys)))
-  $resultFile = Join-Path $WorkRoot "result-$tag.txt"
-  $stdout = Join-Path $WorkRoot "result-$tag.stdout.txt"
-  $stderr = Join-Path $WorkRoot "result-$tag.stderr.txt"
-  # The launcher starts the app and exits without waiting; its own errors go
-  # to this file.
-  $launcherLog = Join-Path $WorkRoot "result-$tag.launcher.txt"
-  $Environment = @{} + $Environment
-  $Environment["GP_LAUNCHER_ERROR_LOG"] = $launcherLog
-  $Environment["GP_LAUNCHER_NONINTERACTIVE"] = "1"
-  $saved = @{}
-  foreach ($k in $Environment.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $Environment[$k]) }
-  $proc = $null
-  try {
-    $proc = Start-Process -FilePath $Executable -ArgumentList @($Url, "`"$resultFile`"") -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
-    $deadline = (Get-Date).AddSeconds(120)
-    while (-not (Test-Path $resultFile) -and -not $proc.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
-    # The launcher may exit before its child writes the file.
-    while (-not (Test-Path $resultFile) -and (Get-Date) -lt $deadline -and @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) { Start-Sleep -Milliseconds 500 }
-    Start-Sleep -Milliseconds 500
-  } finally {
-    foreach ($k in $Environment.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
-  }
-  $state = if ($proc.HasExited) { "$(Split-Path -Leaf $Executable) exit $($proc.ExitCode)" } else { "still running at 120 s" }
-  Stop-GpCaseProcesses -Proc $proc -Tag $tag
-  if (Test-Path $resultFile) { return ([string](Get-Content -Raw $resultFile)).Trim() }
-  $err = ""
-  foreach ($f in @($stderr, $launcherLog)) {
-    if (Test-Path $f) { $err += " " + ([string](Get-Content -Raw $f) -replace "\s+", " ") }
-  }
-  $err = $err.Trim()
-  if ($err.Length -gt 300) { $err = $err.Substring(0, 300) }
-  return "FAIL no result ($state; stderr: $err)"
-}
+# The helpers below (certificates, registry snapshots, owned processes, the
+# case runner and the restore steps) live in a separate file so the failure
+# paths can be tested without a Windows runner: tests/shared/WindowsTlsFreshHost.Tests.ps1.
+$script:launcherPath = $launcher.FullName
+$script:installRoot = $installRoot
 
 # --- 2. Run the cases, then restore the machine -----------------------------
 
@@ -463,18 +260,24 @@ try {
   Write-GpStep "ERROR during the cases: $($_.Exception.Message)"
   $script:restoreProblems.Add("cases stopped early: $($_.Exception.Message)") | Out-Null
 } finally {
-  if (Test-Path $bundleAside) { Move-Item -Force $bundleAside $bundle.FullName }
-  Restore-GpCertificates
-  foreach ($snap in $regSnapshots) { Restore-GpRegSnapshot -Snap $snap }
+  # Each step runs whether or not the one before it threw.
+  Invoke-GpRestoreSteps -Steps (New-GpRestoreSteps -Bundle $bundle.FullName -BundleAside $bundleAside -RegSnapshots $regSnapshots)
 }
 
-# Check the restoration before reporting anything.
-$certCheck = Test-GpCertificatesRestored
-$regCheck = @($regSnapshots | ForEach-Object { Test-GpRegRestored -Snap $_ })
+# Check the restoration and the cleanup before reporting anything.
+$certCheck = @()
+$regCheck = @()
+try { $certCheck = Test-GpCertificatesRestored } catch { $script:restoreProblems.Add("could not check the certificates: $($_.Exception.Message)") | Out-Null }
+foreach ($snap in $regSnapshots) {
+  try { $regCheck += Test-GpRegRestored -Snap $snap } catch { $script:restoreProblems.Add("could not check $($snap.Key)\$($snap.Name): $($_.Exception.Message)") | Out-Null }
+}
+$finalOwned = Get-GpResidualOwned
 foreach ($c in $certCheck) { Write-GpStep "restored? $($c.Store) $($c.Thumbprint): $($c.Present)" }
 foreach ($r in $regCheck) { Write-GpStep "restored? $($r.Key)\$($r.Name): $($r.Restored) (before: $($r.Before); after: $($r.After))" }
 $restored = (@($certCheck | Where-Object { -not $_.Present }).Count -eq 0) -and (@($regCheck | Where-Object { -not $_.Restored }).Count -eq 0) -and ($script:restoreProblems.Count -eq 0)
 $ownedLeft = @($script:cleanup | Where-Object { $_.OwnedLeft.Count -gt 0 -or $_.CleanupErrors.Count -gt 0 })
+foreach ($o in $finalOwned) { Write-GpStep "final check: OWNED PROCESS LEFT $o" }
+if ($finalOwned.Count -eq 0) { Write-GpStep "final check: nothing left running from the install root" }
 
 $report = [ordered]@{
   Sanity = $sanity
@@ -483,6 +286,7 @@ $report = [ordered]@{
   SkippedChecks = $skipped
   Restoration = [ordered]@{ Restored = $restored; Certificates = $certCheck; Registry = $regCheck; Problems = $script:restoreProblems }
   Cleanup = $script:cleanup
+  FinalOwnedLeft = $finalOwned
 }
 $report | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $WorkRoot "results.json") -Encoding utf8
 $results | Format-List | Out-String -Width 400 | Write-Host
@@ -503,5 +307,5 @@ if (-not $sanity.StartsWith("PASS")) {
 }
 if (-not $restored) { Write-GpStep "RESTORATION FAILED: the machine is not back to its prior state (see results.json)."; $exitCode = 1 }
 else { Write-GpStep "restoration verified: certificates and registry values are as they were before" }
-if ($ownedLeft.Count -gt 0) { Write-GpStep "CLEANUP: an owned process was left or could not be stopped (see results.json)."; $exitCode = 1 }
+if ($ownedLeft.Count -gt 0 -or $finalOwned.Count -gt 0) { Write-GpStep "CLEANUP: an owned process was left or could not be stopped (see results.json)."; $exitCode = 1 }
 exit $exitCode

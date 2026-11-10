@@ -72,7 +72,11 @@ As a `workflow_dispatch` job, which also runs on pushes to the test-only
 default CI. It changes the runner's trust store, and the result depends on
 outside sites. The script captures every registry value it changes and each
 root it removes, puts them back exactly at the end (even when a case fails),
-and checks that it did. With a root left out, the job hung after its last step
+and checks that it did. Each restore step runs even if an earlier one
+throws. After each case it ends only its own processes: those running from the
+install root that started after the install, and the case's own process tree,
+matched by PID and start time. The failure paths are tested without a Windows
+runner in `tests/shared/WindowsTlsFreshHost.Tests.ps1`. With a root left out, the job hung after its last step
 in an earlier run; whether the changed store caused that wasn't proven.
 
 ## Results
