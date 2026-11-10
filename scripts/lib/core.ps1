@@ -4075,6 +4075,12 @@ function Get-GpProvisionedThemeNamesFromPayload {
     $report = Get-GpJsonFile -Path $reportPath
     $names = [System.Collections.Generic.List[string]]::new()
     foreach ($theme in @($report["themes"])) {
+      # A formatVersion 2 report (AppImage) also lists themes the app's own stage
+      # script copied in, as origin "stage". Only provisioned themes count here;
+      # a v1 entry has no origin and is always provisioned.
+      if ($theme -is [System.Collections.IDictionary] -and $theme.Contains("origin") -and [string]$theme["origin"] -eq "stage") {
+        continue
+      }
       if ($theme -is [System.Collections.IDictionary] -and $theme.Contains("name") -and -not [string]::IsNullOrWhiteSpace([string]$theme["name"])) {
         $names.Add([string]$theme["name"]) | Out-Null
       }

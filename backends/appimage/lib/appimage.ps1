@@ -1,6 +1,8 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "theme-metadata.ps1")
+
 function Write-GpAppImageLogLine {
   param(
     [string]$LogPath,
@@ -1136,6 +1138,30 @@ function Get-GpAppImageAppDomainDefaults {
   }
 }
 
+# The AppRun lines that seed packaged app-domain defaults. They run on every
+# launch and write a key only when it is absent, so a user's own value stays
+# and a removed key comes back at the next launch.
+function Get-GpAppImageDefaultsSeedLines {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$AppDefaults
+  )
+
+  $lines = [System.Collections.Generic.List[string]]::new()
+  foreach ($entry in @($AppDefaults.Entries)) {
+    $keyLiteral = Convert-GpAppImageValueToShellExpression -Value $entry.Key
+    $valueLiteral = Convert-GpAppImageValueToShellExpression -Value $entry.SerializedValue
+    $domainLiteral = Convert-GpAppImageValueToShellExpression -Value $AppDefaults.Domain
+
+    $lines.Add(('if ! "$APP_DEFAULTS_TOOL" read ' + $domainLiteral + ' ' + $keyLiteral + ' >/dev/null 2>&1; then')) | Out-Null
+    $lines.Add(('  "$APP_DEFAULTS_TOOL" write ' + $domainLiteral + ' ' + $keyLiteral + ' ' + $valueLiteral + ' >/dev/null 2>&1')) | Out-Null
+    $lines.Add('fi') | Out-Null
+  }
+  # Plain array: callers enumerate it (AppRun adds each line). A leading comma
+  # here would hand them one string[] item, which joins into a single line.
+  return [string[]]$lines.ToArray()
+}
+
 function Assert-GpAppImageEnvironmentKeys {
   param(
     [Parameter(Mandatory = $true)]
@@ -1984,14 +2010,8 @@ function Write-GpAppImageAppRun {
     $lines.Add('  exit 41') | Out-Null
     $lines.Add('fi') | Out-Null
 
-    foreach ($entry in @($appDefaults.Entries)) {
-      $keyLiteral = Convert-GpAppImageValueToShellExpression -Value $entry.Key
-      $valueLiteral = Convert-GpAppImageValueToShellExpression -Value $entry.SerializedValue
-      $domainLiteral = Convert-GpAppImageValueToShellExpression -Value $appDefaults.Domain
-
-      $lines.Add(('if ! "$APP_DEFAULTS_TOOL" read ' + $domainLiteral + ' ' + $keyLiteral + ' >/dev/null 2>&1; then')) | Out-Null
-      $lines.Add(('  "$APP_DEFAULTS_TOOL" write ' + $domainLiteral + ' ' + $keyLiteral + ' ' + $valueLiteral + ' >/dev/null 2>&1')) | Out-Null
-      $lines.Add('fi') | Out-Null
+    foreach ($line in @(Get-GpAppImageDefaultsSeedLines -AppDefaults $appDefaults)) {
+      $lines.Add($line) | Out-Null
     }
   }
 
@@ -2131,6 +2151,7 @@ function Prepare-GpAppDir {
   if (-not [string]::IsNullOrWhiteSpace($updateRuntimeConfigPath)) {
     Write-GpAppImageLogLine -LogPath $LogPath -Message ("Generated updater runtime config: {0}" -f $updateRuntimeConfigPath)
   }
+  $themeReportPath = Write-GpAppImageThemeReport -Context $Context -Config $Config -AppDirRoot $WorkPaths.AppDirRoot -MetadataRoot $metadataRoot -LogPath $LogPath
   $packageContract = Invoke-GpPackageContractAssertions -Context $Context -Scope "package" -Backend "appimage" -RootPath $WorkPaths.AppDirRoot
   foreach ($line in @($packageContract.Lines)) {
     Write-GpAppImageLogLine -LogPath $LogPath -Message ("Package contract: {0}" -f $line)
@@ -2151,6 +2172,7 @@ function Prepare-GpAppDir {
     MimePackagePath = $mimePackagePath
     NoticeReportPath = $noticeReport.ReportPath
     UpdateRuntimeConfigPath = $updateRuntimeConfigPath
+    ThemeReportPath = $themeReportPath
     RuntimeNotices = @($noticeReport.Entries)
   }
 }
@@ -2537,6 +2559,7 @@ function Invoke-GpAppImagePackage {
   $appDir = Prepare-GpAppDir -Context $Context -Config $config -WorkPaths $workPaths -LogPath $LogPath
   $toolPath = Ensure-GpAppImageTool -Config $config -WorkPaths $workPaths -LogPath $LogPath
   $artifacts = Build-GpAppImageArtifact -Config $config -WorkPaths $workPaths -ToolPath $toolPath -LogPath $LogPath
+  $themeSidecarPath = Write-GpAppImageThemeSidecar -Config $config -AppDir $appDir -ArtifactPath $artifacts.ArtifactPath -LogPath $LogPath
   $updateFeedPath = $null
   $updateAssetEntry = New-GpAppImageUpdateAssetEntry -Context $Context -Config $config -Artifacts $artifacts
   if ($null -ne $updateAssetEntry) {
@@ -2559,6 +2582,8 @@ function Invoke-GpAppImagePackage {
     ZsyncArtifactPath = $artifacts.ZsyncArtifactPath
     MetadataPath = $metadataPath
     ProvenancePath = $provenancePath
+    ThemeSidecarPath = $themeSidecarPath
+    ThemeReportPath = $appDir.ThemeReportPath
     UpdateFeedPath = $updateFeedPath
     DiagnosticsPath = $diagnosticsPath
     AppDirRoot = $appDir.AppDirRoot
