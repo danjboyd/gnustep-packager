@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Added
+- AppImage: theme metadata for tools that can't run or mount the AppImage,
+  such as a theme-settings configurator. When the payload has themes, the
+  in-payload `gnustep-packager-theme-report.json` becomes `formatVersion` 2
+  (every v1 field kept), and `<artifact-base>.themes.json` is written beside
+  the AppImage, bound to it by sha256. It lists every bundled theme, including
+  ones an app's own stage script copied in, with its identity, hashes and
+  `ThemeSettings.plist` (inline up to 256 KiB). It also records where `GSTheme`
+  comes from: the domain AppRun seeds against the domain the app reads, and
+  each source's precedence. The packager doesn't upload it. Theme loading,
+  AppRun and the seeding policy are unchanged. See
+  `docs/appimage-theme-metadata.md`.
 - CI: a `windows-tls-fresh-host` job (`workflow_dispatch`, or a push to that
   branch; not in default CI) checks that an installed MSI fetches https with
   the server's root removed from the Windows store, using gnustep-base's
