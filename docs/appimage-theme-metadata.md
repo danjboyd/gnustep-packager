@@ -62,6 +62,7 @@ input that should be there.
       "installation": {
         "bundledPath": "usr/GNUstep/System/Library/Themes/Adwaita.theme",
         "executableSha256": "<hex>",
+        "executableStatus": "ok",
         "infoPlistSha256": "<hex>"
       },
       "source": { "repo": "https://...", "commit": "<sha>" },
@@ -83,7 +84,14 @@ input that should be there.
 ### Themes
 
 - **Which themes:** every `<Name>.theme` directory whose parent is named
-  `Themes`, anywhere in the payload. Symbolic links aren't followed.
+  `Themes`, anywhere in the payload. Linked directories aren't followed while
+  searching.
+- **Links inside a theme:** before any file is read or hashed (the Info plist,
+  `ThemeSettings.plist`, the executable), every link along its path is
+  resolved. It is read only when its real location is a file inside the
+  payload. One that leads outside the payload, or loops, isn't read: its status
+  is `unavailable` and its contents and hash are null. A link that stays inside
+  the payload is read normally. The same applies to the app's own Info plist.
   - `origin: "themeInputs"`: the theme came from the manifest's `themeInputs`.
     Its `source` has the repository and resolved commit.
   - `origin: "stage"`: the app's own stage script put the theme there. Its
@@ -99,7 +107,9 @@ input that should be there.
   - `installation` holds the bundle's path and the sha256 of its executable
     and Info plist.
   - Any of these is null when its source is absent or unreadable.
-  - `infoStatus` is `ok`, `absent`, `tooLarge` or `malformed`.
+  - `infoStatus` is `ok`, `absent`, `unavailable`, `tooLarge` or
+    `malformed`, and `installation.executableStatus` is `ok`, `absent` or
+    `unavailable`.
 - **Settings:** the first of `Resources/ThemeSettings.plist`,
   `Contents/Resources/ThemeSettings.plist` and `ThemeSettings.plist` at the
   bundle root, the same order the theme-settings loader uses.
@@ -111,6 +121,8 @@ input that should be there.
     as fully described.
   - `status: "malformed"`: the file couldn't be parsed. `note` gives the
     reason.
+  - `status: "unavailable"`: a link leads outside the payload or loops, so the
+    file wasn't read. Its contents and hash are unavailable.
   - `settings` is null when the theme has no settings file.
 
 ### Domains
@@ -123,7 +135,8 @@ input that should be there.
   none.
   - The hint is the app Info plist's `CFBundleIdentifier`, else the launch
     entry's file name. `runtimeDomainHintSource` says which.
-  - If the app bundle's Info plist can't be read, the hint is null with source
+  - If the app bundle's Info plist can't be read (malformed, too large, or
+    behind a link that leaves the payload), the hint is null with source
     `unknown`, rather than a guess.
 - **`seedDomainMatchesRuntimeHint`:** null when either side is unknown. When
   it's false, a configurator should warn: the packaged default isn't in the

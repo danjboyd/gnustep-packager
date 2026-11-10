@@ -263,12 +263,75 @@ function Find-GpPayloadThemeBundles {
   return @($found | Sort-Object { ConvertTo-GpPayloadRelativePath -PayloadRoot $PayloadRoot -Path $_ })
 }
 
-function Get-GpFirstExistingFile {
-  param([string[]]$Candidates)
-  foreach ($candidate in @($Candidates)) {
-    if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+# The real location of Path: every symbolic link along it resolved, at most 40
+# hops. Returns $null for a loop, a link that can't be read, or a path that
+# doesn't exist once resolved.
+function Resolve-GpRealPath {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $full = [System.IO.Path]::GetFullPath($Path)
+  $root = [System.IO.Path]::GetPathRoot($full)
+  $pending = [System.Collections.Generic.List[string]]::new()
+  foreach ($part in ($full.Substring($root.Length) -split '[\\/]')) { if ($part -ne "") { $pending.Add($part) | Out-Null } }
+  $current = $root
+  $hops = 0
+  while ($pending.Count -gt 0) {
+    $part = $pending[0]
+    $pending.RemoveAt(0)
+    if ($part -eq ".") { continue }
+    if ($part -eq "..") { $current = [System.IO.Path]::GetDirectoryName($current.TrimEnd('\', '/')); if ($null -eq $current) { $current = $root }; continue }
+    $next = Join-Path $current $part
+    $info = if ([System.IO.Directory]::Exists($next)) { [System.IO.DirectoryInfo]::new($next) } else { [System.IO.FileInfo]::new($next) }
+    if (-not $info.Exists -and $null -eq $info.LinkTarget) { return $null }
+    if ($null -ne $info.LinkTarget) {
+      $hops++
+      if ($hops -gt 40) { return $null }
+      $target = [string]$info.LinkTarget
+      if (-not [System.IO.Path]::IsPathRooted($target)) { $target = Join-Path $current $target }
+      $target = [System.IO.Path]::GetFullPath($target)
+      $targetRoot = [System.IO.Path]::GetPathRoot($target)
+      $parts = @($target.Substring($targetRoot.Length) -split '[\\/]' | Where-Object { $_ -ne "" })
+      for ($i = $parts.Count - 1; $i -ge 0; $i--) { $pending.Insert(0, $parts[$i]) }
+      $current = $targetRoot
+      continue
+    }
+    $current = $next
   }
-  return $null
+  return $current
+}
+
+# Whether a file may be read for the metadata. "ok": it exists and its real
+# location, every link resolved, is inside the payload's real root.
+# "unavailable": it exists, but resolves outside the payload, through a loop,
+# or to something that isn't a file; it isn't read. "absent": nothing there.
+function Get-GpPayloadFileStatus {
+  param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$PayloadRoot)
+
+  $lexical = [System.IO.Path]::GetFullPath($Path)
+  $exists = [System.IO.File]::Exists($lexical) -or [System.IO.Directory]::Exists($lexical)
+  $isLink = $false
+  try { $isLink = $null -ne ([System.IO.FileInfo]::new($lexical)).LinkTarget } catch { $isLink = $false }
+  if (-not $exists -and -not $isLink) { return "absent" }
+
+  $realRoot = Resolve-GpRealPath -Path $PayloadRoot
+  $real = Resolve-GpRealPath -Path $lexical
+  if ($null -eq $realRoot -or $null -eq $real) { return "unavailable" }
+  $base = $realRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+  if (-not $real.StartsWith($base, [System.StringComparison]::Ordinal)) { return "unavailable" }
+  if (-not [System.IO.File]::Exists($real)) { return "unavailable" }
+  return "ok"
+}
+
+# The first candidate that exists, with whether it may be read. A candidate
+# that exists but leaves the payload stops the search, as it would stop a
+# loader that looks in the same order; it is reported, not read.
+function Get-GpFirstPayloadFile {
+  param([string[]]$Candidates, [Parameter(Mandatory = $true)][string]$PayloadRoot)
+  foreach ($candidate in @($Candidates)) {
+    $status = Get-GpPayloadFileStatus -Path $candidate -PayloadRoot $PayloadRoot
+    if ($status -ne "absent") { return [pscustomobject]@{ Path = $candidate; Status = $status } }
+  }
+  return [pscustomobject]@{ Path = $null; Status = "absent" }
 }
 
 # --- One theme -------------------------------------------------------------------
@@ -283,40 +346,41 @@ function Get-GpThemeBundleDescriptor {
   $name = [System.IO.Path]::GetFileNameWithoutExtension($BundlePath)
   $resources = Join-Path $BundlePath "Resources"
 
-  $infoPath = Get-GpFirstExistingFile -Candidates @(
+  $infoFile = Get-GpFirstPayloadFile -PayloadRoot $PayloadRoot -Candidates @(
     (Join-Path $resources "Info-gnustep.plist"),
     (Join-Path $resources "Info.plist"),
     (Join-Path (Join-Path $BundlePath "Contents") "Info.plist"),
     (Join-Path $BundlePath "Info.plist")
   )
   $info = $null
-  $infoStatus = "absent"
+  $infoStatus = $infoFile.Status
   $infoSha = $null
-  if ($null -ne $infoPath) {
-    $read = Read-GpLimitedPlistFile -Path $infoPath -Limit $script:GpThemeInfoPlistLimit
+  if ($infoFile.Status -eq "ok") {
+    $read = Read-GpLimitedPlistFile -Path $infoFile.Path -Limit $script:GpThemeInfoPlistLimit
     $infoStatus = $read.Status
     $infoSha = $read.Sha256
     if ($read.Status -eq "ok") { $info = $read.Value }
   }
 
-  $executable = $null
-  try {
-    $structure = Test-GpThemeBundleStructure -ThemePath $BundlePath -ThemeName $name -Backend "appimage"
-    $executable = $structure.Executable
-  } catch {
-    $executable = $null
-  }
+  # Only the candidate paths: Test-GpThemeBundleStructure would also read the
+  # Info plist, following any link.
+  $executableFile = Get-GpFirstPayloadFile -PayloadRoot $PayloadRoot -Candidates @(Get-GpThemeExecutableCandidates -ThemePath $BundlePath -ThemeName $name -Backend "appimage")
+  $executableStatus = $executableFile.Status
+  $executableSha = if ($executableStatus -eq "ok") { Get-GpFileSha256 -Path $executableFile.Path } else { $null }
 
   # Same order as the theme-settings loader: Resources, then a macOS-style
   # Contents/Resources, then the bundle root.
-  $settingsPath = Get-GpFirstExistingFile -Candidates @(
+  $settingsFile = Get-GpFirstPayloadFile -PayloadRoot $PayloadRoot -Candidates @(
     (Join-Path $resources "ThemeSettings.plist"),
     (Join-Path (Join-Path (Join-Path $BundlePath "Contents") "Resources") "ThemeSettings.plist"),
     (Join-Path $BundlePath "ThemeSettings.plist")
   )
+  $settingsPath = $settingsFile.Path
   $settings = $null
   $themeId = $null
-  if ($null -ne $settingsPath) {
+  if ($settingsFile.Status -eq "unavailable") {
+    $settings = [ordered]@{ status = "unavailable"; schemaVersion = $null; sha256 = $null; sizeBytes = $null; inline = $null; path = (ConvertTo-GpPayloadRelativePath -PayloadRoot $PayloadRoot -Path $settingsPath); note = "a link leads outside the payload (or loops), so it was not read; its contents are unavailable" }
+  } elseif ($settingsFile.Status -eq "ok") {
     $read = Read-GpLimitedPlistFile -Path $settingsPath -Limit $script:GpThemeSettingsInlineLimit
     $relative = ConvertTo-GpPayloadRelativePath -PayloadRoot $PayloadRoot -Path $settingsPath
     switch ($read.Status) {
@@ -348,7 +412,8 @@ function Get-GpThemeBundleDescriptor {
     infoStatus = $infoStatus
     installation = [ordered]@{
       bundledPath = ConvertTo-GpPayloadRelativePath -PayloadRoot $PayloadRoot -Path $BundlePath
-      executableSha256 = $(if ($null -ne $executable -and (Test-Path -LiteralPath $executable -PathType Leaf)) { Get-GpFileSha256 -Path $executable } else { $null })
+      executableSha256 = $executableSha
+      executableStatus = $executableStatus
       infoPlistSha256 = $infoSha
     }
     settings = $settings
@@ -372,15 +437,17 @@ function Get-GpAppRuntimeDomainHint {
   $bundleId = $null
   $status = "noBundle"
   if ($bundleDir.EndsWith(".app", [System.StringComparison]::OrdinalIgnoreCase)) {
-    $infoPath = Get-GpFirstExistingFile -Candidates @(
+    $infoFile = Get-GpFirstPayloadFile -PayloadRoot $PayloadRoot -Candidates @(
       (Join-Path (Join-Path $bundleDir "Resources") "Info-gnustep.plist"),
       (Join-Path (Join-Path $bundleDir "Resources") "Info.plist"),
       (Join-Path (Join-Path $bundleDir "Contents") "Info.plist")
     )
-    if ($null -eq $infoPath) {
+    if ($infoFile.Status -eq "absent") {
       $status = "noInfoPlist"
+    } elseif ($infoFile.Status -eq "unavailable") {
+      $status = "unavailable"
     } else {
-      $read = Read-GpLimitedPlistFile -Path $infoPath -Limit $script:GpThemeInfoPlistLimit
+      $read = Read-GpLimitedPlistFile -Path $infoFile.Path -Limit $script:GpThemeInfoPlistLimit
       $status = $read.Status
       if ($read.Status -eq "ok") { $bundleId = Get-GpPlistString -Dictionary $read.Value -Key "CFBundleIdentifier" }
     }
@@ -392,7 +459,8 @@ function Get-GpAppRuntimeDomainHint {
   if ($status -in @("noBundle", "noInfoPlist", "ok")) {
     return [ordered]@{ executable = $executable; bundleIdentifier = $null; runtimeDomainHint = $executable; runtimeDomainHintSource = "processName" }
   }
-  # An app bundle whose Info plist is too large or malformed: its identifier,
+  # An app bundle whose Info plist is too large, malformed or behind a link that
+  # leaves the payload: its identifier,
   # and so the domain, is unknown. Don't guess the process name.
   return [ordered]@{ executable = $executable; bundleIdentifier = $null; runtimeDomainHint = $null; runtimeDomainHintSource = "unknown" }
 }

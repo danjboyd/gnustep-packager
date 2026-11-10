@@ -170,6 +170,85 @@ Describe "AppImage theme metadata" {
     }
   }
 
+  Context "links inside a theme bundle" {
+    BeforeEach {
+      $script:outside = Join-Path $script:root "outside"
+      New-GpTestFile -Path (Join-Path $script:outside "Resources/Info-gnustep.plist") -Text "{ CFBundleIdentifier = org.example.Leaked; }"
+      New-GpTestFile -Path (Join-Path $script:outside "Resources/ThemeSettings.plist") -Text "{ ThemeIdentifier = leaked; Secret = leaked; }"
+      New-GpTestFile -Path (Join-Path $script:outside "Linked") -Text "outside executable"
+    }
+
+    It "doesn't read a Resources directory linked outside the payload" -Skip:($IsWindows) {
+      $bundle = New-GpTestTheme -ThemesDir $script:systemThemes -Name "Linked" -InfoText $null -SettingsText $null
+      New-Item -ItemType SymbolicLink -Path (Join-Path $bundle "Resources") -Target (Join-Path $script:outside "Resources") | Out-Null
+      $theme = @((New-GpReport)["themes"])[0]
+      $theme["infoStatus"] | Should -Be "unavailable"
+      $theme["bundleId"] | Should -BeNullOrEmpty
+      $theme["installation"]["infoPlistSha256"] | Should -BeNullOrEmpty
+      $theme["settings"]["status"] | Should -Be "unavailable"
+      $theme["settings"]["inline"] | Should -BeNullOrEmpty
+      $theme["settings"]["sha256"] | Should -BeNullOrEmpty
+      $theme["themeId"] | Should -BeNullOrEmpty
+      ((New-GpReport) | ConvertTo-Json -Depth 40) | Should -Not -Match "leaked|Leaked"
+    }
+
+    It "doesn't read a settings file or an Info plist linked outside the payload" -Skip:($IsWindows) {
+      $bundle = New-GpTestTheme -ThemesDir $script:systemThemes -Name "Linked" -InfoText $null -SettingsText $null
+      New-Item -ItemType Directory -Force -Path (Join-Path $bundle "Resources") | Out-Null
+      New-Item -ItemType SymbolicLink -Path (Join-Path $bundle "Resources/ThemeSettings.plist") -Target (Join-Path $script:outside "Resources/ThemeSettings.plist") | Out-Null
+      New-Item -ItemType SymbolicLink -Path (Join-Path $bundle "Resources/Info-gnustep.plist") -Target (Join-Path $script:outside "Resources/Info-gnustep.plist") | Out-Null
+      $theme = @((New-GpReport)["themes"])[0]
+      $theme["settings"]["status"] | Should -Be "unavailable"
+      $theme["settings"]["path"] | Should -Be "usr/GNUstep/System/Library/Themes/Linked.theme/Resources/ThemeSettings.plist"
+      $theme["infoStatus"] | Should -Be "unavailable"
+      ((New-GpReport) | ConvertTo-Json -Depth 40) | Should -Not -Match "leaked|Leaked"
+    }
+
+    It "doesn't hash an executable linked outside the payload" -Skip:($IsWindows) {
+      $bundle = Join-Path $script:systemThemes "Linked.theme"
+      New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+      New-Item -ItemType SymbolicLink -Path (Join-Path $bundle "Linked") -Target (Join-Path $script:outside "Linked") | Out-Null
+      $theme = @((New-GpReport)["themes"])[0]
+      $theme["installation"]["executableStatus"] | Should -Be "unavailable"
+      $theme["installation"]["executableSha256"] | Should -BeNullOrEmpty
+    }
+
+    It "reads through a link that stays inside the payload" -Skip:($IsWindows) {
+      $shared = Join-Path $script:payload "usr/share/adwaita-resources"
+      New-GpTestFile -Path (Join-Path $shared "Info-gnustep.plist") -Text "{ CFBundleIdentifier = org.example.Inside; }"
+      New-GpTestFile -Path (Join-Path $shared "ThemeSettings.plist") -Text "{ ThemeIdentifier = inside; }"
+      $bundle = New-GpTestTheme -ThemesDir $script:systemThemes -Name "Inside" -InfoText $null -SettingsText $null
+      New-Item -ItemType SymbolicLink -Path (Join-Path $bundle "Resources") -Target "../../../../../share/adwaita-resources" | Out-Null
+      $theme = @((New-GpReport)["themes"])[0]
+      $theme["infoStatus"] | Should -Be "ok"
+      $theme["bundleId"] | Should -Be "org.example.Inside"
+      $theme["settings"]["status"] | Should -Be "inline"
+      $theme["themeId"] | Should -Be "inside"
+      $theme["installation"]["executableStatus"] | Should -Be "ok"
+    }
+
+    It "treats a link loop as unavailable without hanging" -Skip:($IsWindows) {
+      $bundle = New-GpTestTheme -ThemesDir $script:systemThemes -Name "Loop" -InfoText $null -SettingsText $null
+      New-Item -ItemType Directory -Force -Path (Join-Path $bundle "Resources") | Out-Null
+      New-Item -ItemType SymbolicLink -Path (Join-Path $bundle "Resources/a") -Target "b" | Out-Null
+      New-Item -ItemType SymbolicLink -Path (Join-Path $bundle "Resources/b") -Target "a" | Out-Null
+      New-Item -ItemType SymbolicLink -Path (Join-Path $bundle "Resources/ThemeSettings.plist") -Target "a" | Out-Null
+      $theme = @((New-GpReport)["themes"])[0]
+      $theme["settings"]["status"] | Should -Be "unavailable"
+    }
+
+    It "doesn't read the app's Info plist through a link outside the payload" -Skip:($IsWindows) {
+      New-GpTestTheme -ThemesDir $script:systemThemes -Name "Adwaita" -InfoText "{ }" -SettingsText $null | Out-Null
+      $appInfo = Join-Path $script:payload "usr/app/Foo.app/Resources/Info-gnustep.plist"
+      Remove-Item -Force $appInfo
+      New-Item -ItemType SymbolicLink -Path $appInfo -Target (Join-Path $script:outside "Resources/Info-gnustep.plist") | Out-Null
+      $report = New-GpReport -AppDefaults (New-GpAppDefaults -Domain "org.example.Leaked" -Theme "Adwaita")
+      $report["app"]["runtimeDomainHintSource"] | Should -Be "unknown"
+      $report["app"]["runtimeDomainHint"] | Should -BeNullOrEmpty
+      $report["app"]["bundleIdentifier"] | Should -BeNullOrEmpty
+    }
+  }
+
   Context "ThemeSettings.plist" {
     It "inlines a small settings file as data, never interpreting its strings" {
       New-GpTestTheme -ThemesDir $script:systemThemes -Name "Adwaita" -InfoText "{ }" -SettingsText '{ ThemeIdentifier = org.example.adwaita; SchemaVersion = 1; Command = "$(rm -rf ~) `x`"; }' | Out-Null
