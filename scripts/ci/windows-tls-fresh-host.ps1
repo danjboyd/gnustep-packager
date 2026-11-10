@@ -11,7 +11,7 @@ store, so run it only on a throwaway runner or VM.
    URL) as an MSI, with gnustep-base's GSTLS resources staged, and installs it.
 2. Stops on-demand root updates and, for each candidate URL in turn, finds the
    root its chain ends in, checks that root is in the staged bundle, and
-   removes it from the machine's Root and AuthRoot stores.
+   removes it from the machine's Root and AuthRoot stores and the user's Root.
 3. Runs the cases through the installed launcher:
      control  bundle moved away                         -> must FAIL
      bundled  bundle in place                           -> must PASS
@@ -21,8 +21,18 @@ store, so run it only on a throwaway runner or VM.
    A URL whose control case passes isn't isolating the root (another trust path
    exists), so the script moves on to the next candidate.
 
-Writes results.json and a table, and exits 1 unless one candidate gave a
-failing control with passing bundled and envfile cases.
+4. Puts the machine back: re-adds every removed certificate, returns the
+   registry values it changed (Windows Error Reporting, DisableRootAutoUpdate)
+   to exactly their prior presence, kind and data, and checks both.
+
+Before the cases, a sanity fetch with the store intact must pass. After each
+case it ends only processes running from the install root (the app, and the
+bundled gdnc), and records any that survive. gdnc/gdomap/gpbs running from
+elsewhere are listed but left alone.
+
+Writes results.json (cases, skipped checks, restoration, cleanup) and exits 1
+unless one candidate gave a failing control with passing bundled and envfile
+cases, the restoration checks out, and no owned process was left.
 #>
 param(
   [Parameter(Mandatory = $true)]
@@ -184,6 +194,76 @@ function Get-GpChainRoot {
   }
 }
 
+# Everything Remove-GpRoot took out, so Restore-GpCertificates can put it back.
+# Each was present before (that's why it was removed), so putting it back is
+# the prior state. The runner agent itself may talk to GitHub through this
+# store, so it must not be left changed.
+$script:removedCerts = [System.Collections.Generic.List[psobject]]::new()
+function Restore-GpCertificates {
+  foreach ($r in $script:removedCerts) {
+    try {
+      $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($r.Store, $r.Location)
+      $store.Open("ReadWrite")
+      $store.Add($r.Certificate)
+      $store.Close()
+    } catch {
+      $script:restoreProblems.Add("could not re-add $($r.Certificate.Thumbprint) to $($r.Location)\$($r.Store): $($_.Exception.Message)") | Out-Null
+    }
+  }
+}
+function Test-GpCertificatesRestored {
+  $out = @()
+  foreach ($r in $script:removedCerts) {
+    $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($r.Store, $r.Location)
+    $store.Open("ReadOnly")
+    $present = @($store.Certificates.Find("FindByThumbprint", $r.Certificate.Thumbprint, $false)).Count -gt 0
+    $store.Close()
+    $out += [pscustomobject]@{ Store = "$($r.Location)\$($r.Store)"; Thumbprint = $r.Certificate.Thumbprint; Present = $present }
+  }
+  return ,$out
+}
+
+# Registry values this script changes, captured before the change and put
+# back exactly: the key's and the value's presence, the value's kind and data.
+function Get-GpRegSnapshot {
+  param([string]$Key, [string]$Name)
+  $snap = [ordered]@{ Key = $Key; Name = $Name; KeyExisted = (Test-Path $Key); ValueExisted = $false; Kind = $null; Data = $null }
+  if ($snap.KeyExisted) {
+    $k = Get-Item -Path $Key
+    if ($k.GetValueNames() -contains $Name) {
+      $snap.ValueExisted = $true
+      $snap.Kind = $k.GetValueKind($Name).ToString()
+      $snap.Data = $k.GetValue($Name, $null, "DoNotExpandEnvironmentNames")
+    }
+  }
+  return [pscustomobject]$snap
+}
+function Restore-GpRegSnapshot {
+  param($Snap)
+  try {
+    if ($Snap.ValueExisted) {
+      Set-ItemProperty -Path $Snap.Key -Name $Snap.Name -Value $Snap.Data -Type $Snap.Kind
+    } elseif (Test-Path $Snap.Key) {
+      Remove-ItemProperty -Path $Snap.Key -Name $Snap.Name -ErrorAction SilentlyContinue
+      # A key this script created goes too, if nothing else was put in it.
+      if (-not $Snap.KeyExisted) {
+        $k = Get-Item -Path $Snap.Key
+        if ($k.ValueCount -eq 0 -and $k.SubKeyCount -eq 0) { Remove-Item -Path $Snap.Key }
+      }
+    }
+  } catch {
+    $script:restoreProblems.Add("could not restore $($Snap.Key)\$($Snap.Name): $($_.Exception.Message)") | Out-Null
+  }
+}
+function Test-GpRegRestored {
+  param($Snap)
+  $now = Get-GpRegSnapshot -Key $Snap.Key -Name $Snap.Name
+  $same = ($now.ValueExisted -eq $Snap.ValueExisted) -and ($now.Kind -eq $Snap.Kind) -and ("$($now.Data)" -eq "$($Snap.Data)")
+  if (-not $Snap.KeyExisted -and $Snap.ValueExisted -eq $false) { $same = $same -and -not ($now.KeyExisted -and @(Get-Item $Snap.Key).ValueCount -eq 0) }
+  return [pscustomobject]@{ Key = $Snap.Key; Name = $Snap.Name; Before = "existed=$($Snap.ValueExisted) kind=$($Snap.Kind) data=$($Snap.Data) keyExisted=$($Snap.KeyExisted)"; After = "existed=$($now.ValueExisted) kind=$($now.Kind) data=$($now.Data) keyExisted=$($now.KeyExisted)"; Restored = $same }
+}
+$script:restoreProblems = [System.Collections.Generic.List[string]]::new()
+
 function Remove-GpRoot {
   param([string]$Thumbprint)
   $removed = @()
@@ -194,6 +274,7 @@ function Remove-GpRoot {
     foreach ($c in @($store.Certificates.Find("FindByThumbprint", $Thumbprint, $false))) {
       $store.Remove($c)
       $removed += "$($loc[1])\$storeName"
+      $script:removedCerts.Add([pscustomobject]@{ Store = $storeName; Location = $loc[1]; Certificate = $c }) | Out-Null
     }
     $store.Close()
   }
@@ -214,12 +295,33 @@ function Test-GpHostFetch {
 # Its output goes to files, so no child holds the step's console pipes open,
 # and a case that writes no result reports the exit code and stderr instead.
 $caseNumber = 0
+# Ends only what this script started: the case's process tree, and anything
+# still running from the install root (the app, and gdnc from
+# runtime\System\Tools). Then checks nothing owned is left, and lists helpers
+# running from elsewhere without touching them.
+$script:cleanup = [System.Collections.Generic.List[psobject]]::new()
+function Get-GpOwnedProcesses {
+  return ,@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase) })
+}
 function Stop-GpCaseProcesses {
-  param($Proc)
-  if ($Proc -and -not $Proc.HasExited) { & taskkill.exe /T /F /PID $Proc.Id 2>&1 | Out-Null }
-  Get-Process -ErrorAction SilentlyContinue | Where-Object {
-    ($_.Path -and $_.Path.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase)) -or $_.ProcessName -in @("WerFault", "WerFaultSecure")
-  } | Stop-Process -Force -ErrorAction SilentlyContinue
+  param($Proc, [string]$Tag)
+  $errors = @()
+  if ($Proc -and -not $Proc.HasExited) {
+    $out = & taskkill.exe /T /F /PID $Proc.Id 2>&1
+    # A tree that ended on its own between the check and the kill isn't an error.
+    if ($LASTEXITCODE -ne 0 -and -not $Proc.HasExited) { $errors += "taskkill $($Proc.Id): $out" }
+  }
+  foreach ($p in (Get-GpOwnedProcesses)) {
+    try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { $errors += "stop $($p.ProcessName)[$($p.Id)]: $($_.Exception.Message)" }
+  }
+  Start-Sleep -Milliseconds 500
+  $owned = @((Get-GpOwnedProcesses) | ForEach-Object { "$($_.ProcessName)[$($_.Id)] $($_.Path)" })
+  $other = @(Get-Process -Name gdnc, gdomap, gpbs -ErrorAction SilentlyContinue | Where-Object { -not ($_.Path -and $_.Path.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase)) } | ForEach-Object { "$($_.ProcessName)[$($_.Id)] $($_.Path)" })
+  $script:cleanup.Add([pscustomobject]@{ Case = $Tag; OwnedLeft = $owned; CleanupErrors = $errors; UnownedHelpersSeen = $other }) | Out-Null
+  $msg = if ($owned.Count -eq 0) { "  cleanup ${Tag}: nothing left from the install root" } else { "  cleanup ${Tag}: OWNED PROCESS LEFT " + [string]::Join(", ", $owned) }
+  if ($errors.Count -gt 0) { $msg += "; errors: " + [string]::Join("; ", $errors) }
+  if ($other.Count -gt 0) { $msg += "; (observed, not ours, left alone: " + [string]::Join(", ", $other) + ")" }
+  Write-GpStep $msg
 }
 function Invoke-GpCase {
   param([string]$Url, [hashtable]$Environment = @{}, [string]$Executable = $launcher.FullName)
@@ -249,7 +351,7 @@ function Invoke-GpCase {
     foreach ($k in $Environment.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
   }
   $state = if ($proc.HasExited) { "$(Split-Path -Leaf $Executable) exit $($proc.ExitCode)" } else { "still running at 120 s" }
-  Stop-GpCaseProcesses -Proc $proc
+  Stop-GpCaseProcesses -Proc $proc -Tag $tag
   if (Test-Path $resultFile) { return ([string](Get-Content -Raw $resultFile)).Trim() }
   $err = ""
   foreach ($f in @($stderr, $launcherLog)) {
@@ -260,99 +362,146 @@ function Invoke-GpCase {
   return "FAIL no result ($state; stderr: $err)"
 }
 
-# Windows Error Reporting would hold a crashed process open behind a dialog.
+# --- 2. Run the cases, then restore the machine -----------------------------
+
+# Everything this script changes on the machine, captured first.
 $werKey = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting"
-New-Item -Path $werKey -Force | Out-Null
-Set-ItemProperty -Path $werKey -Name "DontShowUI" -Value 1 -Type DWord
-Set-ItemProperty -Path $werKey -Name "Disabled" -Value 1 -Type DWord
-
-# Sanity: before any root is removed, the installed app must fetch the first
-# candidate. If it doesn't, the cases below can't mean anything, so stop here
-# with the launcher's and the bare tool's output.
-$sanity = Invoke-GpCase -Url $CandidateUrls[0]
-Write-GpStep "sanity (store intact, bundle in place): $sanity"
-if (-not $sanity.StartsWith("PASS")) {
-  $env:PATH = (Join-Path $installRoot "runtime\bin") + ";" + $env:PATH
-  $bare = Invoke-GpCase -Url $CandidateUrls[0] -Executable (Join-Path $installRoot "app\gp-tls-fetch.exe")
-  Write-GpStep "sanity, tool run directly with runtime\bin on PATH: $bare"
-  @([pscustomobject]@{ Url = $CandidateUrls[0]; Sanity = $sanity; SanityDirect = $bare; Isolated = $false }) | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $WorkRoot "results.json") -Encoding utf8
-  Write-GpStep "RESULT: the installed app can't fetch https with the store intact; no TLS case was run."
-  exit 1
-}
-
-# --- 2. Isolate a root -------------------------------------------------------
-
 $policyKey = "HKLM:\SOFTWARE\Policies\Microsoft\SystemCertificates\AuthRoot"
-New-Item -Path $policyKey -Force | Out-Null
-Set-ItemProperty -Path $policyKey -Name "DisableRootAutoUpdate" -Value 1 -Type DWord
-Write-GpStep "DisableRootAutoUpdate set"
+$regSnapshots = @(
+  (Get-GpRegSnapshot -Key $werKey -Name "DontShowUI"),
+  (Get-GpRegSnapshot -Key $werKey -Name "Disabled"),
+  (Get-GpRegSnapshot -Key $policyKey -Name "DisableRootAutoUpdate")
+)
+foreach ($snap in $regSnapshots) { Write-GpStep "before: $($snap.Key)\$($snap.Name) existed=$($snap.ValueExisted) kind=$($snap.Kind) data=$($snap.Data) keyExisted=$($snap.KeyExisted)" }
 
-$ours = Get-GpPemThumbprints -Path $bundle.FullName
-Write-GpStep "bundle has $($ours.Count) certificates"
-
-$olderList = $null
-try {
-  $zip = Join-Path $WorkRoot "older.zip"
-  Invoke-WebRequest -Uri $OlderListUrl -OutFile $zip -UseBasicParsing
-  $olderDir = Join-Path $WorkRoot "older"
-  Expand-Archive -Path $zip -DestinationPath $olderDir -Force
-  $olderList = Get-ChildItem -Path $olderDir -Recurse -Filter "ca-certificates.crt" | Where-Object { $_.Directory.Name -eq "GSTLS" } | Select-Object -First 1
-} catch {
-  Write-GpStep "could not get the older list: $($_.Exception.Message)"
-}
-$older = if ($olderList) { Get-GpPemThumbprints -Path $olderList.FullName } else { $null }
-if ($older) { Write-GpStep "older list (ObjcMarkdown 0.2.6) has $($older.Count) certificates" }
-
+$sanity = ""
+$sanityDirect = ""
 $results = [System.Collections.Generic.List[psobject]]::new()
 $isolated = $false
-foreach ($url in $CandidateUrls) {
-  try { $root = Get-GpChainRoot -Url $url } catch { Write-GpStep "${url}: no chain ($($_.Exception.Message))"; continue }
-  $thumb = $root.Thumbprint
-  Write-GpStep "${url}: root $($root.Subject) [$thumb]"
-  if (-not $ours.Contains($thumb)) { Write-GpStep "  not in the bundle; next"; continue }
+$skipped = [System.Collections.Generic.List[string]]::new()
+$skipped.Add("MSI backend smoke launch (validation.smoke.enabled=false): not run, so not a pass. The tool exits after one fetch; the MSI install, layout and uninstall validation did run.") | Out-Null
+try {
+  # Windows Error Reporting would hold a crashed process open behind a dialog.
+  New-Item -Path $werKey -Force | Out-Null
+  Set-ItemProperty -Path $werKey -Name "DontShowUI" -Value 1 -Type DWord
+  Set-ItemProperty -Path $werKey -Name "Disabled" -Value 1 -Type DWord
 
-  $removedFrom = Remove-GpRoot -Thumbprint $thumb
-  $hostFetch = Test-GpHostFetch -Url $url
-  Write-GpStep "  removed from: $([string]::Join(',', $removedFrom)); host fetch now: $hostFetch"
+  # Sanity: before any root is removed, the installed app must fetch the first
+  # candidate. If it doesn't, the cases below can't mean anything.
+  $sanity = Invoke-GpCase -Url $CandidateUrls[0]
+  Write-GpStep "sanity (store intact, bundle in place): $sanity"
+  if (-not $sanity.StartsWith("PASS")) {
+    $savedPath = $env:PATH
+    $env:PATH = (Join-Path $installRoot "runtime\bin") + ";" + $env:PATH
+    $sanityDirect = Invoke-GpCase -Url $CandidateUrls[0] -Executable (Join-Path $installRoot "app\gp-tls-fetch.exe")
+    $env:PATH = $savedPath
+    Write-GpStep "sanity, tool run directly with runtime\bin on PATH: $sanityDirect"
+    $skipped.Add("All TLS cases: the sanity fetch failed, so no root was removed.") | Out-Null
+  } else {
+    New-Item -Path $policyKey -Force | Out-Null
+    Set-ItemProperty -Path $policyKey -Name "DisableRootAutoUpdate" -Value 1 -Type DWord
+    Write-GpStep "DisableRootAutoUpdate set"
 
-  Move-Item -Force $bundle.FullName $bundleAside
-  $control = Invoke-GpCase -Url $url
-  Write-GpStep "  control (no bundle): $control"
-  if ($control.StartsWith("PASS")) {
-    Move-Item -Force $bundleAside $bundle.FullName
-    $results.Add([pscustomobject]@{ Url = $url; Root = $root.Subject; Thumbprint = $thumb; RemovedFrom = [string]::Join(",", $removedFrom); HostFetch = $hostFetch; Control = $control; Bundled = ""; EnvFile = ""; OlderList = ""; Isolated = $false }) | Out-Null
-    continue
+    $ours = Get-GpPemThumbprints -Path $bundle.FullName
+    Write-GpStep "bundle has $($ours.Count) certificates"
+
+    $olderList = $null
+    try {
+      $zip = Join-Path $WorkRoot "older.zip"
+      Invoke-WebRequest -Uri $OlderListUrl -OutFile $zip -UseBasicParsing
+      $olderDir = Join-Path $WorkRoot "older"
+      Expand-Archive -Path $zip -DestinationPath $olderDir -Force
+      $olderList = Get-ChildItem -Path $olderDir -Recurse -Filter "ca-certificates.crt" | Where-Object { $_.Directory.Name -eq "GSTLS" } | Select-Object -First 1
+    } catch {
+      Write-GpStep "could not get the older list: $($_.Exception.Message)"
+    }
+    $older = if ($olderList) { Get-GpPemThumbprints -Path $olderList.FullName } else { $null }
+    if ($older) { Write-GpStep "older list (ObjcMarkdown 0.2.6) has $($older.Count) certificates" } else { $skipped.Add("Older-list case: the ObjcMarkdown 0.2.6 list could not be fetched.") | Out-Null }
+
+    foreach ($url in $CandidateUrls) {
+      try { $root = Get-GpChainRoot -Url $url } catch { Write-GpStep "${url}: no chain ($($_.Exception.Message))"; $skipped.Add("${url}: no chain could be built.") | Out-Null; continue }
+      $thumb = $root.Thumbprint
+      Write-GpStep "${url}: root $($root.Subject) [$thumb]"
+      if (-not $ours.Contains($thumb)) { Write-GpStep "  not in the bundle; next"; $skipped.Add("${url}: root $($root.Subject) is not in the bundle.") | Out-Null; continue }
+
+      $removedFrom = Remove-GpRoot -Thumbprint $thumb
+      $hostFetch = Test-GpHostFetch -Url $url
+      Write-GpStep "  removed from: $([string]::Join(',', $removedFrom)); host fetch now: $hostFetch"
+
+      Move-Item -Force $bundle.FullName $bundleAside
+      $control = Invoke-GpCase -Url $url
+      Write-GpStep "  control (no bundle): $control"
+      if ($control.StartsWith("PASS")) {
+        Move-Item -Force $bundleAside $bundle.FullName
+        $results.Add([pscustomobject]@{ Url = $url; Root = $root.Subject; Thumbprint = $thumb; RemovedFrom = [string]::Join(",", $removedFrom); HostFetch = $hostFetch; Control = $control; Bundled = "not run"; EnvFile = "not run"; OlderList = "not run"; Isolated = $false }) | Out-Null
+        $skipped.Add("${url}: control passed with the root removed (another trust path), so its other cases were not run.") | Out-Null
+        continue
+      }
+
+      $envFile = Invoke-GpCase -Url $url -Environment @{ GS_TLS_CA_FILE = $bundleCopy }
+      Write-GpStep "  GS_TLS_CA_FILE: $envFile"
+
+      $olderResult = "not run (no older list)"
+      if ($olderList) {
+        Copy-Item -Force $olderList.FullName $bundle.FullName
+        $olderResult = Invoke-GpCase -Url $url
+        $olderResult = "{0} (root in that list: {1})" -f $olderResult, $older.Contains($thumb)
+        Write-GpStep "  older list: $olderResult"
+        Remove-Item -Force $bundle.FullName
+      }
+
+      Move-Item -Force $bundleAside $bundle.FullName
+      $bundled = Invoke-GpCase -Url $url
+      Write-GpStep "  bundled: $bundled"
+
+      $results.Add([pscustomobject]@{ Url = $url; Root = $root.Subject; Thumbprint = $thumb; RemovedFrom = [string]::Join(",", $removedFrom); HostFetch = $hostFetch; Control = $control; Bundled = $bundled; EnvFile = $envFile; OlderList = $olderResult; Isolated = $true }) | Out-Null
+      $isolated = $true
+      break
+    }
   }
-
-  $envFile = Invoke-GpCase -Url $url -Environment @{ GS_TLS_CA_FILE = $bundleCopy }
-  Write-GpStep "  GS_TLS_CA_FILE: $envFile"
-
-  $olderResult = "not run (no older list)"
-  if ($olderList) {
-    Copy-Item -Force $olderList.FullName $bundle.FullName
-    $olderResult = Invoke-GpCase -Url $url
-    $olderResult = "{0} (root in that list: {1})" -f $olderResult, $older.Contains($thumb)
-    Write-GpStep "  older list: $olderResult"
-    Remove-Item -Force $bundle.FullName
-  }
-
-  Move-Item -Force $bundleAside $bundle.FullName
-  $bundled = Invoke-GpCase -Url $url
-  Write-GpStep "  bundled: $bundled"
-
-  $results.Add([pscustomobject]@{ Url = $url; Root = $root.Subject; Thumbprint = $thumb; RemovedFrom = [string]::Join(",", $removedFrom); HostFetch = $hostFetch; Control = $control; Bundled = $bundled; EnvFile = $envFile; OlderList = $olderResult; Isolated = $true }) | Out-Null
-  $isolated = $true
-  break
+} catch {
+  Write-GpStep "ERROR during the cases: $($_.Exception.Message)"
+  $script:restoreProblems.Add("cases stopped early: $($_.Exception.Message)") | Out-Null
+} finally {
+  if (Test-Path $bundleAside) { Move-Item -Force $bundleAside $bundle.FullName }
+  Restore-GpCertificates
+  foreach ($snap in $regSnapshots) { Restore-GpRegSnapshot -Snap $snap }
 }
 
-$results | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $WorkRoot "results.json") -Encoding utf8
+# Check the restoration before reporting anything.
+$certCheck = Test-GpCertificatesRestored
+$regCheck = @($regSnapshots | ForEach-Object { Test-GpRegRestored -Snap $_ })
+foreach ($c in $certCheck) { Write-GpStep "restored? $($c.Store) $($c.Thumbprint): $($c.Present)" }
+foreach ($r in $regCheck) { Write-GpStep "restored? $($r.Key)\$($r.Name): $($r.Restored) (before: $($r.Before); after: $($r.After))" }
+$restored = (@($certCheck | Where-Object { -not $_.Present }).Count -eq 0) -and (@($regCheck | Where-Object { -not $_.Restored }).Count -eq 0) -and ($script:restoreProblems.Count -eq 0)
+$ownedLeft = @($script:cleanup | Where-Object { $_.OwnedLeft.Count -gt 0 -or $_.CleanupErrors.Count -gt 0 })
+
+$report = [ordered]@{
+  Sanity = $sanity
+  SanityDirect = $sanityDirect
+  Cases = $results
+  SkippedChecks = $skipped
+  Restoration = [ordered]@{ Restored = $restored; Certificates = $certCheck; Registry = $regCheck; Problems = $script:restoreProblems }
+  Cleanup = $script:cleanup
+}
+$report | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $WorkRoot "results.json") -Encoding utf8
 $results | Format-List | Out-String -Width 400 | Write-Host
 
-if (-not $isolated) { Write-GpStep "No candidate URL isolated a root (see the lines above: no chain, root not in the bundle, or the control case passed)."; exit 1 }
-$last = $results[$results.Count - 1]
-if ($last.Bundled.StartsWith("PASS") -and $last.EnvFile.StartsWith("PASS")) {
-  Write-GpStep "RESULT: the bundled CA file let the installed app fetch $($last.Url) with its root removed from the store."
-  exit 0
+$exitCode = 1
+if (-not $sanity.StartsWith("PASS")) {
+  Write-GpStep "RESULT: the installed app can't fetch https with the store intact; no TLS case was run."
+} elseif (-not $isolated) {
+  Write-GpStep "RESULT: no candidate URL isolated a root (no chain, root not in the bundle, or the control case passed)."
+} else {
+  $last = $results[$results.Count - 1]
+  if ($last.Bundled.StartsWith("PASS") -and $last.EnvFile.StartsWith("PASS")) {
+    Write-GpStep "RESULT: the bundled CA file let the installed app fetch $($last.Url) with its root removed from the store."
+    $exitCode = 0
+  } else {
+    Write-GpStep "RESULT: the control failed, but the bundled or GS_TLS_CA_FILE case also failed."
+  }
 }
-Write-GpStep "RESULT: the control failed, but the bundled or GS_TLS_CA_FILE case also failed."
-exit 1
+if (-not $restored) { Write-GpStep "RESTORATION FAILED: the machine is not back to its prior state (see results.json)."; $exitCode = 1 }
+else { Write-GpStep "restoration verified: certificates and registry values are as they were before" }
+if ($ownedLeft.Count -gt 0) { Write-GpStep "CLEANUP: an owned process was left or could not be stopped (see results.json)."; $exitCode = 1 }
+exit $exitCode
