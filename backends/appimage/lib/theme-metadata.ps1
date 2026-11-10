@@ -307,8 +307,11 @@ function Get-GpThemeBundleDescriptor {
     $executable = $null
   }
 
+  # Same order as the theme-settings loader: Resources, then a macOS-style
+  # Contents/Resources, then the bundle root.
   $settingsPath = Get-GpFirstExistingFile -Candidates @(
     (Join-Path $resources "ThemeSettings.plist"),
+    (Join-Path (Join-Path (Join-Path $BundlePath "Contents") "Resources") "ThemeSettings.plist"),
     (Join-Path $BundlePath "ThemeSettings.plist")
   )
   $settings = $null

@@ -100,8 +100,9 @@ input that should be there.
     and Info plist.
   - Any of these is null when its source is absent or unreadable.
   - `infoStatus` is `ok`, `absent`, `tooLarge` or `malformed`.
-- **Settings:** `Resources/ThemeSettings.plist`, or `ThemeSettings.plist` at
-  the bundle root.
+- **Settings:** the first of `Resources/ThemeSettings.plist`,
+  `Contents/Resources/ThemeSettings.plist` and `ThemeSettings.plist` at the
+  bundle root, the same order the theme-settings loader uses.
   - `status: "inline"`: the file is at most 256 KiB and parsed. `inline` holds
     its contents.
   - `status: "notInlined"`: the file is larger, and wasn't parsed or copied.

@@ -194,6 +194,15 @@ Describe "AppImage theme metadata" {
       $theme["settings"]["schemaVersion"] | Should -BeNullOrEmpty
     }
 
+    It "looks for settings in Resources, then Contents/Resources, then the bundle root" {
+      $bundle = New-GpTestTheme -ThemesDir $script:systemThemes -Name "Mac" -InfoText "{ }" -SettingsText $null
+      New-GpTestFile -Path (Join-Path $bundle "ThemeSettings.plist") -Text "{ ThemeIdentifier = root; }"
+      New-GpTestFile -Path (Join-Path $bundle "Contents/Resources/ThemeSettings.plist") -Text "{ ThemeIdentifier = contents; }"
+      @((New-GpReport)["themes"])[0]["themeId"] | Should -Be "contents"
+      New-GpTestFile -Path (Join-Path $bundle "Resources/ThemeSettings.plist") -Text "{ ThemeIdentifier = resources; }"
+      @((New-GpReport)["themes"])[0]["themeId"] | Should -Be "resources"
+    }
+
     It "records a malformed settings file as malformed, with no contents" {
       New-GpTestTheme -ThemesDir $script:systemThemes -Name "Broken" -InfoText "{ CFBundleIdentifier = org.example.Broken; }" -SettingsText "{ ThemeIdentifier = " | Out-Null
       $theme = @((New-GpReport)["themes"])[0]
