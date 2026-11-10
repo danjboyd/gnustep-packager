@@ -8,7 +8,9 @@
   the server's root removed from the Windows store, using gnustep-base's
   bundled CA list. It runs a control without the list, `GS_TLS_CA_FILE`, and
   ObjcMarkdown 0.2.6's older list, then restores the machine. Results are in
-  `docs/windows-tls-fresh-host-check.md`.
+  `docs/windows-tls-fresh-host-check.md`. Every restore step runs even if
+  another fails, a case that fails to start still cleans up, and only the
+  job's own processes are ended; tests cover those paths.
 - Docs: the AppImage's `GP_HOST_*` variables (the caller's environment, saved
   by `AppRun` since v0.1.9) are now a documented interface, in "AppImage: the
   Caller's Environment" in `docs/launch-contract.md`. It covers which variables
