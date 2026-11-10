@@ -626,6 +626,7 @@ function New-GpAppImageThemeSidecar {
       bundleId = $theme["bundleId"]
       version = $theme["version"]
       shortVersion = $theme["shortVersion"]
+      infoStatus = $theme["infoStatus"]
       installation = $theme["installation"]
       source = $(if ($theme["origin"] -eq "themeInputs" -and $theme["source"] -is [System.Collections.IDictionary]) { [ordered]@{ repo = $theme["source"]["repo"]; commit = $theme["source"]["resolvedCommit"] } } else { $null })
       origin = $theme["origin"]

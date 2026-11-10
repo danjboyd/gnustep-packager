@@ -59,6 +59,7 @@ input that should be there.
       "bundleId": "org.gnustep.Adwaita",
       "version": "14",
       "shortVersion": "1.4.0",
+      "infoStatus": "ok",
       "installation": {
         "bundledPath": "usr/GNUstep/System/Library/Themes/Adwaita.theme",
         "executableSha256": "<hex>",

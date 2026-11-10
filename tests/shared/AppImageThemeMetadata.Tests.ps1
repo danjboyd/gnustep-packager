@@ -397,7 +397,7 @@ Describe "AppImage theme metadata" {
       [System.IO.File]::WriteAllBytes($artifact, [byte[]](1..8))
       $sidecar = New-GpAppImageThemeSidecar -Report (New-GpReport) -ArtifactPath $artifact
       $theme = @($sidecar["themes"])[0]
-      @($theme.Keys) | Should -Be @("name", "themeId", "bundleId", "version", "shortVersion", "installation", "source", "origin", "settings")
+      @($theme.Keys) | Should -Be @("name", "themeId", "bundleId", "version", "shortVersion", "infoStatus", "installation", "source", "origin", "settings")
       $theme["source"] | Should -BeNullOrEmpty
       $sidecar["schema"] | Should -Be 1
     }
