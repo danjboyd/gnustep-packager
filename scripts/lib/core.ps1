@@ -2283,6 +2283,135 @@ function Get-GpElfBuildId {
   return $null
 }
 
+# The LC_UUID of each architecture in a Mach-O file, thin or universal, as
+# [ordered]@{ arch; uuid } with the UUID in the uppercase 8-4-4-4-12 form
+# `dwarfdump --uuid` prints. $null when the file is not Mach-O or no slice
+# has a UUID. Parsed directly, so it needs no otool or dwarfdump on the host.
+function Get-GpMachOUuids {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $stream = $null
+  try {
+    $stream = [System.IO.File]::OpenRead($Path)
+    $reader = [System.IO.BinaryReader]::new($stream)
+    $length = $stream.Length
+
+    $readUInt = {
+      param([long]$Offset, [int]$Size, [bool]$BigEndian)
+      if ($Offset -lt 0 -or ($Offset + $Size) -gt $length) {
+        throw "truncated"
+      }
+      $stream.Position = $Offset
+      $bytes = $reader.ReadBytes($Size)
+      if ($BigEndian) {
+        [array]::Reverse($bytes)
+      }
+      if ($Size -eq 8) {
+        return [long][System.BitConverter]::ToUInt64($bytes, 0)
+      }
+      return [long][System.BitConverter]::ToUInt32($bytes, 0)
+    }
+
+    $archName = {
+      param([long]$CpuType, [long]$CpuSubtype)
+      $subtype = $CpuSubtype -band 0x00FFFFFF
+      switch ($CpuType) {
+        0x00000007 { return "i386" }
+        0x01000007 { return $(if ($subtype -eq 8) { "x86_64h" } else { "x86_64" }) }
+        0x0000000C { return "arm" }
+        0x0100000C { return $(if ($subtype -eq 2) { "arm64e" } else { "arm64" }) }
+        0x0200000C { return "arm64_32" }
+        0x00000012 { return "ppc" }
+        0x01000012 { return "ppc64" }
+        default { return ("cputype-0x{0:x}" -f $CpuType) }
+      }
+    }
+
+    # One thin Mach-O image at $Base: its architecture and LC_UUID, or $null
+    # when the bytes there are not a Mach-O header.
+    $readSlice = {
+      param([long]$Base, [long]$SliceEnd)
+      $magic = & $readUInt $Base 4 $false
+      switch ($magic) {
+        0xFEEDFACEL { $is64 = $false; $bigEndian = $false }
+        0xFEEDFACFL { $is64 = $true; $bigEndian = $false }
+        0xCEFAEDFEL { $is64 = $false; $bigEndian = $true }
+        0xCFFAEDFEL { $is64 = $true; $bigEndian = $true }
+        default { return $null }
+      }
+      $cpuType = & $readUInt ($Base + 4) 4 $bigEndian
+      $cpuSubtype = & $readUInt ($Base + 8) 4 $bigEndian
+      $commandCount = & $readUInt ($Base + 16) 4 $bigEndian
+      $position = $Base + $(if ($is64) { 32 } else { 28 })
+      $uuid = $null
+      for ($index = 0; $index -lt $commandCount -and $position + 8 -le $SliceEnd; $index++) {
+        $command = & $readUInt $position 4 $bigEndian
+        $commandSize = & $readUInt ($position + 4) 4 $bigEndian
+        if ($commandSize -lt 8) {
+          break
+        }
+        # LC_UUID: cmd, cmdsize, then 16 bytes.
+        if ($command -eq 0x1B -and $commandSize -ge 24 -and $position + 24 -le $SliceEnd) {
+          $stream.Position = $position + 8
+          $hex = -join ($reader.ReadBytes(16) | ForEach-Object { $_.ToString("X2") })
+          $uuid = "{0}-{1}-{2}-{3}-{4}" -f $hex.Substring(0, 8), $hex.Substring(8, 4), $hex.Substring(12, 4), $hex.Substring(16, 4), $hex.Substring(20, 12)
+          break
+        }
+        $position += $commandSize
+      }
+      if ($null -eq $uuid) {
+        return $null
+      }
+      return [ordered]@{
+        arch = & $archName $cpuType $cpuSubtype
+        uuid = $uuid
+      }
+    }
+
+    $results = [System.Collections.Generic.List[object]]::new()
+    $fatMagic = & $readUInt 0 4 $true
+    if ($fatMagic -eq 0xCAFEBABEL -or $fatMagic -eq 0xCAFEBABFL) {
+      # Universal binary, big-endian headers. Java class files share 0xCAFEBABE;
+      # their "count" is the class version (45 or more), so a small count and
+      # a Mach-O header in every slice tell them apart.
+      $is64Fat = $fatMagic -eq 0xCAFEBABFL
+      $count = & $readUInt 4 4 $true
+      if ($count -lt 1 -or $count -gt 16) {
+        return $null
+      }
+      $entrySize = if ($is64Fat) { 32 } else { 20 }
+      for ($index = 0; $index -lt $count; $index++) {
+        $entry = 8 + ($index * $entrySize)
+        $offset = & $readUInt ($entry + 8) $(if ($is64Fat) { 8 } else { 4 }) $true
+        $size = & $readUInt ($entry + $(if ($is64Fat) { 16 } else { 12 })) $(if ($is64Fat) { 8 } else { 4 }) $true
+        $slice = & $readSlice $offset ([math]::Min($length, $offset + $size))
+        if ($null -ne $slice) {
+          $results.Add($slice) | Out-Null
+        }
+      }
+    } else {
+      $slice = & $readSlice 0 $length
+      if ($null -ne $slice) {
+        $results.Add($slice) | Out-Null
+      }
+    }
+
+    if ($results.Count -eq 0) {
+      return $null
+    }
+    return , $results.ToArray()
+  } catch {
+    return $null
+  } finally {
+    if ($null -ne $stream) {
+      $stream.Dispose()
+    }
+  }
+}
+
 function Get-GpProvenanceSettings {
   param(
     [Parameter(Mandatory = $true)]
@@ -2348,13 +2477,21 @@ function Get-GpPayloadProvenanceFiles {
     if ([System.IO.Path]::IsPathRooted($relativePath) -or $relativePath -eq ".." -or $relativePath.StartsWith("../")) {
       throw "Provenance file $($File.FullName) is not inside the payload root $root."
     }
-    [pscustomobject][ordered]@{
+    $description = [ordered]@{
       path = $relativePath
       role = $Role
       sizeBytes = $File.Length
       sha256 = Get-GpFileSha256 -Path $File.FullName
       elfBuildId = Get-GpElfBuildId -Path $File.FullName
     }
+    # Mach-O files (the DMG backend's payload) carry an LC_UUID per
+    # architecture instead of a GNU build ID. Only those files get the key,
+    # so AppImage and MSI provenance is unchanged.
+    $machOUuids = Get-GpMachOUuids -Path $File.FullName
+    if ($null -ne $machOUuids) {
+      $description["machoUuids"] = $machOUuids
+    }
+    [pscustomobject]$description
   }
 
   if (-not [string]::IsNullOrWhiteSpace($EntryPath) -and (Test-Path -LiteralPath $EntryPath -PathType Leaf)) {
@@ -2623,7 +2760,11 @@ function Write-GpProvenanceDocument {
     [Parameter(Mandatory = $true)]
     [string]$PayloadRoot,
     [string]$EntryPath,
-    [string[]]$RelatedArtifactPaths = @()
+    [string[]]$RelatedArtifactPaths = @(),
+    # Files already described with Get-GpPayloadProvenanceFiles, for a
+    # backend whose payload is gone (or changed) by the time the artifact is
+    # final, such as the DMG's signed volume tree. PayloadRoot is then unused.
+    [object[]]$Files
   )
 
   $settings = Get-GpProvenanceSettings -Context $Context
@@ -2660,7 +2801,7 @@ function Write-GpProvenanceDocument {
     source = Get-GpSourceRevision -Path $Context.ManifestRoot
     packager = Get-GpSourceRevision -Path $Context.ToolRoot
     toolchain = Get-GpToolchainProvenanceSummary -Context $Context
-    files = @(Get-GpPayloadProvenanceFiles -PayloadRoot $PayloadRoot -LibraryPatterns $settings.Libraries -EntryPath $EntryPath)
+    files = @(if ($PSBoundParameters.ContainsKey("Files")) { $Files } else { Get-GpPayloadProvenanceFiles -PayloadRoot $PayloadRoot -LibraryPatterns $settings.Libraries -EntryPath $EntryPath })
   }
 
   $path = Get-GpArtifactSidecarPath -ArtifactPath $ArtifactPath -Suffix "provenance.json"

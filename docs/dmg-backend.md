@@ -223,7 +223,8 @@ Reference fixture:
    staples it when enabled and credentials are present.
 9. Writes the `.dmg.sha256` sidecar (`checksumSidecar`) and the Sparkle
    appcast (`updates.appcast`) from the final, stapled bytes.
-10. Writes the `.metadata.json` and `.diagnostics.txt` sidecars, deletes the
+10. Writes the `.provenance.json` (`provenance`), `.metadata.json` and
+   `.diagnostics.txt` sidecars, deletes the
    read-write image and the volume folder, and detaches anything it attached,
    also on failure.
 
@@ -260,6 +261,7 @@ Each check is printed as `PASS`, `FAIL`, `WARN`, `INFO` or `SKIP`.
 dist/packages/
   <name>-<version>-macos-<arch>.dmg
   <name>-<version>-macos-<arch>.metadata.json
+  <name>-<version>-macos-<arch>.provenance.json  (provenance.enabled, the default)
   <name>-<version>-macos-<arch>.diagnostics.txt
   <name>-<version>-macos-<arch>.dmg.sha256   (checksumSidecar)
   <name>-<version>-macos-<arch>.appcast.xml  (updates.appcast)
@@ -286,6 +288,16 @@ volume name, bundle identifier, versions, architectures, Finder layout result,
 signing identity and the app's signature details, the notarization status
 (`disabled`, `skipped-no-credentials`, `skipped-ad-hoc`, `accepted`), ignored
 manifest settings, warnings, tool paths and host details.
+
+The provenance sidecar (`provenance` in `docs/manifest.md`) is safe to
+publish: no build-machine paths. It describes the app as it ships, the signed
+copy on the volume, so each file's SHA-256 is the signed file's. Its paths are
+relative to the volume root (`<Name>.app/Contents/...`), and each Mach-O file
+carries one `LC_UUID` per architecture (`machoUuids`). Code signing doesn't
+change a UUID, so they match `dwarfdump --uuid` on the build's own output and
+the binary images in a macOS crash report. The `toolchain` build-ID check in
+`validate` compares ELF build IDs only; on a DMG payload it reports that
+there was nothing to compare.
 
 ## Signing And Notarization
 Without an Apple Developer account the useful configuration is the default:

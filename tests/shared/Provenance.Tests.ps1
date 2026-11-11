@@ -124,6 +124,85 @@ Describe "Release provenance" {
     }
   }
 
+  It "reads the LC_UUID of thin and universal Mach-O files, and nothing from other files" {
+    # A thin little-endian Mach-O image: header, an unrelated load command,
+    # then LC_UUID.
+    $newSlice = {
+      param([bool]$Is64, [uint32]$CpuType, [uint32]$CpuSubtype, [byte[]]$Uuid)
+      $bytes = [System.Collections.Generic.List[byte]]::new()
+      $put = { param([uint32]$Value) $bytes.AddRange([byte[]][System.BitConverter]::GetBytes($Value)) }
+      & $put $(if ($Is64) { [uint32]0xFEEDFACFL } else { [uint32]0xFEEDFACEL })
+      & $put $CpuType
+      & $put $CpuSubtype
+      & $put 6        # filetype: MH_DYLIB
+      & $put 2        # ncmds
+      & $put 40       # sizeofcmds
+      & $put 0        # flags
+      if ($Is64) { & $put 0 }
+      & $put 0x2      # LC_SYMTAB, skipped
+      & $put 16
+      & $put 0; & $put 0
+      & $put 0x1B     # LC_UUID
+      & $put 24
+      $bytes.AddRange($Uuid)
+      return , $bytes.ToArray()
+    }
+    $uuidA = [byte[]](0..15)
+    $uuidB = [byte[]](@(0xAB) * 16)
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-provenance-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    try {
+      [System.IO.File]::WriteAllBytes((Join-Path $root "thin.dylib"), (& $newSlice $true 0x0100000C 0 $uuidA))
+      [System.IO.File]::WriteAllBytes((Join-Path $root "thin32"), (& $newSlice $false 7 3 $uuidB))
+
+      # Universal: big-endian fat header, two slices at 4096 and 8192.
+      $x86 = & $newSlice $true 0x01000007 3 $uuidA
+      $arm = & $newSlice $true 0x0100000C 2 $uuidB
+      $fat = [byte[]]::new(8192 + $arm.Length)
+      $putBig = { param([int]$Offset, [uint32]$Value) $raw = [System.BitConverter]::GetBytes($Value); [array]::Reverse($raw); [array]::Copy($raw, 0, $fat, $Offset, 4) }
+      & $putBig 0 ([uint32]0xCAFEBABEL)
+      & $putBig 4 2
+      & $putBig 8 0x01000007; & $putBig 12 3; & $putBig 16 4096; & $putBig 20 $x86.Length; & $putBig 24 12
+      & $putBig 28 0x0100000C; & $putBig 32 2; & $putBig 36 8192; & $putBig 40 $arm.Length; & $putBig 44 14
+      [array]::Copy($x86, 0, $fat, 4096, $x86.Length)
+      [array]::Copy($arm, 0, $fat, 8192, $arm.Length)
+      [System.IO.File]::WriteAllBytes((Join-Path $root "universal"), $fat)
+
+      # A Java class file starts with the same 0xCAFEBABE; its "count" is the class version.
+      [System.IO.File]::WriteAllBytes((Join-Path $root "Main.class"), [byte[]](0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 0x37, 0, 0, 0, 0))
+      New-GpTestElf -Path (Join-Path $root "elf64.so")
+
+      $thin = Get-GpMachOUuids -Path (Join-Path $root "thin.dylib")
+      Assert-GpEqual -Actual $thin.Count -Expected 1 -Message "A thin file has one UUID."
+      Assert-GpEqual -Actual $thin[0].arch -Expected "arm64" -Message "The thin file's architecture should be named."
+      Assert-GpEqual -Actual $thin[0].uuid -Expected "00010203-0405-0607-0809-0A0B0C0D0E0F" -Message "The UUID should be in dwarfdump's form."
+      $thin32 = Get-GpMachOUuids -Path (Join-Path $root "thin32")
+      Assert-GpEqual -Actual "$($thin32[0].arch) $($thin32[0].uuid)" -Expected "i386 ABABABAB-ABAB-ABAB-ABAB-ABABABABABAB" -Message "A 32-bit image should be read."
+
+      $universal = Get-GpMachOUuids -Path (Join-Path $root "universal")
+      Assert-GpEqual -Actual @($universal | ForEach-Object { "$($_.arch) $($_.uuid)" }) -Expected @(
+        "x86_64 00010203-0405-0607-0809-0A0B0C0D0E0F",
+        "arm64e ABABABAB-ABAB-ABAB-ABAB-ABABABABABAB"
+      ) -Message "Each slice of a universal file should be listed in order."
+
+      Assert-GpEqual -Actual (Get-GpMachOUuids -Path (Join-Path $root "Main.class")) -Expected $null -Message "A Java class file isn't Mach-O."
+      Assert-GpEqual -Actual (Get-GpMachOUuids -Path (Join-Path $root "elf64.so")) -Expected $null -Message "An ELF file isn't Mach-O."
+
+      # In the provenance file list, only Mach-O files get machoUuids.
+      $files = @(Get-GpPayloadProvenanceFiles -PayloadRoot $root -LibraryPatterns @("*.dylib", "elf64.so", "universal"))
+      $byName = @{}
+      foreach ($file in $files) { $byName[$file.path] = $file }
+      Assert-GpEqual -Actual @($byName["universal"].machoUuids).Count -Expected 2 -Message "A universal library should carry both UUIDs."
+      Assert-GpEqual -Actual @($byName["thin.dylib"].machoUuids).Count -Expected 1 -Message "A thin library should carry its UUID as a one-item list."
+      Assert-GpTrue -Condition (-not $byName["elf64.so"].PSObject.Properties["machoUuids"]) -Message "An ELF library should have no machoUuids key, so AppImage provenance is unchanged."
+      $json = ConvertTo-Json @{ files = $files } -Depth 10 | ConvertFrom-Json
+      $thinJson = @($json.files | Where-Object { $_.path -eq "thin.dylib" })[0]
+      Assert-GpTrue -Condition ($thinJson.machoUuids -is [System.Array]) -Message "machoUuids should serialize as a JSON array even with one slice."
+    } finally {
+      Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+    }
+  }
+
   It "records the entry and the GNUstep libraries with paths relative to the payload" {
     $root = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-provenance-" + [guid]::NewGuid().ToString("N"))
     $libraryDirectory = Join-Path $root "usr/runtime/lib"
