@@ -658,7 +658,12 @@ The sidecar records:
   DMG volume root, size, SHA-256 and, for an ELF file, its GNU build ID
   (`elfBuildId`). A Mach-O file (DMG) also has `machoUuids`: one
   `{ "arch", "uuid" }` per architecture, from its `LC_UUID`, in the form
-  `dwarfdump --uuid` prints. Other files have no `machoUuids` key. Symbolic
+  `dwarfdump --uuid` prints. Other files have no `machoUuids` key. A PE
+  file (DLL or EXE) with a CodeView debug record also has `peCodeView`: the
+  PDB's `guid` and `age`, its file name (`pdb`, without the build machine's
+  directory) and `symbolKey`, the GUID and age as symbol servers and Windows
+  crash dumps index a PDB (`<pdb>/<symbolKey>/<pdb>`). DLLs linked without
+  one (MinGW without `--build-id` or `-g`) have no `peCodeView` key. Symbolic
   links are left out; the files they point to are listed. A file whose path
   would not be relative to the payload stops packaging rather than publish a
   build machine path.

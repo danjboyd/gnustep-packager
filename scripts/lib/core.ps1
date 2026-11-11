@@ -2412,6 +2412,129 @@ function Get-GpMachOUuids {
   }
 }
 
+# The CodeView (RSDS) record of a PE file (a Windows DLL or EXE): the PDB's
+# GUID and age, and the PDB's file name without its build-machine directory.
+# symbolKey is GUID+age the way symbol servers and crash dumps index a PDB
+# (<pdb>/<symbolKey>/<pdb>). $null when the file is not PE or has no RSDS
+# debug entry, as MinGW builds linked without --build-id or -g often don't.
+function Get-GpPeCodeViewId {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $stream = $null
+  try {
+    $stream = [System.IO.File]::OpenRead($Path)
+    $reader = [System.IO.BinaryReader]::new($stream)
+    $length = $stream.Length
+    $at = {
+      param([long]$Offset, [int]$Size)
+      if ($Offset -lt 0 -or ($Offset + $Size) -gt $length) {
+        throw "truncated"
+      }
+      $stream.Position = $Offset
+      $bytes = $reader.ReadBytes($Size)
+      switch ($Size) {
+        2 { return [long][System.BitConverter]::ToUInt16($bytes, 0) }
+        4 { return [long][System.BitConverter]::ToUInt32($bytes, 0) }
+      }
+    }
+
+    if ($length -lt 0x40 -or (& $at 0 2) -ne 0x5A4D) {
+      return $null
+    }
+    $peHeader = & $at 0x3C 4
+    if ((& $at $peHeader 4) -ne 0x00004550) {
+      return $null
+    }
+    $coff = $peHeader + 4
+    $sectionCount = & $at ($coff + 2) 2
+    $optionalSize = & $at ($coff + 16) 2
+    $optional = $coff + 20
+    $magic = & $at $optional 2
+    $directoryBase = switch ($magic) {
+      0x10B { $optional + 96 }
+      0x20B { $optional + 112 }
+      default { return $null }
+    }
+    $directoryCount = & $at ($directoryBase - 4) 4
+    # IMAGE_DIRECTORY_ENTRY_DEBUG is entry 6.
+    if ($directoryCount -le 6) {
+      return $null
+    }
+    $debugRva = & $at ($directoryBase + 48) 4
+    $debugSize = & $at ($directoryBase + 52) 4
+    if ($debugRva -eq 0 -or $debugSize -eq 0) {
+      return $null
+    }
+
+    # The debug directory's file offset, from the section that holds its RVA.
+    $sections = $optional + $optionalSize
+    $debugOffset = $null
+    for ($index = 0; $index -lt $sectionCount; $index++) {
+      $section = $sections + ($index * 40)
+      $virtualSize = & $at ($section + 8) 4
+      $virtualAddress = & $at ($section + 12) 4
+      $rawSize = & $at ($section + 16) 4
+      $rawPointer = & $at ($section + 20) 4
+      $span = [math]::Max($virtualSize, $rawSize)
+      if ($debugRva -ge $virtualAddress -and $debugRva -lt ($virtualAddress + $span)) {
+        $debugOffset = $rawPointer + ($debugRva - $virtualAddress)
+        break
+      }
+    }
+    if ($null -eq $debugOffset) {
+      return $null
+    }
+
+    # IMAGE_DEBUG_DIRECTORY entries are 28 bytes; type 2 is CodeView.
+    for ($entry = 0; $entry -lt [math]::Floor($debugSize / 28) -and $entry -lt 64; $entry++) {
+      $base = $debugOffset + ($entry * 28)
+      if ((& $at ($base + 12) 4) -ne 2) {
+        continue
+      }
+      $dataSize = & $at ($base + 16) 4
+      $dataPointer = & $at ($base + 24) 4
+      if ($dataSize -lt 24 -or (& $at $dataPointer 4) -ne 0x53445352) {
+        continue
+      }
+      $stream.Position = $dataPointer + 4
+      $guidBytes = $reader.ReadBytes(16)
+      $age = & $at ($dataPointer + 20) 4
+      $nameBytes = [byte[]]@()
+      if ($dataSize -gt 24) {
+        $stream.Position = $dataPointer + 24
+        $nameBytes = $reader.ReadBytes([int][math]::Min($dataSize - 24, 4096))
+      }
+      $terminator = [array]::IndexOf($nameBytes, [byte]0)
+      if ($terminator -ge 0) {
+        $nameBytes = $nameBytes[0..([math]::Max(0, $terminator - 1))]
+        if ($terminator -eq 0) { $nameBytes = [byte[]]@() }
+      }
+      $pdbPath = [System.Text.Encoding]::UTF8.GetString([byte[]]$nameBytes)
+      # Only the file name: the full path is the build machine's.
+      $pdbName = ($pdbPath -split '[\\/]')[-1]
+      $guid = [guid]::new([byte[]]$guidBytes)
+      $guidText = $guid.ToString("D").ToUpperInvariant()
+      return [ordered]@{
+        guid = $guidText
+        age = $age
+        pdb = $(if ([string]::IsNullOrWhiteSpace($pdbName)) { $null } else { $pdbName })
+        symbolKey = ("{0}{1:X}" -f ($guid.ToString("N").ToUpperInvariant()), $age)
+      }
+    }
+  } catch {
+    return $null
+  } finally {
+    if ($null -ne $stream) {
+      $stream.Dispose()
+    }
+  }
+
+  return $null
+}
+
 function Get-GpProvenanceSettings {
   param(
     [Parameter(Mandatory = $true)]
@@ -2486,10 +2609,16 @@ function Get-GpPayloadProvenanceFiles {
     }
     # Mach-O files (the DMG backend's payload) carry an LC_UUID per
     # architecture instead of a GNU build ID. Only those files get the key,
-    # so AppImage and MSI provenance is unchanged.
+    # so AppImage provenance is unchanged.
     $machOUuids = Get-GpMachOUuids -Path $File.FullName
     if ($null -ne $machOUuids) {
       $description["machoUuids"] = $machOUuids
+    }
+    # A PE file (the MSI's DLLs and EXE) with a CodeView record gets its PDB
+    # identity; files without one get no key.
+    $codeView = Get-GpPeCodeViewId -Path $File.FullName
+    if ($null -ne $codeView) {
+      $description["peCodeView"] = $codeView
     }
     [pscustomobject]$description
   }

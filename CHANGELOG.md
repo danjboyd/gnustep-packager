@@ -9,6 +9,10 @@
   `LC_UUID` of every architecture (`machoUuids`, matching `dwarfdump --uuid`),
   read without otool. AppImage and MSI provenance is unchanged. `metadata.json`
   points at it under `artifacts.provenance`.
+- MSI: provenance records each DLL's and EXE's CodeView PDB identity
+  (`peCodeView`: GUID, age, PDB file name and symbol-server key), read without
+  dumpbin. Only the PDB's file name is kept, never its build path. Files
+  without a CodeView record, and AppImage provenance, are unchanged.
 - AppImage: theme metadata for tools that can't run or mount the AppImage,
   such as a theme-settings configurator. When the payload has themes, the
   in-payload `gnustep-packager-theme-report.json` becomes `formatVersion` 2
