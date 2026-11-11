@@ -124,6 +124,79 @@ Describe "Release provenance" {
     }
   }
 
+  It "reads the CodeView PDB identity of PE32 and PE32+ files, and only the PDB's file name" {
+    # A minimal PE: DOS header, PE signature, COFF header, optional header
+    # with 16 data directories (debug = entry 6), one section holding the
+    # debug directory and an RSDS record.
+    $newPe = {
+      param([bool]$Plus, [byte[]]$Guid, [uint32]$Age, [string]$PdbPath, [switch]$NoCodeView)
+      $image = [byte[]]::new(0x400)
+      $put16 = { param([int]$Offset, [int]$Value) [array]::Copy([System.BitConverter]::GetBytes([uint16]$Value), 0, $image, $Offset, 2) }
+      $put32 = { param([int]$Offset, [long]$Value) [array]::Copy([System.BitConverter]::GetBytes([uint32]$Value), 0, $image, $Offset, 4) }
+      & $put16 0 0x5A4D
+      & $put32 0x3C 0x80
+      & $put32 0x80 0x00004550
+      $coff = 0x84
+      $optionalSize = if ($Plus) { 240 } else { 224 }
+      & $put16 ($coff + 2) 1
+      & $put16 ($coff + 16) $optionalSize
+      $optional = $coff + 20
+      & $put16 $optional $(if ($Plus) { 0x20B } else { 0x10B })
+      $directories = $optional + $(if ($Plus) { 112 } else { 96 })
+      & $put32 ($directories - 4) 16
+      & $put32 ($directories + 48) 0x1000
+      & $put32 ($directories + 52) 28
+      $section = $optional + $optionalSize
+      & $put32 ($section + 8) 0x100
+      & $put32 ($section + 12) 0x1000
+      & $put32 ($section + 16) 0x200
+      & $put32 ($section + 20) 0x200
+      # Debug directory at file offset 0x200, the RSDS record at 0x240.
+      & $put32 (0x200 + 12) $(if ($NoCodeView) { 4 } else { 2 })
+      $nameBytes = [System.Text.Encoding]::UTF8.GetBytes($PdbPath + [char]0)
+      & $put32 (0x200 + 16) (24 + $nameBytes.Length)
+      & $put32 (0x200 + 24) 0x240
+      & $put32 0x240 0x53445352
+      [array]::Copy($Guid, 0, $image, 0x244, 16)
+      & $put32 0x254 $Age
+      [array]::Copy($nameBytes, 0, $image, 0x258, $nameBytes.Length)
+      return , $image
+    }
+    $guidBytes = [byte[]](0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10)
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-provenance-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    try {
+      [System.IO.File]::WriteAllBytes((Join-Path $root "libgnustep-base-1_31.dll"), (& $newPe $true $guidBytes 3 'D:\a\build\obj\libgnustep-base-1_31.pdb'))
+      [System.IO.File]::WriteAllBytes((Join-Path $root "pe32.dll"), (& $newPe $false $guidBytes 10 "/home/builder/out/pe32.pdb"))
+      [System.IO.File]::WriteAllBytes((Join-Path $root "nodebug.dll"), (& $newPe $true $guidBytes 1 "x.pdb" -NoCodeView))
+      Set-Content -Path (Join-Path $root "text.dll") -Value "MZ but not a PE file"
+      New-GpTestElf -Path (Join-Path $root "elf64.so")
+
+      $plus = Get-GpPeCodeViewId -Path (Join-Path $root "libgnustep-base-1_31.dll")
+      Assert-GpEqual -Actual $plus.guid -Expected "04030201-0605-0807-090A-0B0C0D0E0F10" -Message "The GUID should be read with its mixed-endian layout."
+      Assert-GpEqual -Actual $plus.age -Expected 3 -Message "The age should be read."
+      Assert-GpEqual -Actual $plus.pdb -Expected "libgnustep-base-1_31.pdb" -Message "Only the PDB's file name should be kept, not the build machine's directory."
+      Assert-GpEqual -Actual $plus.symbolKey -Expected "0403020106050807090A0B0C0D0E0F103" -Message "The symbol-server key is the GUID's hex digits and the age in hex."
+      $pe32 = Get-GpPeCodeViewId -Path (Join-Path $root "pe32.dll")
+      Assert-GpEqual -Actual "$($pe32.pdb) $($pe32.symbolKey)" -Expected "pe32.pdb 0403020106050807090A0B0C0D0E0F10A" -Message "A PE32 file should be read too."
+      foreach ($name in @("nodebug.dll", "text.dll", "elf64.so")) {
+        Assert-GpEqual -Actual (Get-GpPeCodeViewId -Path (Join-Path $root $name)) -Expected $null -Message "$name has no CodeView record."
+      }
+
+      $files = @(Get-GpPayloadProvenanceFiles -PayloadRoot $root -LibraryPatterns @("*.dll", "elf64.so"))
+      $byName = @{}
+      foreach ($file in $files) { $byName[$file.path] = $file }
+      Assert-GpEqual -Actual $byName["libgnustep-base-1_31.dll"].peCodeView.symbolKey -Expected $plus.symbolKey -Message "A DLL with CodeView should carry it in provenance."
+      foreach ($name in @("nodebug.dll", "elf64.so")) {
+        Assert-GpTrue -Condition (-not $byName[$name].PSObject.Properties["peCodeView"]) -Message "$name should have no peCodeView key."
+      }
+      $json = ConvertTo-Json @{ files = $files } -Depth 10
+      Assert-GpTrue -Condition (-not $json.Contains("builder") -and -not $json.Contains("D:\\a")) -Message "No build machine path should reach the provenance JSON."
+    } finally {
+      Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+    }
+  }
+
   It "records the entry and the GNUstep libraries with paths relative to the payload" {
     $root = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-provenance-" + [guid]::NewGuid().ToString("N"))
     $libraryDirectory = Join-Path $root "usr/runtime/lib"

@@ -655,7 +655,12 @@ The sidecar records:
   packager, with `dirty` when tracked files had changes (null outside git)
 - `files`: the launch entry (`role: entry`) and each matching library
   (`role: library`), with its path relative to the AppDir or MSI install tree,
-  size, SHA-256 and, for an ELF file, its GNU build ID (`elfBuildId`). Symbolic
+  size, SHA-256 and, for an ELF file, its GNU build ID (`elfBuildId`). A PE
+  file (DLL or EXE) with a CodeView debug record also has `peCodeView`: the
+  PDB's `guid` and `age`, its file name (`pdb`, without the build machine's
+  directory) and `symbolKey`, the GUID and age as symbol servers and Windows
+  crash dumps index a PDB (`<pdb>/<symbolKey>/<pdb>`). DLLs linked without
+  one (MinGW without `--build-id` or `-g`) have no `peCodeView` key. Symbolic
   links are left out; the files they point to are listed. A file whose path
   would not be relative to the payload stops packaging rather than publish a
   build machine path.
