@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- DMG: `<artifact-base>.provenance.json`, as the AppImage and MSI already
+  write. It hashes the final image and describes the signed app on the volume,
+  with paths relative to the volume root. Each Mach-O file records the
+  `LC_UUID` of every architecture (`machoUuids`, matching `dwarfdump --uuid`),
+  read without otool. AppImage and MSI provenance is unchanged. `metadata.json`
+  points at it under `artifacts.provenance`.
 - MSI: provenance records each DLL's and EXE's CodeView PDB identity
   (`peCodeView`: GUID, age, PDB file name and symbol-server key), read without
   dumpbin. Only the PDB's file name is kept, never its build path. Files

@@ -1309,6 +1309,7 @@ function Write-GpDmgArtifactMetadata {
       metadata = [ordered]@{ path = $Config.Sidecars.MetadataPath }
       diagnostics = [ordered]@{ path = $Config.Sidecars.DiagnosticsPath }
       checksum = $(if ($Config.ChecksumSidecar) { [ordered]@{ path = $Config.Sidecars.ChecksumPath } } else { $null })
+      provenance = $(if ($Details.Contains("provenancePath") -and $null -ne $Details["provenancePath"]) { [ordered]@{ path = $Details["provenancePath"] } } else { $null })
       appcast = $(if ($Details.Contains("appcast")) { $Details["appcast"] } else { $null })
     }
     app = [ordered]@{
@@ -1491,6 +1492,7 @@ function Invoke-GpDmgPackage {
 
   $mount = $null
   $succeeded = $false
+  $provenanceFiles = $null
   try {
     # 1. Volume contents: a copy of the staged app (the stage is never mutated),
     #    the /Applications link, an optional background and notice report.
@@ -1526,6 +1528,15 @@ function Invoke-GpDmgPackage {
     }
     if ($config.Notarization.Enabled -and -not $config.Signing.IsAdHoc -and -not $signature.HardenedRuntime) {
       $details["warnings"].Add("Notarization requires the hardened runtime; the app signature has no 'runtime' flag.") | Out-Null
+    }
+
+    # Provenance describes the app as it ships: the signed copy in the volume
+    # tree, which is deleted once the image is built. Signing rewrites each
+    # Mach-O file, so the staged copy's hashes would not match the image.
+    $provenanceSettings = Get-GpProvenanceSettings -Context $Context
+    if ($provenanceSettings.Enabled) {
+      $volumeEntry = if (-not [string]::IsNullOrWhiteSpace($config.AppInfo.Executable)) { Join-Path $volumeApp ("Contents/MacOS/{0}" -f $config.AppInfo.Executable) } else { $null }
+      $provenanceFiles = @(Get-GpPayloadProvenanceFiles -PayloadRoot $workPaths.VolumeRoot -LibraryPatterns $provenanceSettings.Libraries -EntryPath $volumeEntry)
     }
 
     if ($config.ApplicationsLink) {
@@ -1648,6 +1659,19 @@ function Invoke-GpDmgPackage {
     $details["warnings"].Add(("Sparkle appcast skipped: {0}" -f $details["appcast"]["reason"])) | Out-Null
   }
 
+  $provenancePath = Get-GpArtifactSidecarPath -ArtifactPath $config.ArtifactPath -Suffix "provenance.json"
+  if ($null -ne $provenanceFiles) {
+    # After signing and stapling, so the artifact hash is the shipped image's.
+    $provenancePath = Write-GpProvenanceDocument -Context $Context -Backend "dmg" -ArtifactPath $config.ArtifactPath -PayloadRoot $config.StageRoot -Files $provenanceFiles
+    Write-GpDmgLogLine -LogPath $LogPath -Message ("Wrote provenance sidecar: {0}" -f $provenancePath)
+  } else {
+    if (Test-Path -LiteralPath $provenancePath) {
+      Remove-Item -Force -LiteralPath $provenancePath
+    }
+    $provenancePath = $null
+  }
+  $details["provenancePath"] = $provenancePath
+
   $details["warnings"] = [string[]]@($details["warnings"].ToArray())
   $metadataPath = Write-GpDmgArtifactMetadata -Context $Context -Config $config -Details $details -LogPath $LogPath
   $diagnosticsPath = Write-GpDmgDiagnosticsSummary -Context $Context -Config $config -Details $details -LogPath $LogPath
@@ -1662,6 +1686,7 @@ function Invoke-GpDmgPackage {
     MetadataPath = $metadataPath
     DiagnosticsPath = $diagnosticsPath
     ChecksumPath = $checksumPath
+    ProvenancePath = $provenancePath
     AppcastPath = $details["appcast"]["path"]
     FinderLayoutApplied = [bool]$details["finderLayoutApplied"]
     FinderLayoutReason = $details["finderLayoutReason"]

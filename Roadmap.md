@@ -1613,9 +1613,9 @@ Execution order: 18A, 18B, 18C, then 18D.
   - ELF build IDs of the bundled GNUstep libraries in the release metadata
   - release metadata without absolute build-machine paths, safe to publish
   Implemented as `<artifact-base>.provenance.json` (`provenance` in
-  `docs/manifest.md`) for the AppImage and MSI, with PE CodeView IDs
-  (`peCodeView`) for the MSI's DLLs that have one. Follow-up: the DMG backend
-  (Mach-O `LC_UUID`).
+  `docs/manifest.md`) for the AppImage, MSI and DMG: Mach-O `LC_UUID`s as
+  `machoUuids`, and PE CodeView IDs (`peCodeView`) for the MSI's DLLs that
+  have one.
   Exit criteria:
   - anyone can tell which libs-base, libs-gui and libs-back builds a release
     shipped

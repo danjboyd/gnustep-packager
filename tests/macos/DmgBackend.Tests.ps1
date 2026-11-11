@@ -178,6 +178,27 @@ Describe "DMG backend" {
       Assert-GpEqual -Actual $script:metadata.layout.finderLayoutApplied -Expected $false -Message "Finder layout is off for the fixture."
     }
 
+    It "writes a provenance sidecar with the shipped image's hash and each slice's LC_UUID" {
+      $provenancePath = $script:packageResult.ProvenancePath
+      Assert-GpEqual -Actual (Split-Path -Leaf $provenancePath) -Expected "SampleMacApp-0.1.0-macos-universal.provenance.json" -Message "The provenance sidecar shares the artifact base name."
+      Assert-GpEqual -Actual $script:metadata.artifacts.provenance.path -Expected $provenancePath -Message "Metadata should point at the provenance sidecar."
+      $provenance = Get-Content -Raw -Path $provenancePath | ConvertFrom-Json
+      Assert-GpEqual -Actual $provenance.backend -Expected "dmg" -Message "Provenance should name the backend."
+      Assert-GpEqual -Actual $provenance.artifact.sha256 -Expected (Get-GpFileSha256 -Path $script:packageResult.ArtifactPath) -Message "Provenance should hash the final image."
+      $entry = @($provenance.files | Where-Object { $_.role -eq "entry" })
+      Assert-GpEqual -Actual $entry.Count -Expected 1 -Message "The app's executable should be recorded."
+      Assert-GpEqual -Actual $entry[0].path -Expected ("{0}/Contents/MacOS/{1}" -f $script:config.AppBundleName, $script:config.AppInfo.Executable) -Message "Paths are relative to the volume root."
+      $recorded = @($entry[0].machoUuids | ForEach-Object { "$($_.arch) $($_.uuid)" } | Sort-Object)
+      Assert-GpEqual -Actual $recorded.Count -Expected 2 -Message "The universal fixture should have two UUIDs."
+      # Code signing doesn't change LC_UUID, so the staged executable's UUIDs
+      # are the shipped ones.
+      $dwarfdump = & xcrun dwarfdump --uuid $script:config.AppInfo.ExecutablePath 2>$null
+      if ($LASTEXITCODE -eq 0) {
+        $expected = @($dwarfdump | ForEach-Object { if ($_ -match '^UUID: ([0-9A-F-]{36}) \((\S+)\)') { "$($Matches[2]) $($Matches[1])" } } | Sort-Object)
+        Assert-GpEqual -Actual $recorded -Expected $expected -Message "The recorded UUIDs should match dwarfdump."
+      }
+    }
+
     It "never mutates the staged payload" {
       $after = (Get-GpDmgSignatureInfo -Path $script:config.StagedAppPath).Raw
       Assert-GpEqual -Actual $after -Expected $script:stagedSignatureBefore -Message "The staged app's signature should be unchanged."
