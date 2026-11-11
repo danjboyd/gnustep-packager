@@ -628,7 +628,7 @@ manifest never holds notary credentials.
 
 ## `provenance`
 What each release was built from, in a sidecar that is safe to publish:
-`<artifact-base>.provenance.json`, beside the AppImage or MSI. It has no
+`<artifact-base>.provenance.json`, beside the AppImage, MSI or DMG. It has no
 absolute paths from the build machine, unlike `<artifact-base>.metadata.json`.
 
 Fields:
@@ -654,13 +654,17 @@ The sidecar records:
 - `source` and `packager`: the git commit of the manifest's checkout and of the
   packager, with `dirty` when tracked files had changes (null outside git)
 - `files`: the launch entry (`role: entry`) and each matching library
-  (`role: library`), with its path relative to the AppDir or MSI install tree,
-  size, SHA-256 and, for an ELF file, its GNU build ID (`elfBuildId`). Symbolic
+  (`role: library`), with its path relative to the AppDir, MSI install tree or
+  DMG volume root, size, SHA-256 and, for an ELF file, its GNU build ID
+  (`elfBuildId`). A Mach-O file (DMG) also has `machoUuids`: one
+  `{ "arch", "uuid" }` per architecture, from its `LC_UUID`, in the form
+  `dwarfdump --uuid` prints. Other files have no `machoUuids` key. Symbolic
   links are left out; the files they point to are listed. A file whose path
   would not be relative to the payload stops packaging rather than publish a
   build machine path.
 
-The build IDs match `readelf -n` and the debug-symbol servers that index by
+The build IDs match `readelf -n` (and the UUIDs `dwarfdump --uuid` and
+macOS crash reports' binary images) and the debug-symbol servers that index by
 build ID, so a crash report or a user's copy can be traced to the libs-base,
 libs-gui and libs-back builds a release shipped.
 

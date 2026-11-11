@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- DMG: `<artifact-base>.provenance.json`, as the AppImage and MSI already
+  write. It hashes the final image and describes the signed app on the volume,
+  with paths relative to the volume root. Each Mach-O file records the
+  `LC_UUID` of every architecture (`machoUuids`, matching `dwarfdump --uuid`),
+  read without otool. AppImage and MSI provenance is unchanged. `metadata.json`
+  points at it under `artifacts.provenance`.
 - AppImage: theme metadata for tools that can't run or mount the AppImage,
   such as a theme-settings configurator. When the payload has themes, the
   in-payload `gnustep-packager-theme-report.json` becomes `formatVersion` 2
