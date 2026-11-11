@@ -1,7 +1,7 @@
 # App Coverage
 
 What gnustep-packager builds today for each downstream app, by backend. This
-is a snapshot taken on 2026-11-03 from each app's latest release assets and its
+is a snapshot taken on 2026-11-11 from each app's latest release assets and its
 CI workflows. Re-check it before using it for release planning.
 
 Legend:
@@ -20,20 +20,20 @@ Legend:
 
 ## Desktop apps
 
-| App | AppImage | MSI | DMG | Packager pin | Notes |
-| --- | --- | --- | --- | --- | --- |
-| ObjcMarkdown (MarkdownViewer) | packager (v0.2.6-rc4) | packager (v0.2.6-rc3; the rc4 run was still in progress) | app-script *(CI)*: `macos/Makefile` `dmg`, UDZO/HFS+ | reusable workflow at a commit SHA | Also ships a Flatpak built outside gnustep-packager |
-| ScreenshotTool | packager (v0.3.3) | packager (v0.3.3, plus a portable ZIP) | app-script *(CI)*: `scripts/package_macos_dmg.sh`, ULFO | reusable workflow `@v0.1.4` | DMG script adds an "Opening an unsigned app" note, a `.sha256` file and a Sparkle appcast |
-| LinDirStat | configured | configured | configured *(CI)*: DMG backend via `scripts/ci-release-macos.sh` | pinned checkout | No GitHub release yet. This is the only app wired to the DMG backend |
-| PerformanceDashboard | packager (v0.1.3) | configured (manifest only) | none | pinned checkout | Release gate uses `--require-backend appimage`; the Windows CI job is skipped because the Linux job fails on `main` |
-| SpreadsheetApp | configured | configured (`release-msi.yml`) | none | reusable workflow `@main` (unpinned) | No release yet |
-| Adwaita ThemeDemo | example (`theme-demos/adwaita`) | none | n/a | none | `Examples/ThemeDemo` in plugins-themes-Adwaita |
-| WinUITheme ThemeDemo | n/a | example (`theme-demos/winuitheme`) | n/a | none | `Examples/ThemeDemo` in plugins-themes-winuitheme |
-| Gorm | example (`gnustep-apps/gorm`) | none | none | none | Upstream GNUstep app, tag `gorm-1_5_0` |
-| ProjectCenter | example (`gnustep-apps/projectcenter`) | none | none | none | Upstream GNUstep app, tag `projectcenter-0_7_0` |
-| GWorkspace | example (`gnustep-apps/gworkspace`) | none | none | none | Upstream GNUstep app, tag `gworkspace-1_0_0` |
-| SystemPreferences | example (`gnustep-apps/systempreferences`) | none | none | none | Upstream GNUstep app, tag `systempreferences-1_2_1` |
-| Terminal | example (`gnustep-apps/terminal`) | none | none | none | GAP app, `gnustep/gap` commit `220860a` (the repo has no tags) |
+| App | AppImage | MSI | DMG | Packager pin | Linux provenance | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| ObjcMarkdown (MarkdownViewer) | packager (v0.2.7) | packager (v0.2.7, plus a portable ZIP) | app-script *(CI)*: `macos/Makefile` `dmg`, UDZO/HFS+ | reusable workflow `@v0.1.7` (AppImage), `@v0.1.4` (MSI) | not published | Also ships a Flatpak built outside gnustep-packager. The AppImage is built in the app's own CI image |
+| ScreenshotTool | packager (v0.3.6) | packager (v0.3.6, plus a portable ZIP) | app-script *(CI)*: `scripts/package_macos_dmg.sh`, ULFO | reusable workflow `@v0.1.8` | packager `provenance.json`, with the app's own toolchain lock (`screenshottool`) | DMG script adds an "Opening an unsigned app" note, a `.sha256` file and a Sparkle appcast |
+| LinDirStat | configured | configured | configured *(CI)*: DMG backend via `scripts/ci-release-macos.sh` | pinned checkout | n/a | No GitHub release yet. This is the only app wired to the DMG backend |
+| PerformanceDashboard | packager (v0.1.5) | configured (manifest only) | none | pinned checkout (`v0.1.7`) | the app's own `provenance.json` format | Release gate uses `--require-backend appimage`. Builds libs-back itself, with two carried patches, over the gnustep-cli-new v0.1.3 toolchain |
+| SpreadsheetApp | configured | configured (`release-msi.yml`) | none | reusable workflow `@main` (unpinned) | n/a | No release yet |
+| Adwaita ThemeDemo | example (`theme-demos/adwaita`) | none | n/a | none | n/a | `Examples/ThemeDemo` in plugins-themes-Adwaita |
+| WinUITheme ThemeDemo | n/a | example (`theme-demos/winuitheme`) | n/a | none | n/a | `Examples/ThemeDemo` in plugins-themes-winuitheme |
+| Gorm | example (`gnustep-apps/gorm`) | none | none | none | n/a | Upstream GNUstep app, tag `gorm-1_5_0` |
+| ProjectCenter | example (`gnustep-apps/projectcenter`) | none | none | none | n/a | Upstream GNUstep app, tag `projectcenter-0_7_0` |
+| GWorkspace | example (`gnustep-apps/gworkspace`) | none | none | none | n/a | Upstream GNUstep app, tag `gworkspace-1_0_0` |
+| SystemPreferences | example (`gnustep-apps/systempreferences`) | none | none | none | n/a | Upstream GNUstep app, tag `systempreferences-1_2_1` |
+| Terminal | example (`gnustep-apps/terminal`) | none | none | none | n/a | GAP app, `gnustep/gap` commit `220860a` (the repo has no tags) |
 
 ## Command-arrow word moves (PR #83)
 
@@ -70,13 +70,24 @@ No app sets the remap for MSI, so Windows is left out for now.
      `.metadata.json`.
    - A Sparkle appcast for macOS updates. The update-feed contract accepts
      Sparkle keys, but the DMG backend emits no feed.
-2. **PerformanceDashboard has no MSI.** This is on the app side: its Linux CI
-   is red, so the Windows job never runs, and its release gate requires only
-   AppImage.
+2. **PerformanceDashboard has no MSI.** This is on the app side: its Windows
+   workflows build review and candidate artifacts, but no release has shipped
+   an MSI, and its release gate requires only AppImage.
 3. **The theme repos don't use the demo examples yet.** Both setups are tested
    in `examples/downstream/theme-demos`, and each theme repo still has to adopt
    its own.
-4. **SpreadsheetApp tracks `@main`.** Any packager change can break its
+4. **ObjcMarkdown publishes no Linux provenance.** Its packager pin writes
+   `<artifact-base>.provenance.json` into the package root (it is on by
+   default), but the release attaches only the AppImage, `.zsync`,
+   `.metadata.json`, `.debug.tar.gz`, `.diagnostics.txt` and
+   `.update-feed.json`. Nobody outside its CI can tell which libs-gui and
+   libs-back a release shipped. Attaching the provenance file fixes it; no
+   manifest change is needed.
+5. **No app attaches the theme sidecar yet.** `<artifact-base>.themes.json`
+   (`docs/appimage-theme-metadata.md`) is on `main` only, not in a tagged
+   release, and the reusable workflow uploads it with the rest of the package
+   root. Each app's release step decides whether to attach it.
+6. **SpreadsheetApp tracks `@main`.** Any packager change can break its
    release. It should pin a tag.
 5. **Arlen and the Swift apps** wait on decisions (PR #77, the archive
    hosting). They are not engineering gaps in this repo.
