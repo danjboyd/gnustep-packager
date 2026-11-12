@@ -394,6 +394,21 @@ Important fields:
 - `signing.description`
 - `signing.additionalArguments`
 - `updates.feedUrl`
+- `fonts.bundle`
+
+MSI bundled fonts (`fonts.bundle`) take the same entries as the AppImage's
+(below). The fonts go under `<runtimeRoot>\share\fonts\<name>\`, the
+licenses under `<metadataRoot>\licenses\fonts\`, and the notice report lists
+them. The backend writes `<runtimeRoot>\etc\fonts\fonts.conf`, where the
+launcher points `FONTCONFIG_FILE` and `FONTCONFIG_PATH`. If the stage already
+has one (an MSYS2 `fonts.conf`, for example), it is kept as `fonts.app.conf`
+and included first, so its directories and rules still apply; otherwise the
+generated file lists `WINDOWSFONTDIR`. It then adds the bundled directory,
+relative to the file so it works wherever the MSI installs, and puts the
+cache under `LOCAL_APPDATA_FONTCONFIG_CACHE` because the install directory
+isn't writable. This is for a `gnustep-back` built with cairo and fontconfig,
+as MSYS2's is: a `winlib` (GDI) backend doesn't read fontconfig. Packaging
+fails if the stage already has an `etc\fonts\fonts.app.conf`.
 
 ### `backends.appimage`
 Important fields:

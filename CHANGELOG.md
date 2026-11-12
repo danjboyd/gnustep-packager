@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- MSI: `backends.msi.fonts.bundle`, the AppImage's font bundling for the MSI.
+  It installs the fonts under `runtime\share\fonts`, ships their licenses
+  in the notice report, and writes a relocatable `runtime\etc\fonts\fonts.conf`
+  with a per-user cache. A staged `fonts.conf` is kept as `fonts.app.conf` and
+  included first. A theme that asks for DejaVu Sans (Gumdrop, for one) gets it
+  on Windows instead of gnustep-back's Tahoma fallback. MSIs without
+  `fonts.bundle` are unchanged.
 - DMG: `<artifact-base>.provenance.json`, as the AppImage and MSI already
   write. It hashes the final image and describes the signed app on the volume,
   with paths relative to the volume root. Each Mach-O file records the
