@@ -7,8 +7,8 @@ for the MSI and AppImage backends. The example is Gumdrop
 `NSFont = DejaVuSans` and `NSBoldFont = DejaVuSans-Bold`. Windows has no
 DejaVu, and some Linux distributions don't either.
 
-Status: findings only (2026-11-11). Nothing here is implemented beyond what
-the manifest already supports.
+Status: findings from 2026-11-11. Gap 1, fonts for the MSI, is now
+`backends.msi.fonts.bundle` (2026-11-12).
 
 ## Summary
 
@@ -17,11 +17,10 @@ the manifest already supports.
 | Build the theme from its repository | yes: `themeInputs` | yes: `themeInputs`, the first path it was built for |
 | Put it where the app finds it | yes: `<gnustepConfig.systemRoot>/Library/Themes` or `runtime/lib/GNUstep/Themes` | yes: the staged runtime's themes directory |
 | Start the app with it | yes: `packagedDefaults.defaultTheme` seeds `GSTheme` in the app's domain on every launch if absent | yes: the launcher seeds `GSTheme` with the bundled `defaults.exe` on first launch, plus a `GSTheme` environment fallback |
-| Ship the fonts it names | yes: `backends.appimage.fonts.bundle` | **no manifest support**: the app's stage script has to do it (gap 1) |
+| Ship the fonts it names | yes: `backends.appimage.fonts.bundle` | yes: `backends.msi.fonts.bundle` (was gap 1) |
 | Tools can see the bundled themes | yes: `<artifact-base>.themes.json` | no sidecar (gap 4) |
 
-So Gumdrop on an AppImage is a manifest-only change. On an MSI everything but
-the fonts is a manifest change, and the fonts take stage-script work today.
+So Gumdrop is a manifest-only change on both an AppImage and an MSI.
 
 ## How Windows Finds Fonts
 
@@ -42,24 +41,19 @@ stage. That file lists `WINDOWSFONTDIR`, which has no DejaVu.
 
 ## Gaps
 
-1. **No `fonts.bundle` for the MSI.** The AppImage's `fonts.bundle` copies the
-   files and their licenses, adds them to the notice report, and writes a
-   `fonts.conf` that includes the host's configuration and adds the bundled
-   directory. The MSI has none of this. Today an MSI app must do it in its own
-   stage script:
-   - copy the TTFs under `runtime\share\fonts\<name>\`;
-   - write a `runtime\etc\fonts\fonts.conf` that keeps MSYS2's settings and
-     adds that directory as `<dir prefix="relative">../../share/fonts</dir>`,
-     relative to the config file, so it works wherever the MSI installs;
-   - set a per-user cache, `<cachedir>LOCAL_APPDATA_FONTCONFIG_CACHE</cachedir>`,
-     because the install directory isn't writable;
-   - ship the font's license itself.
-
-   Proposed fix: move `fonts.bundle` out of `backends.appimage`, as a shared
-   section or `backends.msi.fonts.bundle`. On the MSI it would write that
-   `fonts.conf`, and fail when the stage already has one that doesn't include
-   the bundled directory. This reuses the AppImage's license and notice
-   handling.
+1. **Fonts for the MSI: done.** `backends.msi.fonts.bundle` takes the
+   AppImage's entries. It copies the TTFs under `runtime\share\fonts\<name>\`
+   and the licenses into the notice report. It writes a `runtime\etc\fonts\fonts.conf`
+   that includes a staged one (kept as `fonts.app.conf`) or lists
+   `WINDOWSFONTDIR`, adds the bundled directory as
+   `<dir prefix="relative">../../share/fonts</dir>`, and caches under
+   `LOCAL_APPDATA_FONTCONFIG_CACHE`. It covers the cairo backend only. A
+   `winlib` build finds fonts through GDI and would need them registered with
+   `AddFontResourceEx`, which nothing does today. On 2026-11-12 winuitheme's
+   check of Gumdrop on Windows saw DejaVuSans missing and a fall back to Tahoma.
+   That matches the fontconfig enumerator's fallback order
+   (`FCFontEnumerator -defaultSystemFontName`: DejaVuSans, then Bitstream
+   Vera, FreeSans, Tahoma).
 2. **A repository with several themes needs `build.command`.**
    funthemes has no top-level makefile; Gumdrop builds from `Themes/Gumdrop`
    and uses `../../Shared`. The default build command, `make clean; make;
@@ -117,5 +111,5 @@ root (`Get-GpThemeBuildShellConfig`), and the command passes it to
 default command writes the path literally because `GNUstep.sh` unsets
 `GNUSTEP_HOME`. If the manifest's `bootstrapCommands` source it, write the
 path literally too. The same `themeInputs`
-entry with `"platforms": ["windows"]` covers the MSI, apart from the fonts
-(gap 1).
+entry with `"platforms": ["windows"]` covers the MSI, with the same font entry
+under `backends.msi.fonts.bundle` (Windows paths to the TTFs and license).
