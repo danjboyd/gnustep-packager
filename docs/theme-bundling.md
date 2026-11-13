@@ -8,7 +8,9 @@ for the MSI and AppImage backends. The example is Gumdrop
 DejaVu, and some Linux distributions don't either.
 
 Status: findings from 2026-11-11. Gap 1, fonts for the MSI, is now
-`backends.msi.fonts.bundle` (2026-11-12).
+`backends.msi.fonts.bundle` (2026-11-12), and Windows CI tests it end to end
+(2026-11-13). For the steps an app author follows, see
+[How To](#how-to-a-theme-and-its-fonts-in-both-installers).
 
 ## Summary
 
@@ -74,7 +76,44 @@ stage. That file lists `WINDOWSFONTDIR`, which has no DejaVu.
 5. **DMG:** `themeInputs` for macOS aren't provisioned into a native app
    bundle. The backend notes that and ignores them.
 
-## A Manifest Sketch (AppImage, Works Today)
+## How To: A Theme and Its Fonts in Both Installers
+
+Three parts of the manifest are involved, and none of them needs packager
+code of your own:
+
+1. `themeInputs` builds the theme and puts it in the staged runtime. One
+   entry with `"platforms": ["linux", "windows"]` covers both installers;
+   use one entry per platform if they need different builds.
+2. `"default": true` on that entry makes it the theme the app starts with on
+   each of its platforms. You can also name it in
+   `packagedDefaults.defaultTheme`. The user's own `GSTheme` setting still
+   wins.
+3. `fonts.bundle` ships the fonts the theme names. It is set per backend:
+   `backends.appimage.fonts.bundle` and `backends.msi.fonts.bundle` take the
+   same entries. Each one gives a `name`, the font `files`, and a required
+   `licenseFile`, plus an optional `license` and `homepage` for the notice
+   report.
+
+### Where the font files come from
+
+Paths in `fonts.bundle` are relative to the manifest, or absolute. The build
+host has to have the files:
+
+- **Linux (AppImage):** the distribution's package, for example
+  `fonts-dejavu-core` on Debian and Ubuntu:
+  `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`, license
+  `/usr/share/doc/fonts-dejavu-core/copyright`.
+- **Windows (MSI):** MSYS2's `mingw-w64-clang-x86_64-ttf-dejavu`, which puts
+  the fonts in `clang64\share\fonts\TTF\` and the license under
+  `clang64\share\licenses\`. MSYS2's location differs between hosts, so
+  have the stage script copy them to a folder next to the manifest and point
+  `fonts.bundle` there. `examples/sample-gui/scripts/stage-fixture.ps1` does
+  this, copying them into `dist/fixture-fonts`.
+
+A font can also live in the app's own repository, with its license beside
+it. That needs no host package at all.
+
+### Example (Gumdrop)
 
 ```json
 {
@@ -83,7 +122,7 @@ stage. That file lists `WINDOWSFONTDIR`, which has no DejaVu.
       "name": "Gumdrop",
       "repo": "https://github.com/danjboyd/gnustep-funthemes.git",
       "ref": "<tag or commit>",
-      "platforms": ["linux"],
+      "platforms": ["linux", "windows"],
       "required": true,
       "default": true,
       "build": { "command": "cd Themes/Gumdrop && make clean && make && make install GNUSTEP_INSTALLATION_DOMAIN=USER GNUSTEP_HOME=\"$GNUSTEP_HOME\"" }
@@ -96,7 +135,20 @@ stage. That file lists `WINDOWSFONTDIR`, which has no DejaVu.
           {
             "name": "DejaVu",
             "files": ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"],
-            "licenseFile": "/usr/share/doc/fonts-dejavu-core/copyright"
+            "licenseFile": "/usr/share/doc/fonts-dejavu-core/copyright",
+            "license": "Bitstream-Vera AND LicenseRef-DejaVu-Public-Domain"
+          }
+        ]
+      }
+    },
+    "msi": {
+      "fonts": {
+        "bundle": [
+          {
+            "name": "DejaVu",
+            "files": ["dist/fonts/DejaVuSans.ttf", "dist/fonts/DejaVuSans-Bold.ttf"],
+            "licenseFile": "dist/fonts/LICENSE",
+            "license": "Bitstream-Vera AND LicenseRef-DejaVu-Public-Domain"
           }
         ]
       }
@@ -105,11 +157,42 @@ stage. That file lists `WINDOWSFONTDIR`, which has no DejaVu.
 }
 ```
 
+The AppImage entry names the system paths directly. The MSI entry names a
+folder the stage script fills from MSYS2. Adwaita works the same way: see
+`examples/downstream/theme-demos/adwaita`, which bundles DejaVu in its
+AppImage.
+
+### Checking the result
+
+- Add the font and its license to `validation.installedResult.requiredPaths`,
+  so the installed package's validation fails if they're missing:
+  `runtime/share/fonts/dejavu/DejaVuSans.ttf`, `runtime/etc/fonts/fonts.conf`
+  and `metadata/licenses/fonts/dejavu.txt`. The paths are relative to the
+  payload, so the same entries work for the MSI and the AppImage (the
+  AppImage's `usr/`).
+- `THIRD-PARTY-NOTICES.txt` lists the font as `DejaVu (font)`.
+- The tested example is `examples/sample-gui`. It bundles MSYS2's DejaVu and
+  WinUXTheme as its default theme. On every run, `validate-repo.yml`'s
+  Windows job runs `fc-list` with the same `FONTCONFIG_FILE` and
+  `FONTCONFIG_PATH` the launcher sets, and it must list DejaVu Sans from the
+  MSI's own `runtime\share\fonts\dejavu`.
+
+### Limits
+
+- Windows: the MSI's fonts reach a `gnustep-back` that is built with cairo
+  and fontconfig, as MSYS2's (the managed toolchain's) is. A `winlib` (GDI)
+  backend doesn't read fontconfig (gap 1).
+- The theme's own look on each platform is the theme's business. Gumdrop's
+  X11 defaults don't apply on Windows (gap 3).
+- `themeInputs` don't reach a DMG (gap 5).
+
+### Theme build commands
+
 The build shell's environment sets `GNUSTEP_HOME` to the theme's install
 root (`Get-GpThemeBuildShellConfig`), and the command passes it to
 `make install` explicitly because gnustep-make otherwise uses `$(HOME)`. The
 default command writes the path literally because `GNUstep.sh` unsets
 `GNUSTEP_HOME`. If the manifest's `bootstrapCommands` source it, write the
-path literally too. The same `themeInputs`
-entry with `"platforms": ["windows"]` covers the MSI, with the same font entry
-under `backends.msi.fonts.bundle` (Windows paths to the TTFs and license).
+path literally too. For the MSI the
+same command runs in the MSYS2 shell. Building Gumdrop there hasn't been
+tried yet (gap 3).
