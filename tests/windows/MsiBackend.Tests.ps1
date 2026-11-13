@@ -396,7 +396,9 @@ Describe "MSI backend" {
       $noticeText = Get-Content -Raw -Path $script:transform.NoticeReportPath
 
       Assert-GpTrue -Condition (Test-Path $script:transform.NoticeReportPath) -Message "Transform should emit a third-party notice report."
-      Assert-GpMatch -Actual $noticeText -Pattern "Runtime notice entries: 2" -Message "Notice report should summarize compliance entries."
+      Assert-GpMatch -Actual $noticeText -Pattern "Runtime notice entries: 3" -Message "Notice report should summarize compliance entries and the bundled font."
+      Assert-GpMatch -Actual $noticeText -Pattern "\[DejaVu \(font\)\]" -Message "Notice report should list the font from backends.msi.fonts.bundle."
+      Assert-GpMatch -Actual $noticeText -Pattern "metadata/licenses/fonts/dejavu.txt" -Message "Notice report should point at the bundled font license."
       Assert-GpMatch -Actual $noticeText -Pattern "GNUstep Runtime Seed" -Message "Notice report should list configured runtime notices."
       Assert-GpMatch -Actual $noticeText -Pattern "metadata/licenses/GNUstep-runtime.txt" -Message "Notice report should preserve staged notice paths."
     }

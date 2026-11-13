@@ -63,6 +63,33 @@ if ($fontConfigSource) {
   Copy-Item -Force $fontConfigSource (Join-Path $runtimeFonts "fonts.conf")
 }
 
+# Font inputs for backends.msi.fonts.bundle, outside the stage root because the
+# backend copies them in itself. Real DejaVu fonts when MSYS2's ttf-dejavu is
+# installed (validate-repo's Windows job installs it and checks that fontconfig
+# finds the bundled copy), placeholder files otherwise: the backend only
+# copies them.
+$fixtureFonts = [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path "dist/fixture-fonts"))
+New-Item -ItemType Directory -Force -Path $fixtureFonts | Out-Null
+$msysShare = if (-not [string]::IsNullOrWhiteSpace($env:MSYS2_LOCATION)) { Join-Path $env:MSYS2_LOCATION "clang64\share" } else { $null }
+$dejavuDir = if ($msysShare) { Join-Path (Join-Path $msysShare "fonts") "TTF" } else { $null }
+$dejavuLicense = if ($msysShare -and (Test-Path (Join-Path $msysShare "licenses"))) {
+  Get-ChildItem -Path (Join-Path $msysShare "licenses") -Directory -Filter "*dejavu*" -ErrorAction SilentlyContinue |
+    ForEach-Object { Get-ChildItem -Path $_.FullName -File } | Select-Object -First 1
+} else { $null }
+foreach ($fontFile in @("DejaVuSans.ttf", "DejaVuSans-Bold.ttf")) {
+  $source = if ($dejavuDir) { Join-Path $dejavuDir $fontFile } else { $null }
+  if ($source -and (Test-Path $source)) {
+    Copy-Item -Force $source (Join-Path $fixtureFonts $fontFile)
+  } else {
+    Set-Content -Path (Join-Path $fixtureFonts $fontFile) -Value "fixture font placeholder"
+  }
+}
+if ($dejavuLicense) {
+  Copy-Item -Force $dejavuLicense.FullName (Join-Path $fixtureFonts "LICENSE")
+} else {
+  Set-Content -Path (Join-Path $fixtureFonts "LICENSE") -Value "Fixture font license placeholder."
+}
+
 Set-Content -Path (Join-Path $runtimeConfig "theme.conf") -Value "GSTheme=WinUXTheme"
 Set-Content -Path (Join-Path $runtimeTheme "WinUXTheme.dll") -Value "fixture theme payload"
 Set-Content -Path (Join-Path $metadataIcons "sample-icon.txt") -Value "fixture icon placeholder"

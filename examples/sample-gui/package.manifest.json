@@ -107,7 +107,10 @@
         }
       ],
       "requiredPaths": [
-        "metadata/icons/sample-icon.txt"
+        "metadata/icons/sample-icon.txt",
+        "runtime/share/fonts/dejavu/DejaVuSans.ttf",
+        "runtime/etc/fonts/fonts.conf",
+        "metadata/licenses/fonts/dejavu.txt"
       ]
     }
   },
@@ -147,7 +150,21 @@
       "productName": "Sample GNUstep App",
       "shortcutName": "Sample GNUstep App",
       "installDirectoryName": "SampleGNUstepApp",
-      "launcherFileName": "SampleGNUstepApp.exe"
+      "launcherFileName": "SampleGNUstepApp.exe",
+      "fonts": {
+        "bundle": [
+          {
+            "name": "DejaVu",
+            "files": [
+              "dist/fixture-fonts/DejaVuSans.ttf",
+              "dist/fixture-fonts/DejaVuSans-Bold.ttf"
+            ],
+            "licenseFile": "dist/fixture-fonts/LICENSE",
+            "license": "Bitstream-Vera AND LicenseRef-DejaVu-Public-Domain",
+            "homepage": "https://dejavu-fonts.github.io/"
+          }
+        ]
+      }
     },
     "appimage": {
       "enabled": false,

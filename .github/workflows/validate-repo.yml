@@ -28,6 +28,8 @@ jobs:
             tar
             gzip
             mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-fontconfig
+            mingw-w64-clang-x86_64-ttf-dejavu
 
       - name: Expose MSYS2 Toolchain
         run: |
@@ -91,6 +93,32 @@ jobs:
       - name: Run Shared Packaging Pipeline
         run: |
           ./scripts/run-packaging-pipeline.ps1 -Manifest examples/sample-gui/package.manifest.json -Backend msi -RunSmoke
+
+      # backends.msi.fonts.bundle end to end: the fixture bundles MSYS2's real
+      # DejaVu fonts, and fontconfig, started the way the launcher starts it
+      # (FONTCONFIG_FILE and FONTCONFIG_PATH at runtime\etc\fonts), must
+      # list DejaVu Sans from the bundled copy, not from MSYS2's own fonts.
+      - name: Check Bundled Fonts With Fontconfig
+        run: |
+          $install = Get-ChildItem examples/sample-gui/dist/tmp/msi -Directory | Sort-Object Name | Select-Object -Last 1 | ForEach-Object { Join-Path $_.FullName "install" }
+          if (-not $install -or -not (Test-Path $install)) { throw "No MSI install tree under examples/sample-gui/dist/tmp/msi" }
+          $fontDir = Join-Path $install "runtime\share\fonts\dejavu"
+          $font = Get-Item (Join-Path $fontDir "DejaVuSans.ttf")
+          if ($font.Length -lt 100KB) { throw "Bundled DejaVuSans.ttf is $($font.Length) bytes: the fixture staged a placeholder, not MSYS2's font" }
+          $confDir = Join-Path $install "runtime\etc\fonts"
+          Get-Content (Join-Path $confDir "fonts.conf") | Write-Host
+          if (-not (Test-Path (Join-Path $confDir "fonts.app.conf"))) { throw "The staged MSYS2 fonts.conf was not kept as fonts.app.conf" }
+          $notices = Get-Content -Raw (Join-Path $install "metadata\THIRD-PARTY-NOTICES.txt")
+          if ($notices -notmatch '\[DejaVu \(font\)\]') { throw "The notice report has no DejaVu (font) entry" }
+          $env:FONTCONFIG_PATH = $confDir
+          $env:FONTCONFIG_FILE = Join-Path $confDir "fonts.conf"
+          $fcList = Join-Path $env:MSYS2_LOCATION "clang64\bin\fc-list.exe"
+          $files = @(& $fcList -f "%{file}\n" "DejaVu Sans")
+          if ($LASTEXITCODE -ne 0) { throw "fc-list failed (exit $LASTEXITCODE)" }
+          $files | Write-Host
+          $bundled = @($files | Where-Object { $_ -and ([System.IO.Path]::GetFullPath($_)).StartsWith($fontDir, [System.StringComparison]::OrdinalIgnoreCase) })
+          if ($bundled.Count -eq 0) { throw "fontconfig did not list DejaVu Sans from the bundled directory $fontDir" }
+          Write-Host "fontconfig lists the bundled DejaVu Sans: $($bundled -join ', ')"
 
       - name: Upload gnustep-cli-new Diagnostics
         if: ${{ always() }}
