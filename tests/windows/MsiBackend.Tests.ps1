@@ -315,7 +315,7 @@ Describe "MSI backend" {
         Assert-GpEqual -Actual $LASTEXITCODE -Expected 0 -Message "The argv stub should compile."
 
         $callerDir = Join-Path $tempRoot "home"
-        New-Item -ItemType Directory -Force -Path (Join-Path $callerDir "Pictures"), (Join-Path $callerDir "My Docs") | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $callerDir "Pictures"), (Join-Path $callerDir "My Docs"), (Join-Path $callerDir "logs") | Out-Null
         # YES is there so the -NSDebugLog YES case shows that an option's value stays as is.
         foreach ($file in @("Pictures\x.png", "notes.txt", "My Docs\a b.md", "YES")) {
           Set-Content -Path (Join-Path $callerDir $file) -Value ""
@@ -347,7 +347,7 @@ Describe "MSI backend" {
         # Launched from a prompt in the user's folder.
         $prompt = Invoke-GpTestLauncher -From $callerDir -Arguments @(
           "Pictures\x.png", "Pictures/x.png", "notes.txt", ".\notes.txt", "My Docs\a b.md", "exports\new.png",
-          "missing.txt", "--foo=bar", "-NSDebugLog", "YES", "-Key", "notes.txt", "-GSLogFile", "logs\run.txt", "--out", "notes.txt",
+          "missing.txt", "--foo=bar", "-NSDebugLog", "YES", "-Key", "notes.txt", "-GSLogFile", "logs\run.txt", "-Type", "text/plain", "-Dump", "exports\new.png", "--out", "notes.txt",
           "/flag", "https://example.invalid/a?b=c", "mailto:someone@example.invalid"
         )
         Assert-GpEqual -Actual $prompt -Expected @(
@@ -366,12 +366,16 @@ Describe "MSI backend" {
           "arg=[notes.txt]"
           "arg=[-GSLogFile]"
           "arg=[$callerDir\logs\run.txt]"
+          "arg=[-Type]"
+          "arg=[text/plain]"
+          "arg=[-Dump]"
+          "arg=[exports\new.png]"
           "arg=[--out]"
           "arg=[$callerDir\notes.txt]"
           "arg=[/flag]"
           "arg=[https://example.invalid/a?b=c]"
           "arg=[mailto:someone@example.invalid]"
-        ) -Message "Relative paths should resolve against the caller's directory, while the app still runs in launch.workingDirectory; options, a -Key option's plain value, and URLs pass through."
+        ) -Message "Relative paths should resolve against the caller's directory, while the app still runs in launch.workingDirectory; options, a -Key option's plain value or a separator value whose folder is missing (-Type text/plain), and URLs pass through."
 
         # Explorer, Open with and shortcuts pass absolute paths or file URLs.
         $absolute = Join-Path $callerDir "Pictures\x.png"

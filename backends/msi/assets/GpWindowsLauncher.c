@@ -666,8 +666,36 @@ static BOOL GPIsSingleDashOption(const wchar_t *arg)
    exists there, or when it contains a path separator and is not a URL.
    Options (-x, /x), URLs, rooted and drive paths pass through unchanged.
    The value after a single-dash option (GNUstep's -Key value) is resolved
-   only when it contains a separator: in -Key YES, YES is a value even if a
-   file of that name exists. */
+   only when it contains a separator and the folder it names exists: in
+   -Key YES, YES is a value even if a file of that name exists, and
+   -Key text/plain stays as is unless there is a text folder. A file the app
+   will create (-GSLogFile logs\run.txt) still resolves when logs exists. */
+static BOOL GPParentDirectoryExists(const wchar_t *arg)
+{
+    wchar_t parent[GP_MAX_PATH];
+    wchar_t *slash = NULL;
+    wchar_t *backslash = NULL;
+    wchar_t *last = NULL;
+    DWORD attributes = 0;
+
+    if (wcslen(arg) >= GP_MAX_PATH) {
+        return FALSE;
+    }
+    wcscpy(parent, arg);
+    slash = wcsrchr(parent, L'/');
+    backslash = wcsrchr(parent, L'\\');
+    last = slash;
+    if (backslash != NULL && (last == NULL || backslash > last)) {
+        last = backslash;
+    }
+    if (last == NULL || last == parent) {
+        return FALSE;
+    }
+    *last = L'\0';
+    attributes = GetFileAttributesW(parent);
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
 static const wchar_t *GPResolveCallerArgument(wchar_t *buffer, size_t bufferCount, const wchar_t *arg, BOOL afterOption)
 {
     DWORD length = 0;
@@ -677,6 +705,9 @@ static const wchar_t *GPResolveCallerArgument(wchar_t *buffer, size_t bufferCoun
     }
     if ((afterOption || GetFileAttributesW(arg) == INVALID_FILE_ATTRIBUTES) &&
         (GPLooksLikeUrl(arg) || (wcschr(arg, L'\\') == NULL && wcschr(arg, L'/') == NULL))) {
+        return arg;
+    }
+    if (afterOption && !GPParentDirectoryExists(arg)) {
         return arg;
     }
     length = GetFullPathNameW(arg, (DWORD)bufferCount, buffer, NULL);
