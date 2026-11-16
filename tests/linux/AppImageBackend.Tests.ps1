@@ -613,7 +613,7 @@ Describe "AppImage backend" {
         $workingDirectory = Join-Path $appDir "usr/app/SampleGNUstepLinuxApp.app"
 
         $callerDir = Join-Path $tempRoot "home"
-        New-Item -ItemType Directory -Force -Path (Join-Path $callerDir "Pictures"), (Join-Path $callerDir "My Docs") | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $callerDir "Pictures"), (Join-Path $callerDir "My Docs"), (Join-Path $callerDir "logs") | Out-Null
         # YES is there so the -NSDebugLog YES case shows that an option's value stays as is.
         foreach ($file in @("Pictures/x.png", "notes.txt", "My Docs/a b.md", "YES")) {
           Set-Content -Path (Join-Path $callerDir $file) -Value ""
@@ -629,7 +629,7 @@ Describe "AppImage backend" {
         # Launched from a terminal in the user's home.
         $terminal = Invoke-GpTestAppRun -From $callerDir -Arguments @(
           "Pictures/x.png", "notes.txt", "./notes.txt", "My Docs/a b.md", "exports/new.png",
-          "missing.txt", "--foo=bar", "-NSDebugLog", "YES", "-Key", "notes.txt", "-GSLogFile", "logs/run.txt", "--out", "notes.txt",
+          "missing.txt", "--foo=bar", "-NSDebugLog", "YES", "-Key", "notes.txt", "-GSLogFile", "logs/run.txt", "-Type", "text/plain", "-Dump", "exports/new.png", "--out", "notes.txt",
           "https://example.invalid/a?b=c", "mailto:someone@example.invalid", ""
         )
         Assert-GpEqual -Actual $terminal -Expected @(
@@ -647,12 +647,16 @@ Describe "AppImage backend" {
           "arg=[notes.txt]"
           "arg=[-GSLogFile]"
           "arg=[$callerDir/logs/run.txt]"
+          "arg=[-Type]"
+          "arg=[text/plain]"
+          "arg=[-Dump]"
+          "arg=[exports/new.png]"
           "arg=[--out]"
           "arg=[$callerDir/notes.txt]"
           "arg=[https://example.invalid/a?b=c]"
           "arg=[mailto:someone@example.invalid]"
           "arg=[]"
-        ) -Message "Relative paths should resolve against the caller's directory, while the app still runs in launch.workingDirectory; options, a -Key option's plain value, and URLs pass through."
+        ) -Message "Relative paths should resolve against the caller's directory, while the app still runs in launch.workingDirectory; options, a -Key option's plain value or a slash value whose folder is missing (-Type text/plain), and URLs pass through."
 
         # A file manager or desktop launcher passes absolute paths or file URLs from wherever it runs.
         $absolute = Join-Path $callerDir "Pictures/x.png"

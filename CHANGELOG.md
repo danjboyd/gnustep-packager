@@ -46,6 +46,13 @@
   caller's environment for a child process. Behavior is unchanged; a new test
   checks what the app itself receives.
 
+### Fixed
+- AppImage and MSI launchers: an option value with a slash, such as
+  `-Type text/plain`, is no longer turned into a path in the caller's
+  directory. The value after a single-dash option is made absolute only when
+  the folder it names exists there (`-GSLogFile logs/run.txt` with a `logs`
+  folder). Reported by gnustep-themes.
+
 ## v0.1.10
 
 ### Upgrading

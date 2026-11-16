@@ -1817,9 +1817,11 @@ function Write-GpAppImageAppRun {
   # slash and is not a URL. Options (-x, --foo=bar), URLs, absolute paths and
   # the manifest's own launch arguments (added later) pass through unchanged.
   # The value after a single-dash option (GNUstep's -Key value) is resolved only
-  # when it contains a slash: in -Key YES, YES is a value even if a file of that
-  # name exists. Without a usable caller directory (it was deleted), nothing is
-  # rewritten.
+  # when it contains a slash and the folder it names exists in the caller's
+  # directory: in -Key YES, YES is a value even if a file of that name exists,
+  # and -Key text/plain stays as is unless there is a text folder. A file the app
+  # will create (-GSLogFile logs/run.txt) still resolves when logs/ exists.
+  # Without a usable caller directory (it was deleted), nothing is rewritten.
   $lines.Add('GP_CALLER_DIR="$(pwd 2>/dev/null)" || GP_CALLER_DIR=""') | Out-Null
   $lines.Add('case "$GP_CALLER_DIR" in') | Out-Null
   $lines.Add('  /*)') | Out-Null
@@ -1839,7 +1841,12 @@ function Write-GpAppImageAppRun {
   $lines.Add('            case "${gp_arg%%:*}" in') | Out-Null
   $lines.Add("              ""`$gp_arg""|''|[!A-Za-z]*|*[!A-Za-z0-9+.-]*)") | Out-Null
   $lines.Add('                case "$gp_arg" in') | Out-Null
-  $lines.Add('                  */*) gp_resolve=1 ;;') | Out-Null
+  $lines.Add('                  */*)') | Out-Null
+  # The loop runs before the cd, so -d tests the folder in the caller's directory.
+  $lines.Add('                    if [ "$gp_after_option" = 0 ] || [ -d "${gp_arg%/*}" ]; then') | Out-Null
+  $lines.Add('                      gp_resolve=1') | Out-Null
+  $lines.Add('                    fi') | Out-Null
+  $lines.Add('                    ;;') | Out-Null
   $lines.Add('                esac') | Out-Null
   $lines.Add('                ;;') | Out-Null
   $lines.Add('            esac') | Out-Null
