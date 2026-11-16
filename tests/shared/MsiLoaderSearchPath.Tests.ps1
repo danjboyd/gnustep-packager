@@ -30,6 +30,17 @@ Describe "MSI: DLLs on the app's search path" {
       & clang @common "-Wl,/subsystem:console" -o (Join-Path $script:buildRoot "Demo.exe") (Join-Path $script:buildRoot "app.c") (Join-Path $script:buildRoot "gpprivate.lib")
       if ($LASTEXITCODE -ne 0) { throw "building Demo.exe failed" }
     }
+    # The closure reads imports with objdump. An objdump built for another
+    # architecture (the arm64 Linux runner's) can't read an x86-64 PE, and
+    # every case would pass with nothing checked.
+    $script:canReadPe = $script:canBuild -and (@(Get-GpPeImportedDllNames -Path (Join-Path $script:buildRoot "Demo.exe")) -contains "gpprivate.dll")
+    function Skip-GpUnlessPeReadable {
+      if (-not $script:canReadPe) {
+        Set-ItResult -Skipped -Because "this host's objdump can't read the cross-built x86-64 PE files"
+        return $true
+      }
+      return $false
+    }
 
     # An install tree with app/Demo.app/Demo.exe and gpprivate.dll at
     # $DllRelativeDir. Returns the analysis and its context and config.
@@ -62,23 +73,27 @@ Describe "MSI: DLLs on the app's search path" {
   }
 
   It "accepts the DLL in runtime\bin, which the launcher puts on PATH" -Skip:(-not ((Get-Command clang -ErrorAction SilentlyContinue) -and (Get-Command lld-link -ErrorAction SilentlyContinue))) {
+    if (Skip-GpUnlessPeReadable) { return }
     $case = Invoke-GpLoaderCase -Name "runtime-bin" -DllRelativeDir "runtime/bin"
     @($case.Analysis.MissingDependencyNames).Count | Should -Be 0
     @($case.Analysis.OffSearchPathRecords).Count | Should -Be 0
   }
 
   It "accepts the DLL next to the app" -Skip:(-not ((Get-Command clang -ErrorAction SilentlyContinue) -and (Get-Command lld-link -ErrorAction SilentlyContinue))) {
+    if (Skip-GpUnlessPeReadable) { return }
     $case = Invoke-GpLoaderCase -Name "beside" -DllRelativeDir "app/Demo.app"
     @($case.Analysis.OffSearchPathRecords).Count | Should -Be 0
   }
 
   It "accepts the DLL in a folder named in launch.pathPrepend, with tokens expanded" -Skip:(-not ((Get-Command clang -ErrorAction SilentlyContinue) -and (Get-Command lld-link -ErrorAction SilentlyContinue))) {
+    if (Skip-GpUnlessPeReadable) { return }
     $case = Invoke-GpLoaderCase -Name "prepend" -DllRelativeDir "app/plugins/bin" -PathPrepend @("{@appRoot}/plugins/bin")
     @($case.Analysis.OffSearchPathRecords).Count | Should -Be 0
     @($case.Analysis.LoaderSearchDirectories) | Should -Contain ([System.IO.Path]::GetFullPath((Join-Path $case.Root "app/plugins/bin")))
   }
 
   It "warns about a DLL that is only under Resources" -Skip:(-not ((Get-Command clang -ErrorAction SilentlyContinue) -and (Get-Command lld-link -ErrorAction SilentlyContinue))) {
+    if (Skip-GpUnlessPeReadable) { return }
     $case = Invoke-GpLoaderCase -Name "resources" -DllRelativeDir "app/Demo.app/Resources"
     @($case.Analysis.MissingDependencyNames).Count | Should -Be 0 -Because "it is in the install tree, which is all the old check asked"
     @($case.Analysis.OffSearchPathRecords).Count | Should -Be 1
@@ -88,6 +103,7 @@ Describe "MSI: DLLs on the app's search path" {
   }
 
   It "fails on the same case with requireLoaderSearchPath" -Skip:(-not ((Get-Command clang -ErrorAction SilentlyContinue) -and (Get-Command lld-link -ErrorAction SilentlyContinue))) {
+    if (Skip-GpUnlessPeReadable) { return }
     $case = Invoke-GpLoaderCase -Name "resources-strict" -DllRelativeDir "app/Demo.app/Resources" -Require
     { Assert-GpMsiLoaderSearchPath -Config $case.Config -Analysis $case.Analysis -LogPath $case.Log } | Should -Throw "*not on the app's DLL search path*gpprivate.dll*"
   }
