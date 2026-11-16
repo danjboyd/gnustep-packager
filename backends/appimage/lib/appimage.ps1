@@ -3182,6 +3182,7 @@ function Invoke-GpAppImageRuntimeClosureValidation {
       CheckedFileCount = 0
       DynamicFileCount = 0
       LibrarySearchPaths = @()
+      LoaderPathIssues = [string[]]@()
       LogPath = $LogPath
     }
   }
@@ -3194,6 +3195,7 @@ function Invoke-GpAppImageRuntimeClosureValidation {
       CheckedFileCount = 0
       DynamicFileCount = 0
       LibrarySearchPaths = @()
+      LoaderPathIssues = [string[]]@()
       LogPath = $LogPath
     }
   }
