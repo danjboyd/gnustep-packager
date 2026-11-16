@@ -1,6 +1,10 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# The packaged-defaults domain resolver and the plist reader it uses
+# (Resolve-GpPackagedDefaultsDomain) are shared with the AppImage backend.
+. (Join-Path $PSScriptRoot "..\..\appimage\lib\theme-metadata.ps1")
+
 function New-GpCaseInsensitiveDictionary {
   return [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 }
@@ -1547,12 +1551,8 @@ function Get-GpMsiAppDomainDefaults {
   )
 
   $packagedDefaults = Get-GpPackagedDefaults -Manifest $Context.Manifest
-  $packageId = [string]$Context.Manifest["package"]["id"]
-  $domainName = if ($null -ne $packagedDefaults.AppDomain -and -not [string]::IsNullOrWhiteSpace([string]$packagedDefaults.AppDomain.Domain)) {
-    [string]$packagedDefaults.AppDomain.Domain
-  } else {
-    $packageId
-  }
+  $resolvedDomain = Resolve-GpPackagedDefaultsDomain -Context $Context -PackagedDefaults $packagedDefaults
+  $domainName = $resolvedDomain.Domain
 
   if ($null -eq $packagedDefaults.AppDomain -and [string]::IsNullOrWhiteSpace([string]$packagedDefaults.DefaultTheme)) {
     return $null
@@ -1586,6 +1586,7 @@ function Get-GpMsiAppDomainDefaults {
 
   return [pscustomobject]@{
     Domain = $domainName
+    DomainSource = $resolvedDomain.Source
     Entries = @($entries.ToArray())
   }
 }

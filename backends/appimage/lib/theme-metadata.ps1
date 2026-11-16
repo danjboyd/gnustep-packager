@@ -465,6 +465,46 @@ function Get-GpAppRuntimeDomainHint {
   return [ordered]@{ executable = $executable; bundleIdentifier = $null; runtimeDomainHint = $null; runtimeDomainHintSource = "unknown" }
 }
 
+# The defaults domain the packaged defaults (packagedDefaults.defaultTheme and
+# appDomain.values) are seeded into. gnustep-base reads the app's
+# CFBundleIdentifier, or its process name when there is none
+# (+[NSUserDefaults initialize]), so seeding package.id only reaches an app
+# whose bundle identifier happens to equal it. Order:
+#   1. packagedDefaults.appDomain.domain, when the manifest names one;
+#   2. the domain the staged app reads (Get-GpAppRuntimeDomainHint);
+#   3. package.id, when the staged app isn't there or its plist can't be read.
+# Shared by the AppImage and MSI backends.
+function Resolve-GpPackagedDefaultsDomain {
+  param(
+    [Parameter(Mandatory = $true)][psobject]$Context,
+    $PackagedDefaults
+  )
+
+  if ($null -eq $PackagedDefaults) {
+    $PackagedDefaults = Get-GpPackagedDefaults -Manifest $Context.Manifest
+  }
+  $packageId = [string]$Context.Manifest["package"]["id"]
+  if ($null -ne $PackagedDefaults.AppDomain -and $Context.Manifest["packagedDefaults"]["appDomain"].Contains("domain") -and
+      -not [string]::IsNullOrWhiteSpace([string]$PackagedDefaults.AppDomain.Domain)) {
+    return [pscustomobject]@{ Domain = [string]$PackagedDefaults.AppDomain.Domain; Source = "manifest" }
+  }
+
+  $hint = $null
+  try {
+    $launch = Get-GpLaunchContract -Context $Context
+    $entry = Join-Path $launch.StageRoot ($launch.EntryRelativePath -replace "[\\/]", [System.IO.Path]::DirectorySeparatorChar)
+    if (Test-Path -LiteralPath $entry -PathType Leaf) {
+      $hint = Get-GpAppRuntimeDomainHint -PayloadRoot $launch.StageRoot -EntryRelativePath $launch.EntryRelativePath
+    }
+  } catch {
+    $hint = $null
+  }
+  if ($null -ne $hint -and -not [string]::IsNullOrWhiteSpace([string]$hint["runtimeDomainHint"])) {
+    return [pscustomobject]@{ Domain = [string]$hint["runtimeDomainHint"]; Source = [string]$hint["runtimeDomainHintSource"] }
+  }
+  return [pscustomobject]@{ Domain = $packageId; Source = "packageId" }
+}
+
 # The GSTheme sources the packager controls, ranked (1 wins over 2). The env
 # entry has no rank: gnustep-gui picks the theme from NSUserDefaults alone
 # (GSTheme.m, gui 9bd1123a1), whose search list has no environment domain

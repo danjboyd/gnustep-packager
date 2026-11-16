@@ -1096,12 +1096,8 @@ function Get-GpAppImageAppDomainDefaults {
   )
 
   $packagedDefaults = Get-GpPackagedDefaults -Manifest $Context.Manifest
-  $packageId = [string]$Context.Manifest["package"]["id"]
-  $domainName = if ($null -ne $packagedDefaults.AppDomain -and -not [string]::IsNullOrWhiteSpace([string]$packagedDefaults.AppDomain.Domain)) {
-    [string]$packagedDefaults.AppDomain.Domain
-  } else {
-    $packageId
-  }
+  $resolvedDomain = Resolve-GpPackagedDefaultsDomain -Context $Context -PackagedDefaults $packagedDefaults
+  $domainName = $resolvedDomain.Domain
 
   if ($null -eq $packagedDefaults.AppDomain -and [string]::IsNullOrWhiteSpace([string]$packagedDefaults.DefaultTheme)) {
     return $null
@@ -1134,6 +1130,7 @@ function Get-GpAppImageAppDomainDefaults {
 
   return [pscustomobject]@{
     Domain = $domainName
+    DomainSource = $resolvedDomain.Source
     Entries = @($entries.ToArray())
   }
 }
@@ -1778,6 +1775,15 @@ function Write-GpAppImageAppRun {
   $launch = Get-GpLaunchContract -Context $Context
   $environment = Get-GpLaunchEnvironmentForAppImage -Context $Context
   $appDefaults = Get-GpAppImageAppDomainDefaults -Context $Context
+  if ($null -ne $appDefaults -and @($appDefaults.Entries).Count -gt 0) {
+    $domainReason = switch ($appDefaults.DomainSource) {
+      "manifest" { "packagedDefaults.appDomain.domain" }
+      "bundleIdentifier" { "the app's CFBundleIdentifier" }
+      "processName" { "the app's process name; its Info plist has no CFBundleIdentifier" }
+      default { "package.id; the staged app's bundle identifier couldn't be read" }
+    }
+    Write-GpAppImageLogLine -LogPath $LogPath -Message ("Packaged defaults are seeded into domain '{0}' ({1})." -f $appDefaults.Domain, $domainReason)
+  }
   $appRunPath = Join-Path $AppDirRoot "AppRun"
   $lines = [System.Collections.Generic.List[string]]::new()
 
