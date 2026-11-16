@@ -52,10 +52,14 @@ Name the directory your build writes the DLL to in
 ```json
 "backends": {
   "msi": {
-    "runtimeSearchRoots": ["build/trellis/bin"]
+    "runtimeSearchRoots": ["C:/a/myapp/myapp/build/trellis/bin"]
   }
 }
 ```
+
+Use an absolute path. A relative one isn't resolved against the manifest: it's
+taken from the directory the packager runs in (in the reusable workflow, the
+checkout root), which is easy to get wrong.
 
 When the packager computes the runtime closure, it copies every DLL the app
 imports from those roots into `runtime\bin`. The launcher puts `runtime\bin`
