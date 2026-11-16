@@ -24,6 +24,9 @@ Status: findings from 2026-11-11. Gap 1, fonts for the MSI, is now
 
 So Gumdrop is a manifest-only change on both an AppImage and an MSI.
 
+A theme that carries its own fonts and registers them may not need
+`fonts.bundle` at all: see [Fonts Inside the Theme](#fonts-inside-the-theme).
+
 ## How Windows Finds Fonts
 
 The managed toolchain's Windows `gnustep-back` is MSYS2's
@@ -40,6 +43,33 @@ already sets `FONTCONFIG_FILE` and `FONTCONFIG_PATH` when
 `runtime\etc\fonts\fonts.conf` exists (`docs/msi-launcher-design.md`).
 `examples/sample-gui` copies MSYS2's `clang64\etc\fonts\fonts.conf` into the
 stage. That file lists `WINDOWSFONTDIR`, which has no DejaVu.
+
+## Fonts Inside the Theme
+
+A theme can carry fonts itself, in `<Theme>.theme/Resources/Fonts`, and add
+that directory to fontconfig when it loads (`FcConfigAppFontAddDir`). Gumdrop
+does this for DejaVu Sans. The packager has nothing to do for such fonts:
+they travel inside the theme that `themeInputs` already stages.
+
+On Windows that wasn't enough at first. On 2026-11-16 winuitheme found that
+`gnustep-back` lists the available fonts before the theme loads, so fonts the
+theme registers afterwards are never seen, and the app fell back to another
+face. With a `FONTCONFIG_FILE` that also listed Gumdrop's `Resources/Fonts`,
+the 160 "font ... DejaVuSans can't be found" lines dropped to 0. The fix
+belongs in the theme: after registering its fonts, it has `gnustep-back`
+list them again. Gumdrop does this from `danjboyd/gnustep-funthemes` commit
+`ccd6509` ("Refresh bundled font names after Gumdrop registration"), on the
+`gumdrop-polish-20261113` branch; it isn't on funthemes' `main` yet. On
+2026-11-16 winuitheme confirmed it on Windows with no `FONTCONFIG_FILE`. Pin
+`themeInputs[].ref` to that commit or later. An older Gumdrop on Windows still
+needs the fonts from `fonts.bundle`.
+
+So:
+
+- **A theme that registers its fonts and then re-lists them** (Gumdrop from
+  `ccd6509`) needs no `fonts.bundle` and no packager `fonts.conf`.
+- **`fonts.bundle`** is for fonts that aren't inside a theme: fonts the app
+  itself uses, or fonts a theme names but doesn't carry.
 
 ## Gaps
 
@@ -88,7 +118,9 @@ code of your own:
    each of its platforms. You can also name it in
    `packagedDefaults.defaultTheme`. The user's own `GSTheme` setting still
    wins.
-3. `fonts.bundle` ships the fonts the theme names. It is set per backend:
+3. `fonts.bundle` ships the fonts the theme names, when the theme doesn't
+   carry and register them itself (see
+   [Fonts Inside the Theme](#fonts-inside-the-theme)). It is set per backend:
    `backends.appimage.fonts.bundle` and `backends.msi.fonts.bundle` take the
    same entries. Each one gives a `name`, the font `files`, and a required
    `licenseFile`, plus an optional `license` and `homepage` for the notice

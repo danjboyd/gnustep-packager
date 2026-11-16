@@ -407,7 +407,9 @@ generated file lists `WINDOWSFONTDIR`. It then adds the bundled directory,
 relative to the file so it works wherever the MSI installs, and puts the
 cache under `LOCAL_APPDATA_FONTCONFIG_CACHE` because the install directory
 isn't writable. This is for a `gnustep-back` built with cairo and fontconfig,
-as MSYS2's is: a `winlib` (GDI) backend doesn't read fontconfig. Packaging
+as MSYS2's is: a `winlib` (GDI) backend doesn't read fontconfig. A theme
+that carries its fonts, registers them and re-lists them doesn't need this;
+see `docs/theme-bundling.md`, "Fonts Inside the Theme". Packaging
 fails if the stage already has an `etc\fonts\fonts.app.conf`.
 
 ### `backends.appimage`
