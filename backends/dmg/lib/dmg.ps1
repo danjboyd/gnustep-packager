@@ -289,6 +289,181 @@ function Get-GpDmgAppBundleInfo {
 }
 
 # Reads `codesign -dv` for a bundle or image. Never throws.
+# True when the file starts with a Mach-O or universal (fat) magic number.
+function Test-GpDmgMachOFile {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  try {
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+      $bytes = [byte[]]::new(4)
+      if ($stream.Read($bytes, 0, 4) -ne 4) {
+        return $false
+      }
+    } finally {
+      $stream.Dispose()
+    }
+  } catch {
+    return $false
+  }
+  $magic = [System.BitConverter]::ToString($bytes)
+  return $magic -in @("FE-ED-FA-CE", "FE-ED-FA-CF", "CE-FA-ED-FE", "CF-FA-ED-FE", "CA-FE-BA-BE", "BE-BA-FE-CA")
+}
+
+# Parses `otool -L` output into the libraries a Mach-O file loads, without its
+# own install name. Universal files list each architecture; entries repeat.
+function ConvertFrom-GpDmgOtoolLibraries {
+  param(
+    [AllowEmptyCollection()][string[]]$Lines,
+    [string]$InstallName
+  )
+
+  $references = [System.Collections.Generic.List[psobject]]::new()
+  $seen = @{}
+  foreach ($line in @($Lines)) {
+    if ($line -notmatch '^\s+(\S.*?)\s+\((compatibility version[^)]*)\)\s*$') {
+      continue
+    }
+    $path = $Matches[1]
+    $detail = $Matches[2]
+    if ($InstallName -and $path -eq $InstallName) {
+      continue
+    }
+    if ($seen.ContainsKey($path)) {
+      continue
+    }
+    $seen[$path] = $true
+    $references.Add([pscustomobject]@{ Path = $path; Weak = [bool]($detail -match '\bweak\b') }) | Out-Null
+  }
+  return @($references.ToArray())
+}
+
+# Parses `otool -l` output into the file's LC_RPATH entries.
+function ConvertFrom-GpDmgOtoolRpaths {
+  param([AllowEmptyCollection()][string[]]$Lines)
+
+  $rpaths = [System.Collections.Generic.List[string]]::new()
+  $inRpath = $false
+  foreach ($line in @($Lines)) {
+    if ($line -match '^\s*cmd\s+(\S+)') {
+      $inRpath = ($Matches[1] -eq "LC_RPATH")
+      continue
+    }
+    if ($inRpath -and $line -match '^\s*path\s+(.+?)\s+\(offset\s+\d+\)\s*$') {
+      if (-not $rpaths.Contains($Matches[1])) {
+        $rpaths.Add($Matches[1]) | Out-Null
+      }
+      $inRpath = $false
+    }
+  }
+  return [string[]]@($rpaths.ToArray())
+}
+
+# Where dyld would look for one library reference, as candidate paths.
+function Get-GpDmgMachOReferenceCandidates {
+  param(
+    [Parameter(Mandatory = $true)][string]$Reference,
+    [Parameter(Mandatory = $true)][string]$LoaderDirectory,
+    [Parameter(Mandatory = $true)][string]$ExecutableDirectory,
+    [AllowEmptyCollection()][string[]]$Rpaths
+  )
+
+  function Expand-GpDmgLoaderTokens([string]$Value) {
+    if ($Value.StartsWith("@executable_path")) {
+      return $ExecutableDirectory + $Value.Substring("@executable_path".Length)
+    }
+    if ($Value.StartsWith("@loader_path")) {
+      return $LoaderDirectory + $Value.Substring("@loader_path".Length)
+    }
+    return $Value
+  }
+
+  if ($Reference.StartsWith("@rpath/")) {
+    $rest = $Reference.Substring("@rpath".Length)
+    return [string[]]@(@($Rpaths) | ForEach-Object { (Expand-GpDmgLoaderTokens ([string]$_)) + $rest })
+  }
+  return [string[]]@(Expand-GpDmgLoaderTokens $Reference)
+}
+
+# Checks that every Mach-O file in an app bundle loads its libraries from inside
+# the bundle or from the system (/usr/lib, /System). A library referenced by its
+# build path (/Users/runner/work/..., /opt/homebrew/...) works on the build Mac
+# and nowhere else, and a launch smoke test on the build Mac can't tell.
+function Get-GpDmgMachODependencyReport {
+  param(
+    [Parameter(Mandatory = $true)][string]$AppPath,
+    [Parameter(Mandatory = $true)][string]$ExecutablePath,
+    [string]$LogPath
+  )
+
+  $appRoot = [System.IO.Path]::GetFullPath($AppPath).TrimEnd('/')
+  $executableDirectory = Split-Path -Parent ([System.IO.Path]::GetFullPath($ExecutablePath))
+  $executableRpaths = @()
+  $issues = [System.Collections.Generic.List[string]]::new()
+  $fileCount = 0
+  $bundledCount = 0
+
+  function Get-GpDmgOtoolLines([string[]]$Arguments) {
+    $global:LASTEXITCODE = 0
+    $output = @(& otool @Arguments 2>$null | ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0) {
+      return $null
+    }
+    return $output
+  }
+
+  $executableLoadCommands = Get-GpDmgOtoolLines @("-l", $ExecutablePath)
+  if ($null -ne $executableLoadCommands) {
+    $executableRpaths = @(ConvertFrom-GpDmgOtoolRpaths -Lines $executableLoadCommands)
+  }
+
+  foreach ($item in Get-ChildItem -LiteralPath $appRoot -Recurse -File -Force -ErrorAction SilentlyContinue) {
+    if ($item.LinkType -or -not (Test-GpDmgMachOFile -Path $item.FullName)) {
+      continue
+    }
+    $libraryLines = Get-GpDmgOtoolLines @("-L", $item.FullName)
+    if ($null -eq $libraryLines) {
+      continue
+    }
+    $fileCount += 1
+    $relativeFile = $item.FullName.Substring($appRoot.Length).TrimStart('/')
+    $installNameLines = Get-GpDmgOtoolLines @("-D", $item.FullName)
+    $installName = if ($null -ne $installNameLines) { @($installNameLines | Select-Object -Skip 1 | Where-Object { $_ -and $_ -notmatch ':$' }) | Select-Object -First 1 } else { $null }
+    $loadCommands = Get-GpDmgOtoolLines @("-l", $item.FullName)
+    $rpaths = @(@(if ($null -ne $loadCommands) { ConvertFrom-GpDmgOtoolRpaths -Lines $loadCommands }) + @($executableRpaths) | Select-Object -Unique)
+
+    foreach ($reference in @(ConvertFrom-GpDmgOtoolLibraries -Lines $libraryLines -InstallName $installName)) {
+      $path = [string]$reference.Path
+      if ($path.StartsWith("/usr/lib/") -or $path.StartsWith("/System/")) {
+        continue
+      }
+      $candidates = @(Get-GpDmgMachOReferenceCandidates -Reference $path -LoaderDirectory $item.DirectoryName -ExecutableDirectory $executableDirectory -Rpaths $rpaths)
+      $inside = @($candidates | Where-Object {
+        $full = [System.IO.Path]::GetFullPath($_)
+        $full.StartsWith($appRoot + "/") -and (Test-Path -LiteralPath $full)
+      })
+      if ($inside.Count -gt 0) {
+        $bundledCount += 1
+        continue
+      }
+      if ($reference.Weak) {
+        if ($LogPath) {
+          Write-GpDmgLogLine -LogPath $LogPath -Message ("Weak library not in the bundle (allowed): {0} -> {1}" -f $relativeFile, $path)
+        }
+        continue
+      }
+      $why = if ($path.StartsWith("@")) { "doesn't resolve inside the bundle" } else { "is outside the bundle and the system" }
+      $issues.Add(("{0} loads {1}, which {2}" -f $relativeFile, $path, $why)) | Out-Null
+    }
+  }
+
+  return [pscustomobject]@{
+    MachOFileCount = $fileCount
+    BundledReferenceCount = $bundledCount
+    Issues = [string[]]@($issues.ToArray())
+  }
+}
+
 function Get-GpDmgSignatureInfo {
   param(
     [Parameter(Mandatory = $true)]
@@ -468,6 +643,7 @@ function Get-GpDmgConfig {
     Validation = [pscustomobject]@{
       RequireSignature = [bool](Get-GpDmgValue -Parent $validation -Key "requireSignature" -Default $true)
       RequireGatekeeperAcceptance = [bool](Get-GpDmgValue -Parent $validation -Key "requireGatekeeperAcceptance" -Default $false)
+      RequireBundledDependencies = [bool](Get-GpDmgValue -Parent $validation -Key "requireBundledDependencies" -Default $false)
     }
     Smoke = [pscustomobject]@{
       Enabled = [bool](Get-GpDmgValue -Parent $smoke -Key "enabled" -Default $false)
@@ -1890,6 +2066,20 @@ function Invoke-GpDmgValidation {
       $gatekeeperStatus = if ($spctl.ExitCode -eq 0) { "pass" } elseif ($config.Validation.RequireGatekeeperAcceptance) { "fail" } else { "info" }
       $gatekeeperDetail = if ($spctl.ExitCode -eq 0) { "accepted" } else { "rejected (expected without Developer ID + notarization): {0}" -f (($gatekeeper.output -split "`n") | Select-Object -Last 1) }
       Add-GpDmgCheck -Name "gatekeeper" -Status $gatekeeperStatus -Detail $gatekeeperDetail
+
+      if ($mountedInfo.HasExecutable) {
+        $dependencyReport = Get-GpDmgMachODependencyReport -AppPath $mountedApp -ExecutablePath $mountedInfo.ExecutablePath -LogPath $LogPath
+        foreach ($issue in @($dependencyReport.Issues)) {
+          Write-GpDmgLogLine -LogPath $LogPath -Message ("Library reference: {0}" -f $issue)
+        }
+        $dependencyStatus = if (@($dependencyReport.Issues).Count -eq 0) { "pass" } elseif ($config.Validation.RequireBundledDependencies) { "fail" } else { "warn" }
+        $dependencyDetail = if (@($dependencyReport.Issues).Count -eq 0) {
+          "{0} Mach-O file(s); {1} bundled library reference(s), the rest from the system" -f $dependencyReport.MachOFileCount, $dependencyReport.BundledReferenceCount
+        } else {
+          "{0} reference(s) outside the bundle (works only where that path exists): {1}" -f @($dependencyReport.Issues).Count, [string]::Join("; ", @($dependencyReport.Issues | Select-Object -First 3))
+        }
+        Add-GpDmgCheck -Name "library-references" -Status $dependencyStatus -Detail $dependencyDetail
+      }
 
       if ($mountedInfo.HasInfoPlist -and $mountedInfo.ShortVersion -and $mountedInfo.ShortVersion -ne $config.Version) {
         Add-GpDmgCheck -Name "bundle-version" -Status "warn" -Detail ("CFBundleShortVersionString {0} != package.version {1}" -f $mountedInfo.ShortVersion, $config.Version)
