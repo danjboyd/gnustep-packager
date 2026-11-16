@@ -54,7 +54,7 @@ jobs:
           } >> "$GITHUB_PATH"
           {
             echo "GP_GNUSTEP_CLI_ROOT=$(cygpath -w "${GP_GNUSTEP_CLI_ROOT}")"
-            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.5/release-manifest.json}"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/release-manifest.json}"
           } >> "$GITHUB_ENV"
 
       - name: Validate Example Manifest
@@ -161,7 +161,7 @@ jobs:
           } >> "$GITHUB_PATH"
           {
             echo "GP_GNUSTEP_CLI_ROOT=${GP_GNUSTEP_CLI_ROOT}"
-            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.5/release-manifest.json}"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/release-manifest.json}"
           } >> "$GITHUB_ENV"
 
       - name: Validate Linux Example Manifest
@@ -205,7 +205,7 @@ jobs:
     # aarch64 AppImages build on an aarch64 host: appimagetool and its runtime
     # run only on their own architecture (#109).
     runs-on: ubuntu-24.04-arm
-    # In a Debian trixie container: gnustep-cli-new v0.1.5's linux-arm64
+    # In a Debian trixie container: gnustep-cli-new's Debian linux-arm64
     # toolchain links ICU 76, and ubuntu-24.04-arm has ICU 74, which the
     # toolchain refuses (icu_major_mismatch). Trixie has ICU 76.
     container: debian:trixie
@@ -248,7 +248,7 @@ jobs:
           } >> "$GITHUB_PATH"
           {
             echo "GP_GNUSTEP_CLI_ROOT=${GP_GNUSTEP_CLI_ROOT}"
-            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.5/release-manifest.json}"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/release-manifest.json}"
           } >> "$GITHUB_ENV"
 
       - name: Validate Linux Example Manifest

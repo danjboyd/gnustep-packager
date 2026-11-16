@@ -1,12 +1,12 @@
 #!/bin/sh
 set -eu
 
-manifest_url="${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.5/release-manifest.json}"
-bootstrap_url="${GP_GNUSTEP_CLI_BOOTSTRAP_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.5/gnustep-bootstrap.sh}"
+manifest_url="${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/release-manifest.json}"
+bootstrap_url="${GP_GNUSTEP_CLI_BOOTSTRAP_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/gnustep-bootstrap.sh}"
 # Digests of the default bootstrap scripts. Unset uses these; an empty value
 # skips the check, for a caller testing an unpinned bootstrap URL.
-bootstrap_sha256="${GP_GNUSTEP_CLI_BOOTSTRAP_SHA256-87a44d676e177bb8b8988da6f94b7c192e6063d37f7367a69d987b79a1c25807}"
-bootstrap_ps1_sha256="${GP_GNUSTEP_CLI_BOOTSTRAP_PS1_SHA256-bea03e7868c80b38d122a1af126a4a5ff1da78c1d83d32331623b687fe41a548}"
+bootstrap_sha256="${GP_GNUSTEP_CLI_BOOTSTRAP_SHA256-1580d5ddcf774716bc2caa614cb4c217c19ead1645f4362f58ad12277345c961}"
+bootstrap_ps1_sha256="${GP_GNUSTEP_CLI_BOOTSTRAP_PS1_SHA256-867308a2c1c3febd9a7800564eb131a899db67c2ccc9c5d03d4b921c4b387420}"
 install_root="${GP_GNUSTEP_CLI_ROOT:-/tmp/gnustep-cli-new}"
 log_root="${GP_GNUSTEP_CLI_LOG_ROOT:-/tmp/gnustep-cli-new-logs}"
 smoke_root="${GP_GNUSTEP_CLI_SMOKE_ROOT:-/tmp/gnustep-cli-new-smoke}"
