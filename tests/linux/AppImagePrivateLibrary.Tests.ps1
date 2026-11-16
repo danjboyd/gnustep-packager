@@ -166,4 +166,16 @@ Describe "AppImage: a private library built in the app's tree" {
     { Invoke-GpAppImageRuntimeClosureValidation -Config $script:config -ExpandedRoot $case.Root -LogPath $case.Log -WarningAction SilentlyContinue } | Should -Throw "*runtime-closure validation failed*"
     Get-Content -Raw $case.Log | Should -BeLike "*Plugin.bundle/Plugin -> libgpgone.so*"
   }
+
+  It 'returns LoaderPathIssues when there is nothing to check' {
+    $empty = Join-Path $script:workRoot "no-elf"
+    New-Item -ItemType Directory -Force -Path (Join-Path $empty "usr/app") | Out-Null
+    Set-Content -Path (Join-Path $empty "usr/app/run.sh") -Value "#!/bin/sh"
+    $result = Invoke-GpAppImageRuntimeClosureValidation -Config $script:config -ExpandedRoot $empty -LogPath (Join-Path $script:workRoot "no-elf.log")
+    $result.CheckedFileCount | Should -Be 0
+    @($result.LoaderPathIssues).Count | Should -Be 0
+
+    $off = [pscustomobject]@{ Validation = [pscustomobject]@{ RuntimeClosure = "off"; AllowedSystemLibraries = [string[]]@(); AllowedExternalRunpaths = [string[]]@() } }
+    @((Invoke-GpAppImageRuntimeClosureValidation -Config $off -ExpandedRoot $empty -LogPath (Join-Path $script:workRoot "off.log")).LoaderPathIssues).Count | Should -Be 0
+  }
 }
