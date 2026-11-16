@@ -46,6 +46,12 @@
   caller's environment for a child process. Behavior is unchanged; a new test
   checks what the app itself receives.
 
+### Changed
+- The reusable workflow's default gnustep-cli-new is v0.1.7 (was v0.1.5):
+  the manifest and bootstrap URLs and both bootstrap digests. v0.1.7 fixes a
+  Windows toolchain extraction timeout. A caller that pins its own
+  `gnustep-cli-manifest-url` is unaffected. The examples and docs follow.
+
 ## v0.1.10
 
 ### Upgrading
