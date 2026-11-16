@@ -49,6 +49,17 @@ The backend performs DLL closure for:
 Missing non-system DLLs are searched under `backends.msi.runtimeSearchRoots`
 and copied into `runtime/bin` when found.
 
+A DLL that is in the install tree also has to be where Windows will look for
+it once the launcher starts the app: the importing file's own folder, the
+app's folder, the working directory, or the launcher's `PATH`
+(`launch.pathPrepend`, with its `{@installRoot}`, `{@appRoot}`,
+`{@runtimeRoot}` and `{@metadataRoot}` tokens expanded, then `runtime\bin`).
+One that is only somewhere else, for example under `Resources`, is a warning
+in the package log, or a packaging failure with
+`backends.msi.validation.requireLoaderSearchPath: true`. Without it the
+installed app stops with "The code execution cannot proceed because X.dll was
+not found".
+
 Installed-runtime validation audits only the installed payload tree. Standard
 Windows OS imports are classified centrally as system dependencies and are not
 expected to be bundled under `runtime/`.

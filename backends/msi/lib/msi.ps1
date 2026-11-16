@@ -319,6 +319,7 @@ function Get-GpMsiConfig {
     IconRelativePath = $iconRelativePath
     FallbackRuntimeRoot = [string]$backend["fallbackRuntimeRoot"]
     RuntimeSearchRoots = [string[]]@($backend["runtimeSearchRoots"])
+    RequireLoaderSearchPath = [bool]$(if ($backend["validation"] -is [System.Collections.IDictionary] -and $backend["validation"].Contains("requireLoaderSearchPath")) { $backend["validation"]["requireLoaderSearchPath"] } else { $false })
     UnresolvedDependencyPolicy = [string]$backend["unresolvedDependencyPolicy"]
     IgnoredRuntimeDependencies = [string[]]@($backend["ignoredRuntimeDependencies"])
     ArtifactPlan = $artifactPlan
@@ -842,7 +843,9 @@ function Get-GpPeImportedDllNames {
     }
   }
 
-  return [string[]]($results | Select-Object -Unique)
+  # @(): an import-less PE (a resource-only DLL) gives an empty array, not
+  # one empty name.
+  return [string[]]@($results | Select-Object -Unique)
 }
 
 function Test-GpMsiSystemDllName {
@@ -972,6 +975,49 @@ function Get-GpMsiRuntimeBinaryRole {
   return "app-or-launcher"
 }
 
+# The directories Windows searches for the app's DLLs once the launcher has
+# started it: the app's own directory, the working directory, and the PATH
+# the launcher builds (launch.pathPrepend with its {@...} tokens expanded,
+# and runtime\bin). The importing file's own directory is added per file
+# (DLLs loaded with an altered search path, and tools in runtime\bin).
+function Get-GpMsiLoaderSearchDirectories {
+  param(
+    [Parameter(Mandatory = $true)][psobject]$Context,
+    [Parameter(Mandatory = $true)][psobject]$Config,
+    [Parameter(Mandatory = $true)][string]$InstallRoot
+  )
+
+  $directories = [System.Collections.Generic.List[string]]::new()
+  function Add-GpDirectory([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    $full = [System.IO.Path]::GetFullPath($Path)
+    if (-not ($directories | Where-Object { [string]::Equals($_, $full, [System.StringComparison]::OrdinalIgnoreCase) })) {
+      $directories.Add($full) | Out-Null
+    }
+  }
+  $tokens = [ordered]@{
+    "{@installRoot}" = $InstallRoot
+    "{@appRoot}" = (Resolve-GpPathRelativeToBase -BasePath $InstallRoot -Path $(if ($Config.PSObject.Properties["AppRootRelative"] -and $Config.AppRootRelative) { $Config.AppRootRelative } else { "app" }))
+    "{@runtimeRoot}" = (Resolve-GpPathRelativeToBase -BasePath $InstallRoot -Path $Config.RuntimeRootRelative)
+    "{@metadataRoot}" = (Resolve-GpPathRelativeToBase -BasePath $InstallRoot -Path $(if ($Config.PSObject.Properties["MetadataRootRelative"] -and $Config.MetadataRootRelative) { $Config.MetadataRootRelative } else { "metadata" }))
+  }
+  function Resolve-GpLaunchPath([string]$Spec) {
+    if ([string]::IsNullOrWhiteSpace($Spec)) { return $null }
+    foreach ($token in $tokens.Keys) { $Spec = $Spec.Replace($token, $tokens[$token]) }
+    if ($Spec.Contains("{@")) { return $null }
+    return Resolve-GpPathRelativeToBase -BasePath $InstallRoot -Path $Spec
+  }
+
+  $launch = $Context.Manifest["launch"]
+  Add-GpDirectory (Split-Path -Parent (Resolve-GpPathRelativeToBase -BasePath $InstallRoot -Path $launch["entryRelativePath"]))
+  Add-GpDirectory (Resolve-GpLaunchPath ([string]$launch["workingDirectory"]))
+  foreach ($item in @($launch["pathPrepend"])) {
+    Add-GpDirectory (Resolve-GpLaunchPath ([string]$item))
+  }
+  Add-GpDirectory (Join-Path $tokens["{@runtimeRoot}"] "bin")
+  return [string[]]@($directories.ToArray())
+}
+
 function Get-GpMsiRuntimeClosureAnalysis {
   param(
     [Parameter(Mandatory = $true)]
@@ -993,6 +1039,8 @@ function Get-GpMsiRuntimeClosureAnalysis {
   $seenTargets = New-GpCaseInsensitiveSet
   $unresolved = New-GpCaseInsensitiveSet
   $records = [System.Collections.Generic.List[psobject]]::new()
+  $loaderDirectories = @(Get-GpMsiLoaderSearchDirectories -Context $Context -Config $Config -InstallRoot $InstallRoot)
+  $offSearchPath = [System.Collections.Generic.List[psobject]]::new()
 
   $entryPath = Resolve-GpPathRelativeToBase -BasePath $InstallRoot -Path $Context.Manifest["launch"]["entryRelativePath"]
   if (Test-Path $entryPath) {
@@ -1042,6 +1090,18 @@ function Get-GpMsiRuntimeClosureAnalysis {
 
       if ($localIndex.ContainsKey($dllName)) {
         $record["ResolvedPath"] = $localIndex[$dllName]
+        # Present in the install tree; is it where Windows will look?
+        $reachable = $false
+        foreach ($dir in @((Split-Path -Parent $target)) + $loaderDirectories) {
+          if (Test-Path -LiteralPath (Join-Path $dir $dllName) -PathType Leaf) { $reachable = $true; break }
+        }
+        if (-not $reachable) {
+          $offSearchPath.Add([pscustomobject]@{
+            TargetRelativePath = $targetRelativePath
+            DependencyName = $dllName
+            FoundRelativePath = (Get-GpMsiRelativePath -Root $InstallRoot -Path $localIndex[$dllName])
+          }) | Out-Null
+        }
         $records.Add([pscustomobject]$record) | Out-Null
         continue
       }
@@ -1075,7 +1135,37 @@ function Get-GpMsiRuntimeClosureAnalysis {
     MissingRecords = @($missingRecords)
     MissingDependencyNames = [string[]]@($unresolved.Keys | Sort-Object)
     SearchRoots = [string[]]@($SearchRoots)
+    LoaderSearchDirectories = [string[]]@($loaderDirectories)
+    OffSearchPathRecords = @($offSearchPath.ToArray())
   }
+}
+
+# Reports DLLs the closure found in the install tree but outside the
+# directories Windows searches (Get-GpMsiLoaderSearchDirectories). The app
+# would fail to start with "The code execution cannot proceed because X.dll
+# was not found". Warns, or throws with
+# backends.msi.validation.requireLoaderSearchPath.
+function Assert-GpMsiLoaderSearchPath {
+  param(
+    [Parameter(Mandatory = $true)][psobject]$Config,
+    [Parameter(Mandatory = $true)][psobject]$Analysis,
+    [string]$LogPath
+  )
+
+  $records = @($Analysis.OffSearchPathRecords)
+  $require = [bool]($Config.PSObject.Properties["RequireLoaderSearchPath"] -and $Config.RequireLoaderSearchPath)
+  if ($LogPath) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("DLL search path check ({0}): {1} issue(s){2}" -f ([string]::Join("; ", @($Analysis.LoaderSearchDirectories))), $records.Count, $(if ($records.Count -gt 0 -and -not $require) { "; warning only (set backends.msi.validation.requireLoaderSearchPath to fail)" } else { "" }))
+  }
+  $lines = @($records | ForEach-Object { "{0} imports {1}, which is only at {2}: not in its own folder, the app's folder, the working directory or the launcher's PATH" -f $_.TargetRelativePath, $_.DependencyName, $_.FoundRelativePath })
+  foreach ($line in $lines) {
+    if ($LogPath) { Write-GpMsiLogLine -LogPath $LogPath -Message ("{0} {1}" -f $(if ($require) { "ERROR" } else { "WARNING" }), $line) }
+    if (-not $require) { Write-Warning ("MSI: {0}" -f $line) }
+  }
+  if ($require -and $lines.Count -gt 0) {
+    throw ("MSI runtime closure: {0} DLL(s) are in the install tree but not on the app's DLL search path. Move them to runtime\bin (or next to the importing file), or add their folder to launch.pathPrepend. {1}" -f $lines.Count, [string]::Join(" | ", $lines))
+  }
+  return [string[]]$lines
 }
 
 function Complete-GpMsiRuntimeClosure {
@@ -1732,6 +1822,7 @@ function Prepare-GpMsiInstallTree {
     -UnresolvedDependencies @($runtimeClosureAnalysis.MissingDependencyNames) `
     -IgnoredDependencies @($Config.IgnoredRuntimeDependencies)
   Assert-GpMsiRuntimeClosurePolicy -Config $Config -RuntimeClosure $runtimeClosure -LogPath $LogPath
+  Assert-GpMsiLoaderSearchPath -Config $Config -Analysis $runtimeClosureAnalysis -LogPath $LogPath | Out-Null
   foreach ($line in @(Get-GpMsiMissingDependencySummaryLines -Analysis $runtimeClosureAnalysis)) {
     Write-GpMsiLogLine -LogPath $LogPath -Message $line
   }
