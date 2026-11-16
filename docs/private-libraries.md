@@ -35,11 +35,12 @@ What validation checks (`validation.runtimeClosure: "strict"`):
 - A RUNPATH or RPATH that points outside the AppDir, such as the build
   directory, fails: "escaped the AppDir via RUNPATH/RPATH".
 - A library that wasn't staged fails: "unresolved dependency".
-- **Not caught by static validation:** a library staged in `runtime/lib` with
-  neither a RUNPATH nor `LD_LIBRARY_PATH`. Validation's `ldd` searches every
-  directory in the AppDir that holds an ELF file, so it finds the library,
-  but the app won't. Run the smoke launch (`-RunSmoke`, or `run-smoke: true`
-  in the reusable workflow); it starts the real `AppRun` and fails there.
+- A library staged in `runtime/lib` with neither a RUNPATH nor an
+  `LD_LIBRARY_PATH` entry is a warning: "in the AppDir but not on its runtime
+  search path". Validation follows the loader's real search (RUNPATH with
+  `$ORIGIN`, and the `LD_LIBRARY_PATH` the generated `AppRun` exports), so it
+  sees that the app won't find the library. Set
+  `backends.appimage.validation.requireLoaderSearchPath: true` to make it fail.
 
 `tests/linux/AppImagePrivateLibrary.Tests.ps1` builds such a library and app
 and checks each case.

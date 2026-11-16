@@ -68,3 +68,13 @@ Validation now checks that extracted packaged ELF files:
   allowlisted
 - do not retain unresolved dependencies under the packaged library search path
 - optionally stay within an explicit host-system library allowlist
+- find each bundled library they need on the search path they really get at
+  launch: what is already loaded, DT_RPATH, `AppRun`'s `LD_LIBRARY_PATH` (read
+  from the generated `AppRun`), then DT_RUNPATH with `$ORIGIN` expanded. The
+  check follows the loader from the launch entry and every other packaged
+  executable, then checks the shared objects nothing links (bundles loaded with
+  `dlopen`) with the entry's libraries counted as loaded. A library that is in
+  the AppDir but off that path is a warning, or a failure with
+  `backends.appimage.validation.requireLoaderSearchPath: true`. (The `ldd` pass
+  above uses every directory in the AppDir that holds an ELF file, so it finds
+  such a library when the app won't.)

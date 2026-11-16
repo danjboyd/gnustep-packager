@@ -10,6 +10,12 @@
   by its build path loads on the build Mac, so the smoke launch passed, and
   failed everywhere else. `backends.dmg.validation.requireBundledDependencies`
   makes it fail instead of warn.
+- AppImage validation: follow the dynamic loader's real search path (what is
+  already loaded, RPATH, the generated `AppRun`'s `LD_LIBRARY_PATH`, RUNPATH
+  with `$ORIGIN`) and warn when a bundled library is in the AppDir but off
+  that path. The `ldd` pass searched every directory that holds an ELF file, so
+  it passed a library the app couldn't load.
+  `backends.appimage.validation.requireLoaderSearchPath` makes it fail.
 
 ### Fixed
 - `packagedDefaults.defaultTheme` and `appDomain.values` are seeded into the

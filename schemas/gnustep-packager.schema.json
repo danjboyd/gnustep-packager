@@ -1329,6 +1329,9 @@
                     "minLength": 1
                   }
                 },
+                "requireLoaderSearchPath": {
+                  "type": "boolean"
+                },
                 "allowedExternalRunpaths": {
                   "type": "array",
                   "items": {

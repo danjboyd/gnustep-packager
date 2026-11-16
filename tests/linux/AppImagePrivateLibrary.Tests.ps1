@@ -35,7 +35,7 @@ Describe "AppImage: a private library built in the app's tree" {
     # expanded AppImage root: the app in usr/app/Demo.app, the library in
     # usr/<LibraryDir>. Returns the root and the app's path.
     function New-GpPrivateLibraryRoot {
-      param([string]$Name, [string]$LibraryDir, [string]$Runpath, [switch]$OmitLibrary)
+      param([string]$Name, [string]$LibraryDir, [string]$Runpath, [switch]$OmitLibrary, [string]$AppRunLibraryPath)
       $root = Join-Path $script:workRoot $Name
       $appDir = Join-Path $root "usr/app/Demo.app"
       $libDir = Join-Path $root ("usr/" + $LibraryDir)
@@ -50,6 +50,17 @@ Describe "AppImage: a private library built in the app's tree" {
       if ($LASTEXITCODE -ne 0) { throw "building Demo failed" }
       if (-not $OmitLibrary) {
         Copy-Item $built (Join-Path $libDir "libgpprivate.so")
+      }
+      # The lines of a generated AppRun that the loader check reads.
+      if ($PSBoundParameters.ContainsKey("AppRunLibraryPath")) {
+        Set-Content -Path (Join-Path $root "AppRun") -Value @(
+          '#!/bin/sh'
+          'APPDIR="${APPDIR:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)}"'
+          'USR="${APPDIR}/usr"'
+          'RUNTIME_ROOT="${USR}/runtime"'
+          'ENTRY_PATH="${USR}/app/Demo.app/Demo"'
+          ('export LD_LIBRARY_PATH="{0}${{GP_HOST_LD_LIBRARY_PATH:+:${{GP_HOST_LD_LIBRARY_PATH}}}}"' -f $AppRunLibraryPath)
+        )
       }
       return [pscustomobject]@{ Root = $root; App = $app; Log = (Join-Path $script:workRoot "$Name.log") }
     }
@@ -66,6 +77,7 @@ Describe "AppImage: a private library built in the app's tree" {
 
     $result = Invoke-GpAppImageRuntimeClosureValidation -Config $script:config -ExpandedRoot $case.Root -LogPath $case.Log
     $result.CheckedFileCount | Should -Be 2 -Because "the app and the library are both ELF files"
+    @($result.LoaderPathIssues).Count | Should -Be 0
 
     # Proof it works without help: no LD_LIBRARY_PATH, and the build directory
     # (where the library was linked from) moved out of the way.
@@ -90,5 +102,68 @@ Describe "AppImage: a private library built in the app's tree" {
     $case = New-GpPrivateLibraryRoot -Name "missing" -LibraryDir "runtime/lib" -Runpath '$ORIGIN/../../runtime/lib' -OmitLibrary
     { Invoke-GpAppImageRuntimeClosureValidation -Config $script:config -ExpandedRoot $case.Root -LogPath $case.Log } | Should -Throw "*runtime-closure validation failed*"
     Get-Content -Raw $case.Log | Should -BeLike "*unresolved dependency*libgpprivate.so*"
+  }
+
+  # Validation's ldd pass searches every directory in the AppDir that holds an
+  # ELF file, so it finds a library the app itself can't.
+  It 'warns when the library is in runtime/lib but nothing puts it on the app''s search path' -Skip:(-not (Get-Command cc -ErrorAction SilentlyContinue)) {
+    $case = New-GpPrivateLibraryRoot -Name "unreachable" -LibraryDir "runtime/lib" -Runpath "" -AppRunLibraryPath '${RUNTIME_ROOT}/System/Library/Libraries'
+    $result = Invoke-GpAppImageRuntimeClosureValidation -Config $script:config -ExpandedRoot $case.Root -LogPath $case.Log -WarningAction SilentlyContinue
+    @($result.LoaderPathIssues).Count | Should -Be 1
+    $result.LoaderPathIssues[0] | Should -BeLike "usr/app/Demo.app/Demo needs libgpprivate.so, which is in the AppDir but not on its runtime search path*"
+    Get-Content -Raw $case.Log | Should -BeLike "*warning only (set backends.appimage.validation.requireLoaderSearchPath to fail)*"
+
+    # The app really can't start, which is what the check predicts.
+    & env -u LD_LIBRARY_PATH $case.App 2>$null
+    $LASTEXITCODE | Should -Not -Be 0
+  }
+
+  It 'fails on the same case with requireLoaderSearchPath' -Skip:(-not (Get-Command cc -ErrorAction SilentlyContinue)) {
+    $case = New-GpPrivateLibraryRoot -Name "unreachable-strict" -LibraryDir "runtime/lib" -Runpath "" -AppRunLibraryPath '${RUNTIME_ROOT}/System/Library/Libraries'
+    $strict = [pscustomobject]@{
+      Validation = [pscustomobject]@{
+        RuntimeClosure = "strict"
+        AllowedSystemLibraries = [string[]]@()
+        AllowedExternalRunpaths = [string[]]@()
+        RequireLoaderSearchPath = $true
+      }
+    }
+    { Invoke-GpAppImageRuntimeClosureValidation -Config $strict -ExpandedRoot $case.Root -LogPath $case.Log } | Should -Throw "*runtime-closure validation failed*"
+    Get-Content -Raw $case.Log | Should -BeLike "*Library not on the runtime search path: usr/app/Demo.app/Demo needs libgpprivate.so*"
+  }
+
+  It 'passes with no RUNPATH when AppRun''s LD_LIBRARY_PATH covers runtime/lib' -Skip:(-not (Get-Command cc -ErrorAction SilentlyContinue)) {
+    $case = New-GpPrivateLibraryRoot -Name "apprun-path" -LibraryDir "runtime/lib" -Runpath "" -AppRunLibraryPath '${RUNTIME_ROOT}/lib:${RUNTIME_ROOT}/System/Library/Libraries'
+    $result = Invoke-GpAppImageRuntimeClosureValidation -Config $script:config -ExpandedRoot $case.Root -LogPath $case.Log
+    @($result.LoaderPathIssues).Count | Should -Be 0
+    (& env ("LD_LIBRARY_PATH=" + (Join-Path $case.Root "usr/runtime/lib")) $case.App) | Should -Be "answer=42"
+  }
+
+  It 'reads the last AppRun LD_LIBRARY_PATH entry, before the host''s appended value' -Skip:(-not (Get-Command cc -ErrorAction SilentlyContinue)) {
+    $case = New-GpPrivateLibraryRoot -Name "apprun-last" -LibraryDir "runtime/System/Library/Libraries" -Runpath "" -AppRunLibraryPath '${RUNTIME_ROOT}/lib:${RUNTIME_ROOT}/System/Library/Libraries'
+    $settings = Get-GpAppImageAppRunLoaderSettings -ExpandedRoot $case.Root
+    @($settings.LibraryPath) | Should -Be @((Join-Path $case.Root "usr/runtime/lib"), (Join-Path $case.Root "usr/runtime/System/Library/Libraries"))
+    $settings.EntryPath | Should -Be (Join-Path $case.Root "usr/app/Demo.app/Demo")
+    $result = Invoke-GpAppImageRuntimeClosureValidation -Config $script:config -ExpandedRoot $case.Root -LogPath $case.Log
+    @($result.LoaderPathIssues).Count | Should -Be 0
+  }
+
+  # A bundle the app dlopen()s is a shared object that no executable links.
+  # ldd resolves its dependencies like an executable's (it says "statically
+  # linked" only for an object with no DT_NEEDED entries at all), so a
+  # dependency that was never staged fails validation.
+  It 'fails when a dlopen''d bundle''s dependency was never staged' -Skip:(-not (Get-Command cc -ErrorAction SilentlyContinue)) {
+    $case = New-GpPrivateLibraryRoot -Name "bundle-missing" -LibraryDir "runtime/lib" -Runpath '$ORIGIN/../../runtime/lib'
+    $bundleDir = New-Item -ItemType Directory -Force -Path (Join-Path $case.Root "usr/runtime/lib/GNUstep/Bundles/Plugin.bundle")
+    $goneDir = Join-Path $script:workRoot "gone"
+    New-Item -ItemType Directory -Force -Path $goneDir | Out-Null
+    Set-Content -Path (Join-Path $goneDir "gone.c") -Value 'int gp_gone(void) { return 1; }'
+    Set-Content -Path (Join-Path $goneDir "plugin.c") -Value @('int gp_gone(void);', 'int gp_plugin(void) { return gp_gone(); }')
+    & $script:cc -shared -fPIC -o (Join-Path $goneDir "libgpgone.so") (Join-Path $goneDir "gone.c")
+    & $script:cc -shared -fPIC -o (Join-Path $bundleDir.FullName "Plugin") (Join-Path $goneDir "plugin.c") "-L$goneDir" -lgpgone
+    $LASTEXITCODE | Should -Be 0
+
+    { Invoke-GpAppImageRuntimeClosureValidation -Config $script:config -ExpandedRoot $case.Root -LogPath $case.Log -WarningAction SilentlyContinue } | Should -Throw "*runtime-closure validation failed*"
+    Get-Content -Raw $case.Log | Should -BeLike "*Plugin.bundle/Plugin -> libgpgone.so*"
   }
 }
