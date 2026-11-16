@@ -34,6 +34,11 @@ Contents:
 - `objc/AppDelegate+Updates.m`
   Minimal Objective-C snippet that wires `GPStandardUpdaterController` into an
   app delegate
+- Outside this repository:
+  [tools-xctest `Examples/PackagedAppTests`](https://github.com/danjboyd/tools-xctest/tree/master/Examples/PackagedAppTests)
+  runs an app's XCTest bundle in `pipeline.build` (an `msys2-bash` shell) of
+  the reusable workflow's MSI job, so the MSI is built only when the tests
+  pass. Its caller workflow is `.github/workflows/packaged-app-example.yml`
 
 Recommended adoption order:
 
