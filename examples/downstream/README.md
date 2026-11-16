@@ -36,9 +36,11 @@ Contents:
   app delegate
 - Outside this repository:
   [tools-xctest `Examples/PackagedAppTests`](https://github.com/danjboyd/tools-xctest/tree/master/Examples/PackagedAppTests)
-  runs an app's XCTest bundle in `pipeline.build` (an `msys2-bash` shell) of
-  the reusable workflow's MSI job, so the MSI is built only when the tests
-  pass. Its caller workflow is `.github/workflows/packaged-app-example.yml`
+  runs an app's XCTest bundle in `pipeline.build` of the reusable workflow,
+  so the package is built only when the tests pass: an MSI job (an
+  `msys2-bash` shell) and an AppImage job (`bash`, with `GNUstep.sh` sourced in
+  `bootstrapCommands`, `packaging/package.appimage.json`). Its caller workflow
+  is `.github/workflows/packaged-app-example.yml`
 
 Recommended adoption order:
 
