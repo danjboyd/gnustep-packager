@@ -68,9 +68,11 @@ on `PATH`, so the app finds it there. You can also stage the DLL yourself,
 next to the `.exe` or in `runtime\bin`.
 
 What validation checks: a DLL the app imports that isn't in the install tree
-and isn't in a search root is reported missing, and the MSI isn't built. The
-check counts a DLL found anywhere in the install tree as present, so don't
-leave one in a folder Windows won't search (for example under `Resources`).
+and isn't in a search root is reported missing, and the MSI isn't built. A DLL
+that is in the tree but not where Windows will search (the importing file's
+folder, the app's folder, the working directory, `launch.pathPrepend` or
+`runtime\bin`), for example one left under `Resources`, is a warning. Set
+`backends.msi.validation.requireLoaderSearchPath: true` to make it fail.
 
 `tests/windows/MsiPrivateLibrary.Tests.ps1` builds such a DLL and app and
 checks both cases.

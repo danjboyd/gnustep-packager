@@ -16,8 +16,16 @@
   that path. The `ldd` pass searched every directory that holds an ELF file, so
   it passed a library the app couldn't load.
   `backends.appimage.validation.requireLoaderSearchPath` makes it fail.
+- MSI packaging: warn when a DLL the app imports is in the install tree but
+  not where Windows searches once the launcher starts it (the importing
+  file's folder, the app's folder, the working directory, `launch.pathPrepend`
+  or `runtime\bin`). The closure counted a DLL anywhere in the tree as
+  present, so one under `Resources` packaged fine and the installed app didn't
+  start. `backends.msi.validation.requireLoaderSearchPath` makes it fail.
 
 ### Fixed
+- MSI runtime closure: a PE with no imports (a resource-only DLL) no longer
+  stops packaging with "Cannot bind argument to parameter 'Name'".
 - `packagedDefaults.defaultTheme` and `appDomain.values` are seeded into the
   defaults domain the app reads: its `CFBundleIdentifier`, or its executable's
   name when it has none, as gnustep-base does. They went to `package.id`,

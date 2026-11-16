@@ -386,6 +386,7 @@ Important fields:
 - `unresolvedDependencyPolicy`
 - `ignoredRuntimeDependencies`
 - `validation.maxArtifactBytes`
+- `validation.requireLoaderSearchPath`
 - `wix.version`
 - `wix.downloadUrl`
 - `wix.toolRoot`
