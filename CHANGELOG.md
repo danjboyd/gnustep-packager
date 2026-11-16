@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+- DMG validation: a `library-references` check. It reads every Mach-O file in
+  the mounted app with `otool` and warns when a library it loads is neither in
+  the system (`/usr/lib`, `/System`) nor inside the bundle through
+  `@executable_path`, `@loader_path` or `@rpath`. An app's own dylib referenced
+  by its build path loads on the build Mac, so the smoke launch passed, and
+  failed everywhere else. `backends.dmg.validation.requireBundledDependencies`
+  makes it fail instead of warn.
+
 ### Fixed
 - `packagedDefaults.defaultTheme` and `appDomain.values` are seeded into the
   defaults domain the app reads: its `CFBundleIdentifier`, or its executable's

@@ -1666,6 +1666,9 @@
                 "requireGatekeeperAcceptance": {
                   "type": "boolean"
                 },
+                "requireBundledDependencies": {
+                  "type": "boolean"
+                },
                 "maxArtifactBytes": {
                   "type": "integer",
                   "minimum": 1

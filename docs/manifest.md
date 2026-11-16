@@ -636,6 +636,7 @@ default):
 - `notarization.required`
 - `validation.requireSignature`
 - `validation.requireGatekeeperAcceptance`
+- `validation.requireBundledDependencies`
 - `validation.maxArtifactBytes`
 - `smoke.enabled`
 - `smoke.startupSeconds`

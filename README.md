@@ -230,6 +230,7 @@ Getting started:
 - [docs/github-actions.md](docs/github-actions.md)
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md)
 - [docs/app-coverage.md](docs/app-coverage.md): which downstream apps ship which formats
+- [docs/private-libraries.md](docs/private-libraries.md): shipping your app's own libraries (a private `.so`, `.dll` or `.dylib`) in each installer
 - [docs/swift-apps.md](docs/swift-apps.md): design note for packaging Swift GNUstep apps (proposal)
 
 Backends:
