@@ -147,4 +147,23 @@ Describe "AppImage: a private library built in the app's tree" {
     $result = Invoke-GpAppImageRuntimeClosureValidation -Config $script:config -ExpandedRoot $case.Root -LogPath $case.Log
     @($result.LoaderPathIssues).Count | Should -Be 0
   }
+
+  # A bundle the app dlopen()s is a shared object that no executable links.
+  # ldd resolves its dependencies like an executable's (it says "statically
+  # linked" only for an object with no DT_NEEDED entries at all), so a
+  # dependency that was never staged fails validation.
+  It 'fails when a dlopen''d bundle''s dependency was never staged' -Skip:(-not (Get-Command cc -ErrorAction SilentlyContinue)) {
+    $case = New-GpPrivateLibraryRoot -Name "bundle-missing" -LibraryDir "runtime/lib" -Runpath '$ORIGIN/../../runtime/lib'
+    $bundleDir = New-Item -ItemType Directory -Force -Path (Join-Path $case.Root "usr/runtime/lib/GNUstep/Bundles/Plugin.bundle")
+    $goneDir = Join-Path $script:workRoot "gone"
+    New-Item -ItemType Directory -Force -Path $goneDir | Out-Null
+    Set-Content -Path (Join-Path $goneDir "gone.c") -Value 'int gp_gone(void) { return 1; }'
+    Set-Content -Path (Join-Path $goneDir "plugin.c") -Value @('int gp_gone(void);', 'int gp_plugin(void) { return gp_gone(); }')
+    & $script:cc -shared -fPIC -o (Join-Path $goneDir "libgpgone.so") (Join-Path $goneDir "gone.c")
+    & $script:cc -shared -fPIC -o (Join-Path $bundleDir.FullName "Plugin") (Join-Path $goneDir "plugin.c") "-L$goneDir" -lgpgone
+    $LASTEXITCODE | Should -Be 0
+
+    { Invoke-GpAppImageRuntimeClosureValidation -Config $script:config -ExpandedRoot $case.Root -LogPath $case.Log -WarningAction SilentlyContinue } | Should -Throw "*runtime-closure validation failed*"
+    Get-Content -Raw $case.Log | Should -BeLike "*Plugin.bundle/Plugin -> libgpgone.so*"
+  }
 }
