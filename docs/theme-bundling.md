@@ -57,14 +57,17 @@ theme registers afterwards are never seen, and the app fell back to another
 face. With a `FONTCONFIG_FILE` that also listed Gumdrop's `Resources/Fonts`,
 the 160 "font ... DejaVuSans can't be found" lines dropped to 0. The fix
 belongs in the theme: after registering its fonts, it has `gnustep-back`
-list them again. fun-themes is adding that to Gumdrop; until it lands in
-`danjboyd/gnustep-funthemes`, Gumdrop on Windows still needs the fonts from
-`fonts.bundle`.
+list them again. Gumdrop does this from `danjboyd/gnustep-funthemes` commit
+`ccd6509` ("Refresh bundled font names after Gumdrop registration"), on the
+`gumdrop-polish-20261113` branch; it isn't on funthemes' `main` yet. On
+2026-11-16 winuitheme confirmed it on Windows with no `FONTCONFIG_FILE`. Pin
+`themeInputs[].ref` to that commit or later. An older Gumdrop on Windows still
+needs the fonts from `fonts.bundle`.
 
 So:
 
-- **A theme that registers its fonts and then re-lists them** (Gumdrop, once
-  that fix lands) needs no `fonts.bundle` and no packager `fonts.conf`.
+- **A theme that registers its fonts and then re-lists them** (Gumdrop from
+  `ccd6509`) needs no `fonts.bundle` and no packager `fonts.conf`.
 - **`fonts.bundle`** is for fonts that aren't inside a theme: fonts the app
   itself uses, or fonts a theme names but doesn't carry.
 
