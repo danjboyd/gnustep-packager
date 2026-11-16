@@ -549,6 +549,7 @@ function Get-GpAppImageConfig {
       RuntimeClosure = [string]$validation["runtimeClosure"]
       AllowedSystemLibraries = [string[]]@($validation["allowedSystemLibraries"])
       AllowedExternalRunpaths = [string[]]@($validation["allowedExternalRunpaths"])
+      RequireLoaderSearchPath = [bool]$(if ($validation -is [System.Collections.IDictionary] -and $validation.Contains("requireLoaderSearchPath")) { $validation["requireLoaderSearchPath"] } else { $false })
     }
     Updates = [pscustomobject]@{
       Enabled = [bool]$updateSettings.Enabled
@@ -2428,6 +2429,7 @@ function Write-GpAppImageArtifactMetadata {
         mode = $Config.Validation.RuntimeClosure
         allowedSystemLibraries = [string[]]@($Config.Validation.AllowedSystemLibraries)
         allowedExternalRunpaths = [string[]]@($Config.Validation.AllowedExternalRunpaths)
+        requireLoaderSearchPath = [bool]$Config.Validation.RequireLoaderSearchPath
       }
     }
     compliance = [ordered]@{
@@ -2808,15 +2810,23 @@ function Get-GpAppImageReadElfDynamicInfo {
     throw "AppImage runtime validation requires readelf on PATH."
   }
 
-  $result = Invoke-GpAppImageCapturedTool -FilePath $readelf.Source -ArgumentList @("-d", $Path)
+  $result = Invoke-GpAppImageCapturedTool -FilePath $readelf.Source -ArgumentList @("-d", "-l", "-W", $Path)
   $needed = [System.Collections.Generic.List[string]]::new()
   $runpaths = [System.Collections.Generic.List[string]]::new()
+  $runpathOnly = [System.Collections.Generic.List[string]]::new()
+  $rpathOnly = [System.Collections.Generic.List[string]]::new()
   $hasDynamicSection = $false
   $missingDynamicSection = $false
+  $interpreter = $null
+  $soname = $null
 
   foreach ($line in @($result.Lines)) {
     if ($line -match "There is no dynamic section in this file") {
       $missingDynamicSection = $true
+      continue
+    }
+    if ($line -match "Requesting program interpreter: ([^\]]+)\]") {
+      $interpreter = [string]$Matches[1]
       continue
     }
     if ($line -match "Shared library: \[(.+)\]") {
@@ -2824,11 +2834,18 @@ function Get-GpAppImageReadElfDynamicInfo {
       $needed.Add([string]$Matches[1]) | Out-Null
       continue
     }
-    if ($line -match "(RUNPATH|RPATH).*\[(.*)\]") {
+    if ($line -match "Library soname: \[(.+)\]") {
       $hasDynamicSection = $true
+      $soname = [string]$Matches[1]
+      continue
+    }
+    if ($line -match "\((RUNPATH|RPATH)\).*\[(.*)\]") {
+      $hasDynamicSection = $true
+      $kind = [string]$Matches[1]
       foreach ($entry in @(([string]$Matches[2]) -split ":")) {
         if (-not [string]::IsNullOrWhiteSpace($entry)) {
           $runpaths.Add($entry) | Out-Null
+          if ($kind -eq "RUNPATH") { $runpathOnly.Add($entry) | Out-Null } else { $rpathOnly.Add($entry) | Out-Null }
         }
       }
     }
@@ -2842,6 +2859,11 @@ function Get-GpAppImageReadElfDynamicInfo {
     HasDynamicSection = [bool]($hasDynamicSection -and -not $missingDynamicSection)
     NeededLibraries = [string[]]@($needed.ToArray() | Sort-Object -Unique)
     Runpaths = [string[]]@($runpaths.ToArray() | Sort-Object -Unique)
+    RunpathEntries = [string[]]@($runpathOnly.ToArray())
+    RpathEntries = [string[]]@($rpathOnly.ToArray())
+    NeededInOrder = [string[]]@($needed.ToArray())
+    Soname = $soname
+    Interpreter = $interpreter
     RawOutput = $result.Text
   }
 }
@@ -2988,6 +3010,159 @@ function Test-GpAppImageAllowedSystemLibrary {
   return $false
 }
 
+# What the packaged AppRun does at launch, read back from the AppRun in the
+# expanded AppDir: the launch entry and the LD_LIBRARY_PATH it exports, with the
+# AppDir's own variables (APPDIR, USR, RUNTIME_ROOT) expanded and the host's
+# appended value (GP_HOST_*) dropped. Empty when there is no AppRun.
+function Get-GpAppImageAppRunLoaderSettings {
+  param([Parameter(Mandatory = $true)][string]$ExpandedRoot)
+
+  $appRun = Join-Path $ExpandedRoot "AppRun"
+  $settings = [pscustomobject]@{ EntryPath = $null; LibraryPath = [string[]]@(); HasAppRun = $false }
+  if (-not (Test-Path -LiteralPath $appRun -PathType Leaf)) {
+    return $settings
+  }
+  $settings.HasAppRun = $true
+
+  $variables = @{ APPDIR = $ExpandedRoot.TrimEnd('/') }
+  function Expand-GpAppRunValue([string]$Value) {
+    # ${GP_HOST_X:+:${GP_HOST_X}} (nested braces) and ${GP_HOST_X:-default}: the host's own value.
+    $expanded = [regex]::Replace($Value, '\$\{GP_HOST_[A-Za-z0-9_]+:\+[^${}]*(\$\{[^}]*\}[^${}]*)*\}', '')
+    $expanded = [regex]::Replace($expanded, '\$\{GP_HOST_[A-Za-z0-9_]+(:-[^}]*)?\}', '')
+    return [regex]::Replace($expanded, '\$\{([A-Za-z_][A-Za-z0-9_]*)\}', {
+      param($m)
+      $name = $m.Groups[1].Value
+      if ($variables.ContainsKey($name)) { return $variables[$name] }
+      return $m.Value
+    })
+  }
+
+  foreach ($line in Get-Content -LiteralPath $appRun) {
+    if ($line -match '^(USR|RUNTIME_ROOT)="([^"]*)"\s*$') {
+      $variables[$Matches[1]] = Expand-GpAppRunValue $Matches[2]
+      continue
+    }
+    if ($line -match '^ENTRY_PATH="([^"]*)"\s*$') {
+      $settings.EntryPath = Expand-GpAppRunValue $Matches[1]
+      continue
+    }
+    if ($line -match '^\s*export LD_LIBRARY_PATH="([^"]*)"\s*$') {
+      $settings.LibraryPath = [string[]]@((Expand-GpAppRunValue $Matches[1]) -split ':' | Where-Object { $_ -and -not $_.Contains('$') })
+    }
+  }
+  return $settings
+}
+
+# Follows the dynamic loader through the AppDir, the way ld.so searches when
+# the AppImage runs: a library already loaded (by SONAME or file name), then
+# DT_RPATH (of the object and the objects that loaded it, when it has no
+# DT_RUNPATH), AppRun's LD_LIBRARY_PATH, then the object's own DT_RUNPATH, with
+# $ORIGIN expanded. The roots are the launch entry, then every other packaged
+# executable; shared objects that no executable links (bundles the app
+# dlopen()s) are checked last, with the entry's libraries counted as loaded.
+# Reports a NEEDED library that exists in the AppDir but isn't on that path:
+# validation's ldd pass searches every directory that holds an ELF file, so it
+# resolves such a library; the app doesn't. A library not in the AppDir is the
+# host's, which the ldd pass already checks.
+function Get-GpAppImageLoaderPathIssues {
+  param(
+    [Parameter(Mandatory = $true)][string]$ExpandedRoot,
+    [Parameter(Mandatory = $true)][hashtable]$DynamicInfo,
+    [AllowEmptyCollection()][string[]]$LibraryPath,
+    [string]$EntryPath
+  )
+
+  $root = [System.IO.Path]::GetFullPath($ExpandedRoot).TrimEnd('/')
+  $bundledNames = @{}
+  foreach ($file in $DynamicInfo.Keys) {
+    $bundledNames[[System.IO.Path]::GetFileName($file)] = $true
+    $soname = $DynamicInfo[$file].Soname
+    if ($soname) { $bundledNames[$soname] = $true }
+  }
+  foreach ($item in Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.LinkType }) {
+    $bundledNames[$item.Name] = $true
+  }
+
+  $issues = [System.Collections.Generic.List[string]]::new()
+  $reported = @{}
+
+  function Get-GpRealPath([string]$Path) {
+    try {
+      $target = [System.IO.File]::ResolveLinkTarget($Path, $true)
+      if ($null -ne $target) { return [System.IO.Path]::GetFullPath($target.FullName) }
+    } catch { }
+    return [System.IO.Path]::GetFullPath($Path)
+  }
+  function Expand-GpOrigin([string]$Entry, [string]$Object) {
+    $origin = Split-Path -Parent (Get-GpRealPath $Object)
+    return ($Entry -replace '^\$\{ORIGIN\}', $origin -replace '^\$ORIGIN', $origin)
+  }
+
+  # Walks one root; returns the names it loaded.
+  function Invoke-GpLoaderWalk([string]$RootFile, [hashtable]$Loaded) {
+    $queue = [System.Collections.Generic.Queue[object]]::new()
+    $queue.Enqueue([pscustomobject]@{ File = $RootFile; InheritedRpath = [string[]]@() })
+    $visited = @{}
+    while ($queue.Count -gt 0) {
+      $current = $queue.Dequeue()
+      $real = Get-GpRealPath $current.File
+      if ($visited.ContainsKey($real)) { continue }
+      $visited[$real] = $true
+      $info = $DynamicInfo[$real]
+      if ($null -eq $info) { $info = $DynamicInfo[$current.File] }
+      if ($null -eq $info -or -not $info.HasDynamicSection) { continue }
+
+      $ownRpath = @($info.RpathEntries | ForEach-Object { Expand-GpOrigin $_ $current.File })
+      $rpathChain = if (@($info.RunpathEntries).Count -gt 0) { @() } else { @($ownRpath) + @($current.InheritedRpath) }
+      $runpath = @($info.RunpathEntries | ForEach-Object { Expand-GpOrigin $_ $current.File })
+      $search = @($rpathChain) + @($LibraryPath) + @($runpath)
+
+      foreach ($name in @($info.NeededInOrder)) {
+        if ($name.Contains('/') -or $Loaded.ContainsKey($name)) { continue }
+        $found = $null
+        foreach ($dir in $search) {
+          if ([string]::IsNullOrWhiteSpace($dir)) { continue }
+          $candidate = Join-Path $dir $name
+          if (Test-Path -LiteralPath $candidate -PathType Leaf) { $found = $candidate; break }
+        }
+        if ($null -ne $found -and ([System.IO.Path]::GetFullPath($found)).StartsWith($root + "/")) {
+          $Loaded[$name] = $true
+          $foundInfo = $DynamicInfo[(Get-GpRealPath $found)]
+          if ($null -ne $foundInfo -and $foundInfo.Soname) { $Loaded[$foundInfo.Soname] = $true }
+          $queue.Enqueue([pscustomobject]@{ File = $found; InheritedRpath = [string[]]@($ownRpath + $current.InheritedRpath) })
+          continue
+        }
+        if ($null -eq $found -and $bundledNames.ContainsKey($name)) {
+          $key = "$real|$name"
+          if (-not $reported.ContainsKey($key)) {
+            $reported[$key] = $true
+            $relative = $real.Substring($root.Length).TrimStart('/')
+            $issues.Add(("{0} needs {1}, which is in the AppDir but not on its runtime search path (no RUNPATH or AppRun LD_LIBRARY_PATH entry reaches it)" -f $relative, $name)) | Out-Null
+          }
+        }
+      }
+    }
+    return $visited
+  }
+
+  $entryLoaded = @{}
+  $reached = @{}
+  $executables = @($DynamicInfo.Keys | Where-Object { $DynamicInfo[$_].HasDynamicSection -and $DynamicInfo[$_].Interpreter } | Sort-Object)
+  if ($EntryPath -and (Test-Path -LiteralPath $EntryPath -PathType Leaf)) {
+    $entryReal = Get-GpRealPath $EntryPath
+    foreach ($k in (Invoke-GpLoaderWalk $entryReal $entryLoaded).Keys) { $reached[$k] = $true }
+    $executables = @($executables | Where-Object { $_ -ne $entryReal })
+  }
+  foreach ($exe in $executables) {
+    foreach ($k in (Invoke-GpLoaderWalk $exe @{}).Keys) { $reached[$k] = $true }
+  }
+  foreach ($object in @($DynamicInfo.Keys | Where-Object { -not $reached.ContainsKey($_) -and $DynamicInfo[$_].HasDynamicSection -and -not $DynamicInfo[$_].Interpreter } | Sort-Object)) {
+    Invoke-GpLoaderWalk $object ([hashtable]$entryLoaded.Clone()) | Out-Null
+  }
+
+  return [string[]]@($issues.ToArray())
+}
+
 function Invoke-GpAppImageRuntimeClosureValidation {
   param(
     [Parameter(Mandatory = $true)]
@@ -3034,10 +3209,12 @@ function Invoke-GpAppImageRuntimeClosureValidation {
   }
 
   $issues = [System.Collections.Generic.List[string]]::new()
+  $dynamicInfos = @{}
   $dynamicFileCount = 0
   foreach ($file in @($elfFiles)) {
     Write-GpAppImageLogLine -LogPath $LogPath -Message ("Inspecting ELF: {0}" -f $file)
     $dynamicInfo = Get-GpAppImageReadElfDynamicInfo -Path $file
+    $dynamicInfos[[System.IO.Path]::GetFullPath($file)] = $dynamicInfo
     foreach ($entry in @(Get-GpAppImageRunpathIssues -Runpaths $dynamicInfo.Runpaths -ExpandedRoot $ExpandedRoot -AllowedExternalRunpaths @($Config.Validation.AllowedExternalRunpaths))) {
       $issues.Add(("Packaged ELF escaped the AppDir via RUNPATH/RPATH: {0} -> {1}" -f $file, $entry)) | Out-Null
     }
@@ -3075,6 +3252,21 @@ function Invoke-GpAppImageRuntimeClosureValidation {
     }
   }
 
+  # The broad LD_LIBRARY_PATH above finds every bundled library; the app finds
+  # only what its loader search path reaches.
+  $appRunSettings = Get-GpAppImageAppRunLoaderSettings -ExpandedRoot $ExpandedRoot
+  $loaderIssues = @(Get-GpAppImageLoaderPathIssues -ExpandedRoot $ExpandedRoot -DynamicInfo $dynamicInfos -LibraryPath @($appRunSettings.LibraryPath) -EntryPath $appRunSettings.EntryPath)
+  $requireLoaderPath = [bool]($Config.Validation.PSObject.Properties["RequireLoaderSearchPath"] -and $Config.Validation.RequireLoaderSearchPath)
+  Write-GpAppImageLogLine -LogPath $LogPath -Message ("Loader search path check (AppRun LD_LIBRARY_PATH: {0}): {1} issue(s){2}" -f $(if (@($appRunSettings.LibraryPath).Count -gt 0) { [string]::Join(":", @($appRunSettings.LibraryPath)) } elseif ($appRunSettings.HasAppRun) { "none" } else { "no AppRun" }), $loaderIssues.Count, $(if ($loaderIssues.Count -gt 0 -and -not $requireLoaderPath) { "; warning only (set backends.appimage.validation.requireLoaderSearchPath to fail)" } else { "" }))
+  foreach ($issue in $loaderIssues) {
+    if ($requireLoaderPath) {
+      $issues.Add(("Library not on the runtime search path: {0}" -f $issue)) | Out-Null
+    } else {
+      Write-GpAppImageLogLine -LogPath $LogPath -Message ("WARNING library not on the runtime search path: {0}" -f $issue)
+      Write-Warning ("AppImage: {0}" -f $issue)
+    }
+  }
+
   if ($issues.Count -gt 0) {
     foreach ($issue in @($issues)) {
       Write-GpAppImageLogLine -LogPath $LogPath -Message $issue
@@ -3088,6 +3280,7 @@ function Invoke-GpAppImageRuntimeClosureValidation {
     CheckedFileCount = $elfFiles.Count
     DynamicFileCount = $dynamicFileCount
     LibrarySearchPaths = [string[]]@($librarySearchPaths)
+    LoaderPathIssues = [string[]]@($loaderIssues)
     LogPath = $LogPath
   }
 }

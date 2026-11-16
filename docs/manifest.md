@@ -448,6 +448,7 @@ Important fields:
 - `validation.runtimeClosure`
 - `validation.allowedSystemLibraries`
 - `validation.allowedExternalRunpaths`
+- `validation.requireLoaderSearchPath`
 - `validation.maxArtifactBytes`
 - `smoke.mode`
 - `smoke.arguments`
