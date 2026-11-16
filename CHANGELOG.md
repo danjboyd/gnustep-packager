@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## v0.1.11
+
+### Upgrading
+Change `@v0.1.10` to `@v0.1.11` in your `uses:` lines. Then:
+
+- **The default toolchain is gnustep-cli-new v0.1.7 (was v0.1.5).** It fixes
+  a Windows toolchain extraction timeout. Its toolchains are rebuilt from the
+  same sources. A caller that sets its own `gnustep-cli-manifest-url` is
+  unaffected; one that overrides only `gnustep-cli-bootstrap-url` must also
+  set the matching `gnustep-cli-bootstrap-sha256` and
+  `gnustep-cli-bootstrap-ps1-sha256`.
+- **Launchers leave option values like `-Type text/plain` alone.** The value
+  after a single-dash option is made absolute only when the folder it names
+  exists in the caller's directory. A script that relied on the old rewrite of
+  a value whose folder doesn't exist yet should create the folder or pass an
+  absolute path.
+- **MSI apps can bundle fonts** with `backends.msi.fonts.bundle`, the same
+  entries as the AppImage's. See "How To: A Theme and Its Fonts in Both
+  Installers" in `docs/theme-bundling.md`.
+
 ### Added
 - MSI: `backends.msi.fonts.bundle`, the AppImage's font bundling for the MSI.
   It installs the fonts under `runtime\share\fonts`, ships their licenses
