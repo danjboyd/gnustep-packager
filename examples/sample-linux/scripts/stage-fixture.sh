@@ -26,6 +26,10 @@ fi
 cp "$built_executable" "$app_root/SampleGNUstepLinuxApp"
 chmod +x "$app_root/SampleGNUstepLinuxApp"
 printf 'fixture plist\n' >"$app_root/Info-gnustep.plist"
+# The identifier the app's defaults domain is named after, as a gnustep-make
+# app carries it. The packager seeds packagedDefaults into this domain.
+mkdir -p "$app_root/Resources"
+printf '{\n  CFBundleIdentifier = "com.example.SampleGNUstepLinuxApp";\n  NSExecutable = "SampleGNUstepLinuxApp";\n}\n' >"$app_root/Resources/Info-gnustep.plist"
 printf '#!/bin/sh\nprintf "GNUstep runtime helper\\n"\n' >"$runtime_bin/gnustep-env.sh"
 chmod +x "$runtime_bin/gnustep-env.sh"
 cat >"$runtime_bin/defaults" <<'EOF'

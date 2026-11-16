@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+- `packagedDefaults.defaultTheme` and `appDomain.values` are seeded into the
+  defaults domain the app reads: its `CFBundleIdentifier`, or its executable's
+  name when it has none, as gnustep-base does. They went to `package.id`,
+  which an app reads only when its identifier is the same. Adwaita's
+  ThemeDemo, which has no identifier, started in the default GNUstep theme
+  though `Adwaita.theme` was bundled. `appDomain.domain` still overrides it,
+  and `package.id` is the fallback when the staged app's plist can't be read.
+
 ## v0.1.11
 
 ### Upgrading

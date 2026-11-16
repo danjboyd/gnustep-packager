@@ -130,7 +130,7 @@ Current fields:
 `packagedDefaults.defaultTheme` currently realizes a `GSTheme` launch default
 with `policy: ifUnset` when the manifest does not already declare one. On
 Windows MSI and Linux AppImage, it also seeds `GSTheme` into the packaged app's
-defaults domain on first launch so the requested theme becomes an effective
+defaults domain (see `appDomain.domain` below) on first launch so the requested theme becomes an effective
 user default without requiring a generic global-domain write. If the manifest
 also sets `launch.env.GSTheme`, the values must match.
 
@@ -138,8 +138,12 @@ also sets `launch.env.GSTheme`, the values must match.
 packaged app. Current shape:
 
 - `domain`
-  Optional explicit defaults domain. When omitted, the packager uses
-  `package.id`.
+  Optional explicit defaults domain. When omitted, the packager uses the
+  domain the staged app reads, as gnustep-base names it: the app's
+  `CFBundleIdentifier` from `Resources/Info-gnustep.plist` (or `Info.plist`),
+  or the executable's name when the plist has no identifier. It falls back to
+  `package.id` only when the staged app or its plist can't be read. The
+  AppImage package log names the domain and why it was chosen.
 - `values`
   Required object of scalar defaults to seed only when the key is absent.
   Supported value types are string, boolean, integer, and number.

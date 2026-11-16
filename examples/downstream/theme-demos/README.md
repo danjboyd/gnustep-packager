@@ -10,12 +10,14 @@ Copy `adwaita/` to `packaging/` in the plugins-themes-Adwaita repo. Add a
 from the repo root:
 
 ```sh
-pwsh <gnustep-packager>/scripts/run-packaging-pipeline.ps1 \
-  -Manifest packaging/package.manifest.json -Backend appimage -RunSmoke
+xvfb-run -a dbus-run-session -- pwsh <gnustep-packager>/scripts/run-packaging-pipeline.ps1 \
+  -Manifest packaging/package.manifest.json -Backend appimage
 ```
 
-Run the smoke step under `xvfb-run -a dbus-run-session` on a desktop machine, so
-the app doesn't open on your screen.
+The manifest turns the launch smoke test on (`validation.smoke.enabled`), so it
+runs without `-RunSmoke` and needs an X display. `xvfb-run` gives it a private
+one, so the app doesn't open on your screen. Without a display, the AppImage is
+still built, then validation fails with "Unable to connect to X Server".
 
 How it fits together:
 
@@ -28,8 +30,13 @@ How it fits together:
   `repo` and a tag or commit in `ref`.
 
 Tested on Linux with `/usr/GNUstep`, on a clone at Adwaita 0.1.0-alpha21. The
-AppImage passed package validation and the smoke run, and the running app had
-the bundled `Adwaita.theme` loaded. `package-appimage.yml` hasn't been run yet.
+AppImage passed package validation and the smoke run. On 2026-11-16, a dry run
+from a clean clone at `240589f` found the app starting in the default GNUstep
+theme: ThemeDemo has no `CFBundleIdentifier`, so it reads the defaults domain
+`ThemeDemo`, and the packager seeded `GSTheme` into `package.id`'s domain.
+Since that fix, the seed goes to `ThemeDemo` and the app starts in Adwaita
+(the package log says which domain it used). `package-appimage.yml` hasn't
+been run yet.
 
 ### Loading the toolchain
 

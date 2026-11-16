@@ -43,7 +43,14 @@ if (-not (Test-Path $builtExe)) {
 }
 
 Copy-Item -Force $builtExe (Join-Path $appRoot "SampleGNUstepApp.exe")
-Set-Content -Path (Join-Path $resourceRoot "Info-gnustep.plist") -Value "fixture plist"
+# The identifier the app's defaults domain is named after, as a gnustep-make
+# app carries it. The packager seeds packagedDefaults into this domain.
+Set-Content -Path (Join-Path $resourceRoot "Info-gnustep.plist") -Value @(
+  "{"
+  '  CFBundleIdentifier = "com.example.SampleGNUstepApp";'
+  '  NSExecutable = "SampleGNUstepApp";'
+  "}"
+)
 
 $defaultsSource = $defaultsCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($defaultsSource) {
