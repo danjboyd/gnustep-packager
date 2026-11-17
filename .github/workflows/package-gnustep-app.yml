@@ -644,8 +644,12 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "pacman -Sw failed for $name (exit $LASTEXITCODE)." }
             }
             if (-not (Test-Path -LiteralPath $file)) { throw "No package file for $name at $file." }
-            $overlay = Install-GpMsys2PackageOverlay -PackagePath $file -Root $env:GP_GNUSTEP_CLI_ROOT -TarPath $tar
-            Write-Host "Laid $(@($overlay.Files).Count) files from $name over: $([string]::Join(', ', @($overlay.Targets)))"
+            $overlay = Install-GpMsys2PackageOverlay -PackagePath $file -Root $env:GP_GNUSTEP_CLI_ROOT -TarPath $tar -SkipIfCarried
+            if ($overlay.Skipped) {
+              Write-Host "Left $name out: the toolchain already carries it (for example $(@($overlay.CarriedFiles)[0])), and its GNUstep was built against that copy."
+            } else {
+              Write-Host "Laid $(@($overlay.Files).Count) files from $name over: $([string]::Join(', ', @($overlay.Targets)))"
+            }
           }
 
       - name: Install Carried MSYS2 Packages

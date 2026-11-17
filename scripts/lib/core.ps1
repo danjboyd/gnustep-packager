@@ -909,7 +909,12 @@ function Install-GpMsys2PackageOverlay {
     [string]$Root,
     [Parameter(Mandatory = $true)]
     [string]$TarPath,
-    [string]$Prefix = "clang64"
+    [string]$Prefix = "clang64",
+    # Leave the whole package out when the root already has any of its files.
+    # For hostDependencies libraries: the toolchain's own copy of a library its
+    # GNUstep was built against must not be replaced by MSYS2's current one.
+    # Carried packages (msys2-package-urls) replace on purpose, so they don't set it.
+    [switch]$SkipIfCarried
   )
 
   $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msys2-overlay-" + [guid]::NewGuid().ToString("N"))
@@ -941,6 +946,20 @@ function Install-GpMsys2PackageOverlay {
     $files = @(Get-ChildItem -LiteralPath $packagePrefix -Recurse -File | ForEach-Object {
       $_.FullName.Substring($packagePrefix.Length).TrimStart('\', '/')
     })
+    if ($SkipIfCarried) {
+      $carried = @(foreach ($target in $targets) { foreach ($relative in $files) {
+        if (Test-Path -LiteralPath (Join-Path $target $relative)) { Join-Path $target $relative }
+      } })
+      if ($carried.Count -gt 0) {
+        return [pscustomobject]@{
+          Files = [string[]]@()
+          Targets = [string[]]@($targets.ToArray())
+          Skipped = $true
+          CarriedFiles = [string[]]$carried
+        }
+      }
+    }
+
     foreach ($target in $targets) {
       foreach ($relative in $files) {
         $destination = Join-Path $target $relative
@@ -952,6 +971,8 @@ function Install-GpMsys2PackageOverlay {
     return [pscustomobject]@{
       Files = [string[]]$files
       Targets = [string[]]@($targets.ToArray())
+      Skipped = $false
+      CarriedFiles = [string[]]@()
     }
   }
   finally {

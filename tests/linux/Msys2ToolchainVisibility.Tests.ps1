@@ -99,6 +99,24 @@ Describe "MSYS2 libraries reach the toolchain's pkg-config" {
     @($overlay.Files).Count | Should -Be 3
   }
 
+  It "leaves a library the toolchain already carries alone" {
+    if (-not $script:canRun) {
+      Set-ItResult -Skipped -Because "tar, zstd and pkg-config are needed"
+      return
+    }
+    $package = New-GpVtermPackage
+    $root = Join-Path $script:workRoot "carried-toolchain"
+    New-Item -ItemType Directory -Force -Path (Join-Path $root "clang64/bin") | Out-Null
+    # The toolchain's own copy, which its GNUstep was built against.
+    Set-Content -Path (Join-Path $root "clang64/bin/libvterm-0.dll") -Value "toolchain" -NoNewline
+
+    $overlay = Install-GpMsys2PackageOverlay -PackagePath $package -Root $root -TarPath $script:tar -SkipIfCarried
+
+    $overlay.Skipped | Should -BeTrue
+    Get-Content -Raw (Join-Path $root "clang64/bin/libvterm-0.dll") | Should -Be "toolchain"
+    Test-Path -LiteralPath (Join-Path $root "clang64/lib/pkgconfig/vterm.pc") | Should -BeFalse
+  }
+
   It "is wired into the reusable workflow after the toolchain bootstrap, for manifest packages" {
     $workflow = Get-Content -Raw (Join-Path $script:repoRoot ".github/workflows/package-gnustep-app.yml")
     $bootstrap = $workflow.IndexOf("- name: Bootstrap And Smoke Test gnustep-cli-new For MSI")
