@@ -359,6 +359,23 @@ function ConvertFrom-GpDmgOtoolRpaths {
   return [string[]]@($rpaths.ToArray())
 }
 
+# Reads the Mach-O filetype from `otool -h` (2 is MH_EXECUTE, 6 MH_DYLIB,
+# 8 MH_BUNDLE). A universal file lists one header per architecture; they agree,
+# so the first is used. $null when there's no header line.
+function ConvertFrom-GpDmgOtoolFileType {
+  param([AllowEmptyCollection()][string[]]$Lines)
+
+  # The header row ends "filetype ncmds sizeofcmds flags"; older otool has
+  # no caps column, so count from the end.
+  foreach ($line in @($Lines)) {
+    $tokens = @(([string]$line).Trim() -split '\s+')
+    if ($tokens.Count -ge 7 -and $tokens[0] -match '^0x[0-9a-fA-F]+$' -and $tokens[-1] -match '^0x[0-9a-fA-F]+$' -and $tokens[-4] -match '^\d+$') {
+      return [int]$tokens[-4]
+    }
+  }
+  return $null
+}
+
 # Where dyld would look for one library reference, as candidate paths.
 function Get-GpDmgMachOReferenceCandidates {
   param(
@@ -430,14 +447,25 @@ function Get-GpDmgMachODependencyReport {
     $installNameLines = Get-GpDmgOtoolLines @("-D", $item.FullName)
     $installName = if ($null -ne $installNameLines) { @($installNameLines | Select-Object -Skip 1 | Where-Object { $_ -and $_ -notmatch ':$' }) | Select-Object -First 1 } else { $null }
     $loadCommands = Get-GpDmgOtoolLines @("-l", $item.FullName)
-    $rpaths = @(@(if ($null -ne $loadCommands) { ConvertFrom-GpDmgOtoolRpaths -Lines $loadCommands }) + @($executableRpaths) | Select-Object -Unique)
+    $ownRpaths = @(if ($null -ne $loadCommands) { ConvertFrom-GpDmgOtoolRpaths -Lines $loadCommands })
+    # dyld resolves a library's @rpath through its own LC_RPATH entries and
+    # those of the images that loaded it, down to the main executable, so a
+    # library or plugin gets the app executable's too. Another executable in
+    # the bundle (a helper tool) is its own main executable: it gets only its
+    # own run paths, and @executable_path is its own folder.
+    $isOtherExecutable = $false
+    if ([System.IO.Path]::GetFullPath($item.FullName) -ne [System.IO.Path]::GetFullPath($ExecutablePath)) {
+      $isOtherExecutable = ((ConvertFrom-GpDmgOtoolFileType -Lines (Get-GpDmgOtoolLines @("-h", $item.FullName))) -eq 2)
+    }
+    $fileExecutableDirectory = if ($isOtherExecutable) { $item.DirectoryName } else { $executableDirectory }
+    $rpaths = if ($isOtherExecutable) { @($ownRpaths | Select-Object -Unique) } else { @(@($ownRpaths) + @($executableRpaths) | Select-Object -Unique) }
 
     foreach ($reference in @(ConvertFrom-GpDmgOtoolLibraries -Lines $libraryLines -InstallName $installName)) {
       $path = [string]$reference.Path
       if ($path.StartsWith("/usr/lib/") -or $path.StartsWith("/System/")) {
         continue
       }
-      $candidates = @(Get-GpDmgMachOReferenceCandidates -Reference $path -LoaderDirectory $item.DirectoryName -ExecutableDirectory $executableDirectory -Rpaths $rpaths)
+      $candidates = @(Get-GpDmgMachOReferenceCandidates -Reference $path -LoaderDirectory $item.DirectoryName -ExecutableDirectory $fileExecutableDirectory -Rpaths $rpaths)
       $inside = @($candidates | Where-Object {
         $full = [System.IO.Path]::GetFullPath($_)
         $full.StartsWith($appRoot + "/") -and (Test-Path -LiteralPath $full)
