@@ -24,6 +24,10 @@
   start. `backends.msi.validation.requireLoaderSearchPath` makes it fail.
 
 ### Fixed
+- AppImage smoke: a launch that fails with no `DISPLAY` or `WAYLAND_DISPLAY`
+  now says so, and says whether `-RunSmoke` or the manifest's
+  `validation.smoke.enabled` turned it on and how to run or skip it. Before,
+  it ended with only the app's own error, after the AppImage was built.
 - MSI runtime closure: a PE with no imports (a resource-only DLL) no longer
   stops packaging with "Cannot bind argument to parameter 'Name'".
 - `packagedDefaults.defaultTheme` and `appDomain.values` are seeded into the

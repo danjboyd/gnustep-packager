@@ -1162,6 +1162,57 @@ Describe "AppImage backend" {
       }
     }
 
+    It "says when a failed smoke launch had no display, and how to run or skip it" {
+      $manifestPath = New-GpSiblingManifest {
+        param($manifest)
+        $manifest["backends"]["appimage"]["smoke"] = @{
+          mode = "launch-only"
+          environment = @{
+            GP_FIXTURE_STDERR_LINE = "Unable to find the make_services tool."
+          }
+        }
+      }
+      $saved = @{}
+      foreach ($name in @("DISPLAY", "WAYLAND_DISPLAY")) {
+        $saved[$name] = [Environment]::GetEnvironmentVariable($name)
+      }
+
+      try {
+        $context = Get-GpManifestContext -Path $manifestPath
+        $validationPath = Join-Path $script:packageConfig.OutputPaths.ValidationRoot "pester-appimage-validate-no-display.log"
+        $results = @{}
+        foreach ($case in @("none", "x11")) {
+          [Environment]::SetEnvironmentVariable("WAYLAND_DISPLAY", $null)
+          # A display that does not exist: the hint only looks at whether one is set,
+          # and nothing should reach a real screen.
+          [Environment]::SetEnvironmentVariable("DISPLAY", $(if ($case -eq "x11") { ":987" } else { $null }))
+          $results[$case] = $null
+          try {
+            Invoke-GpAppImageValidation -Context $context -RunSmoke -LogPath $validationPath | Out-Null
+          } catch {
+            $results[$case] = $_.Exception.Message
+          }
+        }
+
+        Assert-GpMatch -Actual $results["none"] -Pattern "could not find a runtime component" -Message "The original failure should still be reported."
+        Assert-GpMatch -Actual $results["none"] -Pattern "-RunSmoke was given, but neither DISPLAY nor WAYLAND_DISPLAY is set.*xvfb-run or scripts/run-gui-isolated.sh, or leave out -RunSmoke" -Message "With no display, the failure should say so and how to run or skip the launch."
+        Assert-GpTrue -Condition ($results["x11"] -notmatch "neither DISPLAY") -Message "With a display set, the failure should not add the no-display hint."
+      } finally {
+        foreach ($name in @("DISPLAY", "WAYLAND_DISPLAY")) {
+          [Environment]::SetEnvironmentVariable($name, $saved[$name])
+        }
+        if (Test-Path $manifestPath) {
+          Remove-Item -Force $manifestPath
+        }
+      }
+    }
+
+    It "words the no-display hint for how the smoke launch was turned on" {
+      Assert-GpTrue -Condition ($null -eq (Get-GpAppImageSmokeDisplayHint -Environment @{ WAYLAND_DISPLAY = "wayland-0" } -RunSmokeRequested $true)) -Message "A Wayland display counts as a display."
+      $manifestHint = Get-GpAppImageSmokeDisplayHint -Environment @{ DISPLAY = "" } -ManifestEnabled $true
+      Assert-GpMatch -Actual $manifestHint -Pattern "the manifest sets validation.smoke.enabled.*set validation.smoke.enabled to false to skip the launch" -Message "A manifest-enabled smoke should point at the manifest setting."
+    }
+
     It "recognizes GNUstep exception and loader failures in smoke output" {
       foreach ($line in @(
         "*** NSTimer ignoring exception 'NSInternalInconsistencyException' (reason 'x') raised during posting of timer",
