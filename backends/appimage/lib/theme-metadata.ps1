@@ -505,6 +505,19 @@ function Resolve-GpPackagedDefaultsDomain {
   return [pscustomobject]@{ Domain = $packageId; Source = "packageId" }
 }
 
+# Why Resolve-GpPackagedDefaultsDomain chose its domain, for the package log, so
+# a reader can tell when the domain differs from package.id and why.
+function Get-GpPackagedDefaultsDomainReason {
+  param([string]$Source)
+
+  switch ($Source) {
+    "manifest" { return "packagedDefaults.appDomain.domain" }
+    "bundleIdentifier" { return "the app's CFBundleIdentifier" }
+    "processName" { return "the app's process name; its Info plist has no CFBundleIdentifier" }
+    default { return "package.id; the staged app's bundle identifier couldn't be read" }
+  }
+}
+
 # The GSTheme sources the packager controls, ranked (1 wins over 2). The env
 # entry has no rank: gnustep-gui picks the theme from NSUserDefaults alone
 # (GSTheme.m, gui 9bd1123a1), whose search list has no environment domain

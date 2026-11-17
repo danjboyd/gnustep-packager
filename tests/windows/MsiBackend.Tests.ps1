@@ -222,6 +222,12 @@ Describe "MSI backend" {
       Assert-GpMatch -Actual $configText -Pattern 'appDefault=SampleWelcomeText=\"Packaged sample\"' -Message "Launcher config should serialize string app defaults as quoted GNUstep literals."
     }
 
+    It "says in the package log which domain the packaged defaults go to, and why" {
+      $logText = Get-Content -Raw -Path $script:transformLogPath
+
+      Assert-GpMatch -Actual $logText -Pattern "Packaged defaults are seeded into domain 'com\.example\.SampleGNUstepApp' \(the app's CFBundleIdentifier\)\." -Message "The MSI package log should name the packaged-defaults domain and its source, as the AppImage log does."
+    }
+
     It "reports launcher errors without a dialog in non-interactive mode" {
       # A text file posing as defaults.exe: the launcher cannot run it to seed
       # packaged defaults. Interactively that error is a modal dialog, which

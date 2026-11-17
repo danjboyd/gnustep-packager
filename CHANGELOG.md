@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Upgrading
+- **Pinning only `gnustep-cli-manifest-url` doesn't pin the bootstrap.** The
+  bootstrap script and its digests still follow the packager release. A pinned
+  v0.1.7 manifest works with the v0.1.8 bootstrap. A pinned `v0.1.0-dev`
+  manifest is refused by every bootstrap since v0.1.7, because its signature no
+  longer verifies. Drop that input or pin a stable release.
+  [docs/gnustep-cli-new-integration.md](docs/gnustep-cli-new-integration.md#pinning-only-the-manifest)
+  has the tested pairs.
+
+### Added
+- The MSI package log now says which domain the packaged defaults go to, and
+  why: "Packaged defaults are seeded into domain 'MarkdownViewer' (the app's
+  process name; its Info plist has no CFBundleIdentifier)." The AppImage log
+  already did. Before this, moving to v0.1.12 could change the domain without
+  any trace in the MSI log; the domain was only visible in the launcher `.ini`
+  inside the package.
+
 ## v0.1.12
 
 ### Upgrading

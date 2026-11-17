@@ -90,4 +90,13 @@ Describe "Resolve-GpPackagedDefaultsDomain" {
     $context = New-GpDomainContext -Name "unstaged" -NoApp
     (Resolve-GpPackagedDefaultsDomain -Context $context).Source | Should -Be "packageId"
   }
+
+  # The AppImage and MSI package logs both say which domain was chosen and why,
+  # so moving to a release that changed the domain shows up in the log.
+  It "explains each domain source for the package log" {
+    Get-GpPackagedDefaultsDomainReason -Source "manifest" | Should -Be "packagedDefaults.appDomain.domain"
+    Get-GpPackagedDefaultsDomainReason -Source "bundleIdentifier" | Should -Be "the app's CFBundleIdentifier"
+    Get-GpPackagedDefaultsDomainReason -Source "processName" | Should -Match "process name; its Info plist has no CFBundleIdentifier"
+    Get-GpPackagedDefaultsDomainReason -Source "packageId" | Should -Match "^package\.id"
+  }
 }
