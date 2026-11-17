@@ -34,6 +34,29 @@ Describe "MSI: DLLs on the app's search path" {
     # architecture (the arm64 Linux runner's) can't read an x86-64 PE, and
     # every case would pass with nothing checked.
     $script:canReadPe = $script:canBuild -and (@(Get-GpPeImportedDllNames -Path (Join-Path $script:buildRoot "Demo.exe")) -contains "gpprivate.dll")
+    # An LLVM install that has clang and lld-link usually has llvm-objdump
+    # too, which reads PE files on any architecture, just not on PATH under
+    # that name (Debian puts it in /usr/lib/llvm-N/bin). Use it for these
+    # tests when the default objdump can't read the exe.
+    $script:savedPath = $env:PATH
+    if ($script:canBuild -and -not $script:canReadPe) {
+      $clangDir = Split-Path -Parent ([System.IO.Path]::GetFullPath((Get-Command clang).Source))
+      $resolvedClang = (& readlink -f (Get-Command clang).Source 2>$null)
+      $dirs = @($clangDir)
+      if ($resolvedClang) { $dirs += Split-Path -Parent $resolvedClang }
+      $dirs += @(Get-ChildItem -Directory -Path "/usr/lib" -Filter "llvm-*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName "bin" })
+      foreach ($dir in $dirs) {
+        if (Test-Path (Join-Path $dir "llvm-objdump")) {
+          $env:PATH = $dir + [System.IO.Path]::PathSeparator + $env:PATH
+          $script:canReadPe = (@(Get-GpPeImportedDllNames -Path (Join-Path $script:buildRoot "Demo.exe")) -contains "gpprivate.dll")
+          if ($script:canReadPe) {
+            Write-Host ("Reading PE imports with {0}" -f (Join-Path $dir "llvm-objdump"))
+            break
+          }
+          $env:PATH = $script:savedPath
+        }
+      }
+    }
     function Skip-GpUnlessPeReadable {
       if (-not $script:canReadPe) {
         Set-ItResult -Skipped -Because "this host's objdump can't read the cross-built x86-64 PE files"
@@ -67,6 +90,7 @@ Describe "MSI: DLLs on the app's search path" {
   }
 
   AfterAll {
+    $env:PATH = $script:savedPath
     if ($script:workRoot -and (Test-Path $script:workRoot)) {
       Remove-Item -Recurse -Force $script:workRoot
     }
