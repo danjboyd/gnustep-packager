@@ -100,10 +100,15 @@ Describe "DMG: library references of an app's own dylib" {
     $report = Get-GpDmgMachODependencyReport -AppPath $demo.App -ExecutablePath $demo.Exe
     @($report.Issues) | Should -Be @("Contents/Resources/gphelper loads @rpath/libgpprivate.dylib, which doesn't resolve inside the bundle")
 
-    # Its own run path, relative to its own folder: it loads, and passes.
-    & install_name_tool -add_rpath "@executable_path/../Frameworks" $helper
-    & codesign --force --sign - $helper 2>$null
-    (& $helper) | Should -Be "answer=42"
+    # Its own run path, relative to its own folder: it loads, and passes. It's
+    # linked fresh rather than patched with install_name_tool: on Apple
+    # Silicon the kernel keeps the old signature for a file changed in place,
+    # and kills the re-signed binary.
+    Remove-Item -Force $helper
+    & xcrun clang -o $helper (Join-Path $script:buildRoot "app.c") $bundledDylib "-Wl,-rpath,@executable_path/../Frameworks"
+    if ($LASTEXITCODE -ne 0) { throw "building gphelper with a run path failed" }
+    $output = & $helper 2>&1
+    $output | Should -Be "answer=42" -Because "exit code $LASTEXITCODE"
     $report = Get-GpDmgMachODependencyReport -AppPath $demo.App -ExecutablePath $demo.Exe
     @($report.Issues).Count | Should -Be 0 -Because ([string]::Join("; ", @($report.Issues)))
   }
