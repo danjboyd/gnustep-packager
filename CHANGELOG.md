@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Upgrading
+- **The default toolchain is gnustep-cli-new v0.1.8 (was v0.1.7).** The
+  reusable workflow's manifest and bootstrap URLs and both bootstrap digests
+  move to v0.1.8. Its toolchains are rebuilt with no source changes, and its
+  package index is the same as v0.1.7's (Arlen 0.3.2). It fixes upgrading an
+  existing Windows install with `gnustep update`, and `gnustep doctor` no
+  longer reports an upgraded install as needing repair. A caller that pins
+  `gnustep-cli-manifest-url` or the bootstrap inputs keeps what it pins.
+
 ### Added
 - DMG validation: a `library-references` check. It reads every Mach-O file in
   the mounted app with `otool` and warns when a library it loads is neither in

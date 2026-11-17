@@ -54,7 +54,7 @@ from the container image, not from the runner.
 ### aarch64 (arm64) AppImages
 An aarch64 AppImage is built on an aarch64 runner (`backends.appimage.architecture`
 defaults to the build host's). gnustep-cli-new's Debian arm64 toolchain links
-ICU 76 (glibc 2.41), and the stock `ubuntu-24.04-arm` image has ICU 74. v0.1.7
+ICU 76 (glibc 2.41), and the stock `ubuntu-24.04-arm` image has ICU 74. v0.1.8
 also publishes an Ubuntu 24.04 arm64 toolchain, which this repo's CI hasn't
 tried. So build in a `debian:trixie` container on
 the arm runner:
@@ -226,7 +226,7 @@ jobs:
     with:
       manifest-path: packaging/package.manifest.json
       backend: msi
-      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/release-manifest.json
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.8/release-manifest.json
       run-validation: true
       run-smoke: true
       artifact-name: my-app-windows
@@ -239,7 +239,7 @@ jobs:
     with:
       manifest-path: packaging/package.manifest.json
       backend: appimage
-      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/release-manifest.json
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.8/release-manifest.json
       run-validation: true
       run-smoke: true
       artifact-name: my-app-linux

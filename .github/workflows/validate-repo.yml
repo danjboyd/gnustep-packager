@@ -54,7 +54,7 @@ jobs:
           } >> "$GITHUB_PATH"
           {
             echo "GP_GNUSTEP_CLI_ROOT=$(cygpath -w "${GP_GNUSTEP_CLI_ROOT}")"
-            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/release-manifest.json}"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.8/release-manifest.json}"
           } >> "$GITHUB_ENV"
 
       - name: Validate Example Manifest
@@ -161,7 +161,7 @@ jobs:
           } >> "$GITHUB_PATH"
           {
             echo "GP_GNUSTEP_CLI_ROOT=${GP_GNUSTEP_CLI_ROOT}"
-            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/release-manifest.json}"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.8/release-manifest.json}"
           } >> "$GITHUB_ENV"
 
       - name: Validate Linux Example Manifest
@@ -248,7 +248,7 @@ jobs:
           } >> "$GITHUB_PATH"
           {
             echo "GP_GNUSTEP_CLI_ROOT=${GP_GNUSTEP_CLI_ROOT}"
-            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/release-manifest.json}"
+            echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL:-https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.8/release-manifest.json}"
           } >> "$GITHUB_ENV"
 
       - name: Validate Linux Example Manifest
