@@ -11,6 +11,15 @@
   [docs/gnustep-cli-new-integration.md](docs/gnustep-cli-new-integration.md#pinning-only-the-manifest)
   has the tested pairs.
 
+### Fixed
+- MSI, reusable workflow: CLANG64 libraries listed under
+  `hostDependencies.windows.msys2Packages` now reach the `gnustep-cli-new`
+  toolchain. Before, they were installed only into the setup-msys2 shell. An app
+  built with `gnustep build` runs in the toolchain's own MSYS2 runtime and
+  couldn't find them: SpreadsheetApp stopped at "required packages were not
+  found: vterm" with libvterm installed. Each named `mingw-w64-clang-x86_64-*`
+  package (not its dependencies) is now laid over the toolchain after setup.
+
 ### Added
 - The MSI package log now says which domain the packaged defaults go to, and
   why: "Packaged defaults are seeded into domain 'MarkdownViewer' (the app's

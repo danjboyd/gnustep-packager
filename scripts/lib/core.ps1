@@ -909,7 +909,12 @@ function Install-GpMsys2PackageOverlay {
     [string]$Root,
     [Parameter(Mandatory = $true)]
     [string]$TarPath,
-    [string]$Prefix = "clang64"
+    [string]$Prefix = "clang64",
+    # Leave the whole package out when the root already has any of its files.
+    # For hostDependencies libraries: the toolchain's own copy of a library its
+    # GNUstep was built against must not be replaced by MSYS2's current one.
+    # Carried packages (msys2-package-urls) replace on purpose, so they don't set it.
+    [switch]$SkipIfCarried
   )
 
   $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msys2-overlay-" + [guid]::NewGuid().ToString("N"))
@@ -941,6 +946,20 @@ function Install-GpMsys2PackageOverlay {
     $files = @(Get-ChildItem -LiteralPath $packagePrefix -Recurse -File | ForEach-Object {
       $_.FullName.Substring($packagePrefix.Length).TrimStart('\', '/')
     })
+    if ($SkipIfCarried) {
+      $carried = @(foreach ($target in $targets) { foreach ($relative in $files) {
+        if (Test-Path -LiteralPath (Join-Path $target $relative)) { Join-Path $target $relative }
+      } })
+      if ($carried.Count -gt 0) {
+        return [pscustomobject]@{
+          Files = [string[]]@()
+          Targets = [string[]]@($targets.ToArray())
+          Skipped = $true
+          CarriedFiles = [string[]]$carried
+        }
+      }
+    }
+
     foreach ($target in $targets) {
       foreach ($relative in $files) {
         $destination = Join-Path $target $relative
@@ -952,11 +971,27 @@ function Install-GpMsys2PackageOverlay {
     return [pscustomobject]@{
       Files = [string[]]$files
       Targets = [string[]]@($targets.ToArray())
+      Skipped = $false
+      CarriedFiles = [string[]]@()
     }
   }
   finally {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $extractRoot
   }
+}
+
+# The manifest's MSYS2 packages that must also reach the gnustep-cli-new
+# toolchain. setup-msys2 installs hostDependencies.windows.msys2Packages into
+# the bootstrap shell, but an app built with `gnustep build` runs make inside
+# the toolchain's own MSYS2 runtime: its pkg-config searches only the
+# toolchain's prefix, and the MSI stages that runtime, not the shell. So a
+# CLANG64 library such as libvterm was installed yet not found ("required
+# packages were not found: vterm"). Only CLANG64 packages are laid over the
+# toolchain; shell tools (make, curl) stay in the shell.
+function Get-GpMsys2ToolchainOverlayPackages {
+  param([string[]]$Packages)
+
+  return [string[]]@(@($Packages) | Where-Object { $_ -like "mingw-w64-clang-x86_64-*" } | Select-Object -Unique)
 }
 
 function Get-GpManifestContext {

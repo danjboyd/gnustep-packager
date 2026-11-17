@@ -92,7 +92,17 @@ Default MSI MSYS2 bootstrap baseline:
 Manifest-declared Windows host packages under
 `hostDependencies.windows.msys2Packages` are installed into the bootstrap shell
 automatically. The reusable workflow then runs `gnustep-cli-new` setup and smoke
-validation before MSI packaging. The `msys2-packages` input remains available as
+validation before MSI packaging. After setup, each CLANG64 package among them
+(`mingw-w64-clang-x86_64-*`) is also laid over the `gnustep-cli-new`
+toolchain. An app built with `gnustep build` runs inside the toolchain's own
+MSYS2 runtime, whose pkg-config searches only the toolchain, and the MSI stages
+that runtime. Without the overlay, such a library was installed but not found.
+Only the named package is laid over the toolchain, not its dependencies, so
+list each library the build needs. A package the toolchain already carries
+(any of its files is there) is left alone, because the toolchain's GNUstep was
+built against its own copy. Only x86_64 CLANG64 packages qualify, matching the
+toolchain. Shell tools such as `make` stay in the
+bootstrap shell. The `msys2-packages` input remains available as
 an additive override or temporary escape hatch while default host setup is
 enabled.
 

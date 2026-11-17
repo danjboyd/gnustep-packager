@@ -610,6 +610,48 @@ jobs:
           "GP_GNUSTEP_CLI_MANIFEST_URL=$env:GP_GNUSTEP_CLI_MANIFEST_URL" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      - name: Lay Manifest MSYS2 Libraries Over The Toolchain
+        if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup && steps.manifest.outputs.manifest_msys2_packages != '' }}
+        shell: pwsh
+        env:
+          GP_MANIFEST_MSYS2_PACKAGES: ${{ steps.manifest.outputs.manifest_msys2_packages }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          . (Join-Path $env:GITHUB_WORKSPACE '.gnustep-packager-toolkit\scripts\lib\core.ps1')
+          # setup-msys2 installed these into the bootstrap shell. `gnustep build`
+          # runs inside the toolchain's own MSYS2 runtime, which neither sees the
+          # shell's pkg-config files nor stages its DLLs, so lay each CLANG64
+          # package over the toolchain too (only the package, not its dependencies).
+          $packages = @(Get-GpMsys2ToolchainOverlayPackages -Packages @($env:GP_MANIFEST_MSYS2_PACKAGES -split '\s+' | Where-Object { $_ }))
+          if ($packages.Count -eq 0) {
+            Write-Host "No CLANG64 packages in hostDependencies.windows.msys2Packages; nothing to lay over the toolchain."
+            exit 0
+          }
+          if ([string]::IsNullOrWhiteSpace($env:GP_GNUSTEP_CLI_ROOT) -or -not (Test-Path -LiteralPath $env:GP_GNUSTEP_CLI_ROOT)) {
+            throw "The gnustep-cli-new toolchain root isn't set up, so the manifest's MSYS2 libraries can't be laid over it."
+          }
+          $msysRoot = '${{ steps.msys2.outputs.msys2-location }}'
+          $bash = Join-Path $msysRoot 'usr\bin\bash.exe'
+          $tar = Join-Path $msysRoot 'usr\bin\tar.exe'
+          $env:MSYSTEM = 'CLANG64'
+          foreach ($name in $packages) {
+            # The package file setup-msys2 installed, from pacman's cache
+            # (downloaded again if the cache was cleaned).
+            $path = (& $bash -lc "pacman -Sp --noconfirm '$name' | tail -n 1").Trim()
+            $file = Join-Path $msysRoot ("var\cache\pacman\pkg\" + [System.IO.Path]::GetFileName($path))
+            if (-not (Test-Path -LiteralPath $file)) {
+              & $bash -lc "pacman -Sw --noconfirm '$name'" | Out-Host
+              if ($LASTEXITCODE -ne 0) { throw "pacman -Sw failed for $name (exit $LASTEXITCODE)." }
+            }
+            if (-not (Test-Path -LiteralPath $file)) { throw "No package file for $name at $file." }
+            $overlay = Install-GpMsys2PackageOverlay -PackagePath $file -Root $env:GP_GNUSTEP_CLI_ROOT -TarPath $tar -SkipIfCarried
+            if ($overlay.Skipped) {
+              Write-Host "Left $name out: the toolchain already carries it (for example $(@($overlay.CarriedFiles)[0])), and its GNUstep was built against that copy."
+            } else {
+              Write-Host "Laid $(@($overlay.Files).Count) files from $name over: $([string]::Join(', ', @($overlay.Targets)))"
+            }
+          }
+
       - name: Install Carried MSYS2 Packages
         if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup && inputs.msys2-package-urls != '' }}
         shell: pwsh
