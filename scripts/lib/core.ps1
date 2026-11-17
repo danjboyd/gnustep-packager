@@ -959,6 +959,20 @@ function Install-GpMsys2PackageOverlay {
   }
 }
 
+# The manifest's MSYS2 packages that must also reach the gnustep-cli-new
+# toolchain. setup-msys2 installs hostDependencies.windows.msys2Packages into
+# the bootstrap shell, but an app built with `gnustep build` runs make inside
+# the toolchain's own MSYS2 runtime: its pkg-config searches only the
+# toolchain's prefix, and the MSI stages that runtime, not the shell. So a
+# CLANG64 library such as libvterm was installed yet not found ("required
+# packages were not found: vterm"). Only CLANG64 packages are laid over the
+# toolchain; shell tools (make, curl) stay in the shell.
+function Get-GpMsys2ToolchainOverlayPackages {
+  param([string[]]$Packages)
+
+  return [string[]]@(@($Packages) | Where-Object { $_ -like "mingw-w64-clang-x86_64-*" } | Select-Object -Unique)
+}
+
 function Get-GpManifestContext {
   param(
     [Parameter(Mandatory = $true)]
