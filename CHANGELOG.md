@@ -2,7 +2,11 @@
 
 ## Unreleased
 
+## v0.1.12
+
 ### Upgrading
+Change `@v0.1.11` to `@v0.1.12` in your `uses:` lines. Then:
+
 - **The default toolchain is gnustep-cli-new v0.1.8 (was v0.1.7).** The
   reusable workflow's manifest and bootstrap URLs and both bootstrap digests
   move to v0.1.8. Its toolchains are rebuilt with no source changes, and its
