@@ -9,7 +9,8 @@
   `@executable_path`, `@loader_path` or `@rpath`. An app's own dylib referenced
   by its build path loads on the build Mac, so the smoke launch passed, and
   failed everywhere else. `backends.dmg.validation.requireBundledDependencies`
-  makes it fail instead of warn.
+  makes it fail instead of warn. A helper executable in the bundle is checked
+  against its own run paths and folder, as dyld does, not the app's.
 - AppImage validation: follow the dynamic loader's real search path (what is
   already loaded, RPATH, the generated `AppRun`'s `LD_LIBRARY_PATH`, RUNPATH
   with `$ORIGIN`) and warn when a bundled library is in the AppDir but off

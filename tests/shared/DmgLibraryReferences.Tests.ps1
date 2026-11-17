@@ -44,6 +44,21 @@ Describe "DMG library references: otool parsing and resolution" {
     @(ConvertFrom-GpDmgOtoolRpaths -Lines $lines) | Should -Be @("@executable_path/../Frameworks", "/Users/runner/work/app/build")
   }
 
+  It "reads the Mach-O filetype from otool -h, with or without the caps column" {
+    ConvertFrom-GpDmgOtoolFileType -Lines @(
+      "/v/Demo.app/Contents/MacOS/Demo (architecture arm64):"
+      "Mach header"
+      "      magic  cputype cpusubtype  caps    filetype ncmds sizeofcmds      flags"
+      " 0xfeedfacf 16777228          0  0x00           2    17       1056 0x00200085"
+    ) | Should -Be 2
+    ConvertFrom-GpDmgOtoolFileType -Lines @(
+      "Mach header"
+      "      magic cputype cpusubtype filetype ncmds sizeofcmds      flags"
+      " 0xfeedfacf 16777223          3        6    14       1384 0x00100085"
+    ) | Should -Be 6
+    ConvertFrom-GpDmgOtoolFileType -Lines @("not a Mach-O file") | Should -BeNullOrEmpty
+  }
+
   It "expands @rpath, @executable_path and @loader_path the way dyld does" {
     $exe = "/v/Demo.app/Contents/MacOS"
     $loader = "/v/Demo.app/Contents/Frameworks"

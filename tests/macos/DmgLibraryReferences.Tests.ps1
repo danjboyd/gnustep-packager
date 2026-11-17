@@ -79,4 +79,32 @@ Describe "DMG: library references of an app's own dylib" {
     $report = Get-GpDmgMachODependencyReport -AppPath $demo.App -ExecutablePath $demo.Exe
     @($report.Issues) | Should -BeLike "*@rpath/libgpprivate.dylib, which doesn't resolve inside the bundle"
   }
+
+  # A helper tool in the bundle is its own main executable: dyld resolves its
+  # @rpath only through its own LC_RPATH entries, not the app's, and
+  # @executable_path is the helper's folder.
+  It "checks a helper executable's @rpath against its own run paths, not the app's" {
+    $demo = New-GpDemoApp -Name "helper" -Bundled
+    Remove-Item -Force $demo.Dylib
+    $resources = Join-Path $demo.App "Contents/Resources"
+    New-Item -ItemType Directory -Force -Path $resources | Out-Null
+    $bundledDylib = Join-Path $demo.App "Contents/Frameworks/libgpprivate.dylib"
+    $helper = Join-Path $resources "gphelper"
+    & xcrun clang -o $helper (Join-Path $script:buildRoot "app.c") $bundledDylib
+    if ($LASTEXITCODE -ne 0) { throw "building gphelper failed" }
+
+    # No run path of its own: the app's @executable_path/../Frameworks doesn't
+    # apply to it, and dyld can't load it.
+    $output = & $helper 2>&1
+    $LASTEXITCODE | Should -Not -Be 0 -Because "dyld should not find @rpath/libgpprivate.dylib for the helper ($output)"
+    $report = Get-GpDmgMachODependencyReport -AppPath $demo.App -ExecutablePath $demo.Exe
+    @($report.Issues) | Should -Be @("Contents/Resources/gphelper loads @rpath/libgpprivate.dylib, which doesn't resolve inside the bundle")
+
+    # Its own run path, relative to its own folder: it loads, and passes.
+    & install_name_tool -add_rpath "@executable_path/../Frameworks" $helper
+    & codesign --force --sign - $helper 2>$null
+    (& $helper) | Should -Be "answer=42"
+    $report = Get-GpDmgMachODependencyReport -AppPath $demo.App -ExecutablePath $demo.Exe
+    @($report.Issues).Count | Should -Be 0 -Because ([string]::Join("; ", @($report.Issues)))
+  }
 }

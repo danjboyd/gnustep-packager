@@ -102,8 +102,14 @@ there, but it fails on every other Mac; this check is what catches it. It warns
 by default. Set `backends.dmg.validation.requireBundledDependencies: true` to
 make it fail.
 
+A helper tool shipped inside the bundle (say in `Contents/Resources`) is its
+own main executable to dyld. It doesn't get the app's run paths, and
+`@executable_path` in it means the helper's folder. Give it its own, for
+example `-Wl,-rpath,@executable_path/../Frameworks` from `Contents/Resources`.
+The check follows the same rule.
+
 `tests/macos/DmgLibraryReferences.Tests.ps1` builds such a dylib and app and
-checks the bundled, build-path and missing-rpath cases.
+checks the bundled, build-path, missing-rpath and helper-executable cases.
 
 ## Notices
 
