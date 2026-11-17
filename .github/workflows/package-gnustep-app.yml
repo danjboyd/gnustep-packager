@@ -68,11 +68,11 @@ on:
       gnustep-cli-manifest-url:
         required: false
         type: string
-        default: "https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/release-manifest.json"
+        default: "https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.8/release-manifest.json"
       gnustep-cli-bootstrap-url:
         required: false
         type: string
-        default: "https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/gnustep-bootstrap.sh"
+        default: "https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.8/gnustep-bootstrap.sh"
       # SHA-256 digests of the bootstrap scripts the gnustep-cli-bootstrap-url
       # default names (gnustep-bootstrap.sh for AppImage, the .ps1 beside it
       # for MSI). The download must match before it runs. A caller that
@@ -81,11 +81,11 @@ on:
       gnustep-cli-bootstrap-sha256:
         required: false
         type: string
-        default: "1580d5ddcf774716bc2caa614cb4c217c19ead1645f4362f58ad12277345c961"
+        default: "322470ad32170b534885063ec67d53c388518a5dc750e34380c2de172a81fa7f"
       gnustep-cli-bootstrap-ps1-sha256:
         required: false
         type: string
-        default: "867308a2c1c3febd9a7800564eb131a899db67c2ccc9c5d03d4b921c4b387420"
+        default: "4bd3e6bf4e9e21688424a776bd35dd29d9bca2dd66697354d2ffaf7ef1769975"
       gnustep-cli-root:
         required: false
         type: string
