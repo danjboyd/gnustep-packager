@@ -404,6 +404,20 @@ jobs:
       artifact-name: sample-gui-reusable
       artifact-retention-days: 7
 
+  # The same sample with one CLANG64 library under
+  # hostDependencies.windows.msys2Packages (libvterm). Its build fails unless the
+  # gnustep-cli-new toolchain's own pkg-config finds vterm, as `gnustep build`
+  # would, and the installed MSI must carry libvterm-0.dll from the toolchain.
+  windows-msys2-library-reusable-workflow:
+    uses: ./.github/workflows/package-gnustep-app.yml
+    with:
+      manifest-path: examples/sample-gui/package.msys2-library.manifest.json
+      backend: msi
+      run-validation: true
+      run-smoke: true
+      artifact-name: sample-gui-msys2-library
+      artifact-retention-days: 7
+
   # The reusable workflow's appimage path, end to end, on the Linux fixture:
   # default host setup (the gnustep-cli-new bootstrap and its digest check),
   # then a launch in a clean container with no GNUstep installed. With the
