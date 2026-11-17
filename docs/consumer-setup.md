@@ -285,6 +285,12 @@ workflow-only additive package inputs.
   -RunSmoke
 ```
 
+The AppImage smoke launch starts the app, so a GUI app needs a display. It
+runs with `-RunSmoke`, and also whenever the manifest sets
+`validation.smoke.enabled`. On a machine with no `DISPLAY` or
+`WAYLAND_DISPLAY`, run it under `xvfb-run`. When the launch fails with no
+display, the error says so and names the setting that turned it on.
+
 ## GitHub Actions
 Once the local run works, call the reusable workflow documented in
 [github-actions.md](github-actions.md).

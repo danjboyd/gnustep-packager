@@ -766,6 +766,27 @@ function Get-GpAppImageSmokeBaseEnvironment {
   return $environment
 }
 
+# A GUI smoke launch with neither DISPLAY nor WAYLAND_DISPLAY has nowhere to
+# open a window, and the error it ends with (an exit code, a missing marker,
+# a GNUstep backend message) doesn't say so. This names the cause and how to
+# run or skip the launch. Returns $null when a display is set.
+function Get-GpAppImageSmokeDisplayHint {
+  param(
+    [System.Collections.IDictionary]$Environment = @{},
+    [bool]$RunSmokeRequested = $false,
+    [bool]$ManifestEnabled = $false
+  )
+
+  foreach ($name in @("DISPLAY", "WAYLAND_DISPLAY")) {
+    if ($Environment.Contains($name) -and -not [string]::IsNullOrWhiteSpace([string]$Environment[$name])) {
+      return $null
+    }
+  }
+  $why = if ($RunSmokeRequested) { "-RunSmoke was given" } elseif ($ManifestEnabled) { "the manifest sets validation.smoke.enabled" } else { "smoke was requested" }
+  $skip = if ($ManifestEnabled -and -not $RunSmokeRequested) { ", or set validation.smoke.enabled to false to skip the launch" } elseif ($RunSmokeRequested) { ", or leave out -RunSmoke to skip the launch" } else { "" }
+  return ("The smoke launch ran because {0}, but neither DISPLAY nor WAYLAND_DISPLAY is set, so a GUI app has no display to open. Run validation under a display, for example xvfb-run or scripts/run-gui-isolated.sh{1}." -f $why, $skip)
+}
+
 function Get-GpAppImageSmokeFailure {
   param(
     [AllowNull()]
@@ -3764,7 +3785,22 @@ function Invoke-GpAppImageValidation {
   }
   $smokeResult = $null
   if ($RunSmoke -or $validationPlan.Enabled) {
-    $smokeResult = Invoke-GpAppImageSmoke -Context $Context -Config $config -ValidationPlan $validationPlan -ValidationRoot $validationRoot -SmokeLog $smokeLog
+    try {
+      $smokeResult = Invoke-GpAppImageSmoke -Context $Context -Config $config -ValidationPlan $validationPlan -ValidationRoot $validationRoot -SmokeLog $smokeLog
+    } catch {
+      $displayEnvironment = [ordered]@{}
+      foreach ($name in @("DISPLAY", "WAYLAND_DISPLAY")) {
+        $displayEnvironment[$name] = [Environment]::GetEnvironmentVariable($name)
+      }
+      $hint = Get-GpAppImageSmokeDisplayHint -Environment $displayEnvironment -RunSmokeRequested ([bool]$RunSmoke) -ManifestEnabled ([bool]$validationPlan.Enabled)
+      if ($hint) {
+        if (Test-Path $smokeLog) {
+          Write-GpAppImageLogLine -LogPath $smokeLog -Message $hint
+        }
+        throw ("{0} {1}" -f $_.Exception.Message, $hint)
+      }
+      throw
+    }
   }
 
   Write-GpAppImageLogLine -LogPath $LogPath -Message ("Validated AppImage artifact: {0}" -f $config.ArtifactPlan.ArtifactPath)
