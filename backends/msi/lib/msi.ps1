@@ -1796,6 +1796,10 @@ function Prepare-GpMsiInstallTree {
   Invoke-GpMsiSignFile -Signing $signing -Path $launcherOutputPath -LogPath $LogPath
   $launcherConfigPath = Write-GpMsiLauncherConfig -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot
   Write-GpMsiLogLine -LogPath $LogPath -Message ("Generated launcher config: {0}" -f $launcherConfigPath)
+  $appDefaults = Get-GpMsiAppDomainDefaults -Context $Context
+  if ($null -ne $appDefaults -and @($appDefaults.Entries).Count -gt 0) {
+    Write-GpMsiLogLine -LogPath $LogPath -Message ("Packaged defaults are seeded into domain '{0}' ({1})." -f $appDefaults.Domain, (Get-GpPackagedDefaultsDomainReason -Source $appDefaults.DomainSource))
+  }
 
   $fontNotices = @(Write-GpMsiBundledFonts -Config $Config -InstallRoot $WorkPaths.InstallRoot -LogPath $LogPath)
   $noticeReport = Write-GpMsiNoticeReport -Context $Context -Config $Config -InstallRoot $WorkPaths.InstallRoot -LogPath $LogPath -AdditionalEntries $fontNotices

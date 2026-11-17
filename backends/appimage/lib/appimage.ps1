@@ -1798,12 +1798,7 @@ function Write-GpAppImageAppRun {
   $environment = Get-GpLaunchEnvironmentForAppImage -Context $Context
   $appDefaults = Get-GpAppImageAppDomainDefaults -Context $Context
   if ($null -ne $appDefaults -and @($appDefaults.Entries).Count -gt 0) {
-    $domainReason = switch ($appDefaults.DomainSource) {
-      "manifest" { "packagedDefaults.appDomain.domain" }
-      "bundleIdentifier" { "the app's CFBundleIdentifier" }
-      "processName" { "the app's process name; its Info plist has no CFBundleIdentifier" }
-      default { "package.id; the staged app's bundle identifier couldn't be read" }
-    }
+    $domainReason = Get-GpPackagedDefaultsDomainReason -Source $appDefaults.DomainSource
     Write-GpAppImageLogLine -LogPath $LogPath -Message ("Packaged defaults are seeded into domain '{0}' ({1})." -f $appDefaults.Domain, $domainReason)
   }
   $appRunPath = Join-Path $AppDirRoot "AppRun"

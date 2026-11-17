@@ -73,6 +73,27 @@ change without editing packager backend code. The downloaded bootstrap script
 must match its digest input before it runs; an overridden bootstrap URL needs
 its own digest, or an empty one to skip the check.
 
+### Pinning only the manifest
+
+The bootstrap URL and its digests follow the packager release, but
+`gnustep-cli-manifest-url` stays whatever the caller sets. A caller that pins
+only the manifest therefore runs the default bootstrap script against an older
+manifest. The script verifies the manifest's signature against the trust keys
+built into it before it uses anything in the manifest.
+
+| Default bootstrap | Pinned manifest | Result (Linux, 2026-11-17) |
+| --- | --- | --- |
+| v0.1.8 | v0.1.7 | installs 0.1.7 |
+| v0.1.7 | v0.1.8 | installs 0.1.8 |
+| v0.1.7 or v0.1.8 | v0.1.0-dev | refused: "the release manifest signature did not verify against the pinned trusted key" |
+
+The `v0.1.0-dev` manifest's signature doesn't verify against the keys built into
+the v0.1.7 and v0.1.8 bootstraps. A caller still pinning it can't bootstrap
+on the default path, whatever packager release it uses. Drop the
+`gnustep-cli-manifest-url` input so that it follows the packager's default, or
+pin a stable release. To keep an old manifest, pin `gnustep-cli-bootstrap-url`
+and both digests to the same release.
+
 When `skip-default-host-setup: false`, the workflow runs the bootstrap smoke
 before packaging for both supported backends.
 
