@@ -54,7 +54,8 @@ such as artifact naming patterns and letting profiles contribute reusable app or
 host-dependency overlays.
 
 ## Current Default Sources
-- [defaults/core/defaults.json](/C:/Users/Support/git/gnustep-packager/defaults/core/defaults.json)
-- [defaults/backends/msi/defaults.json](/C:/Users/Support/git/gnustep-packager/defaults/backends/msi/defaults.json)
-- [defaults/backends/appimage/defaults.json](/C:/Users/Support/git/gnustep-packager/defaults/backends/appimage/defaults.json)
+- [defaults/core/defaults.json](../defaults/core/defaults.json)
+- [defaults/backends/msi/defaults.json](../defaults/backends/msi/defaults.json)
+- [defaults/backends/appimage/defaults.json](../defaults/backends/appimage/defaults.json)
+- [defaults/backends/dmg/defaults.json](../defaults/backends/dmg/defaults.json)
 - `defaults/profiles/*.json` selected by the manifest `profiles` list
