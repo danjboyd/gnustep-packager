@@ -10,6 +10,19 @@
   existing Windows install with `gnustep update`, and `gnustep doctor` no
   longer reports an upgraded install as needing repair. A caller that pins
   `gnustep-cli-manifest-url` or the bootstrap inputs keeps what it pins.
+- **New library checks warn; they don't fail builds.** The DMG
+  `library-references` check and the AppImage and MSI loader search-path checks
+  (below) log a warning when a bundled library isn't where the app will look
+  for it at launch. A build that passed before still passes. Read the warnings
+  in the package log, then set `requireBundledDependencies` (DMG) or
+  `requireLoaderSearchPath` (AppImage, MSI) under the backend's `validation`
+  to make them fail. [docs/private-libraries.md](docs/private-libraries.md)
+  says where each platform looks.
+- **Packaged defaults may land in a different domain.** `packagedDefaults`
+  and `appDomain.values` now go to the domain the app actually reads (its
+  `CFBundleIdentifier`, else its executable name) instead of `package.id`
+  (see Fixed). If an app's identifier differs from `package.id` and something
+  relied on the old domain, set `appDomain.domain` to keep it.
 
 ### Added
 - DMG validation: a `library-references` check. It reads every Mach-O file in
@@ -32,6 +45,8 @@
   or `runtime\bin`). The closure counted a DLL anywhere in the tree as
   present, so one under `Resources` packaged fine and the installed app didn't
   start. `backends.msi.validation.requireLoaderSearchPath` makes it fail.
+- Docs: [docs/private-libraries.md](docs/private-libraries.md), on shipping an
+  app's own shared libraries with each backend and what validation checks.
 
 ### Fixed
 - AppImage smoke: a launch that fails with no `DISPLAY` or `WAYLAND_DISPLAY`
