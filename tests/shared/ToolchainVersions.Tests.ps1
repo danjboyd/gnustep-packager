@@ -75,7 +75,10 @@ Describe "GNUstep toolchain versions" {
   It "is reported by the reusable workflow before the caller preflight" {
     $workflow = Get-Content -Raw (Join-Path $script:repoRoot ".github/workflows/package-gnustep-app.yml")
     $report = $workflow.IndexOf("- name: Report GNUstep Toolchain Versions")
-    $report | Should -BeGreaterThan $workflow.IndexOf("- name: Bootstrap And Smoke Test gnustep-cli-new`n")
+    # Match the Linux step's name line whatever the checkout's line endings.
+    $linuxBootstrap = [regex]::Match($workflow, '(?m)^\s*- name: Bootstrap And Smoke Test gnustep-cli-new\r?$')
+    $linuxBootstrap.Success | Should -BeTrue
+    $report | Should -BeGreaterThan $linuxBootstrap.Index
     $report | Should -BeLessThan $workflow.IndexOf("- name: Run Caller Preflight (pwsh)")
     $workflow | Should -Match "toolchain-versions\.json"
   }
