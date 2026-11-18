@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- Reusable workflow: a failed packaging pipeline now shows its cause on the run
+  page. The newest pipeline log's error lines and last 40 lines go into the job
+  summary, and compiler errors become file and line annotations. Before, the
+  cause was only in the logs artifact.
+
 ## v0.1.13
 
 ### Upgrading
@@ -30,10 +36,6 @@ stays gnustep-cli-new v0.1.8. Then:
   package (not its dependencies) is now laid over the toolchain after setup.
 
 ### Added
-- Reusable workflow: a failed packaging pipeline now shows its cause on the run
-  page. The newest pipeline log's error lines and last 40 lines go into the job
-  summary, and compiler errors become file and line annotations. Before, the
-  cause was only in the logs artifact.
 - The MSI package log now says which domain the packaged defaults go to, and
   why: "Packaged defaults are seeded into domain 'MarkdownViewer' (the app's
   process name; its Info plist has no CFBundleIdentifier)." The AppImage log
