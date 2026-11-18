@@ -20,6 +20,13 @@
   found: vterm" with libvterm installed. Each named `mingw-w64-clang-x86_64-*`
   package (not its dependencies) is now laid over the toolchain after setup.
 
+### Changed
+- Internal: host-dependency planning and the MSYS2 and apt installers moved
+  from `scripts/lib/core.ps1` to `scripts/lib/host-setup.ps1`, unchanged.
+  `core.ps1` dot-sources the new file, so callers still load `core.ps1` alone.
+  [docs/core-library-layout.md](docs/core-library-layout.md) has the plan for
+  the rest of the split.
+
 ### Added
 - The MSI package log now says which domain the packaged defaults go to, and
   why: "Packaged defaults are seeded into domain 'MarkdownViewer' (the app's
