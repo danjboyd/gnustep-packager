@@ -677,6 +677,11 @@ The sidecar records:
   it is empty.
 - `source` and `packager`: the git commit of the manifest's checkout and of the
   packager, with `dirty` when tracked files had changes (null outside git)
+- `gnustepVersions`: when the build ran on the reusable workflow's
+  gnustep-cli-new toolchain, the gnustep-base, gnustep-gui, gnustep-make and
+  libobjc2 versions it reports, the root-relative header directory, whether it
+  was built from `source` or `packages`, and each source-built component's
+  upstream commit. Otherwise it's null.
 - `files`: the launch entry (`role: entry`) and each matching library
   (`role: library`), with its path relative to the AppDir, MSI install tree or
   DMG volume root, size, SHA-256 and, for an ELF file, its GNU build ID

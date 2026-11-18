@@ -229,3 +229,33 @@ used by the packager release. The current baseline is:
 ```text
 https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.8/release-manifest.json
 ```
+
+## What each toolchain release ships
+
+The GNUstep an app compiles against depends on the platform as well as the
+gnustep-cli-new release. The version number alone can mislead. Each Linux
+toolchain is built from upstream source at pinned commits, usually ahead of the
+last release. The Windows toolchain installs MSYS2's packaged release. Both can
+report the same gnustep-base version and still expose different API.
+
+Read from the published artifacts on 2026-11-17:
+
+| Release | Target | gnustep-base | gnustep-gui | gnustep-make | libobjc2 | Built from |
+| --- | --- | --- | --- | --- | --- | --- |
+| v0.1.7, v0.1.8 | `linux-amd64-clang` | 1.31.1 | 0.32.0 | 2.9.3 | 2.2.0 | source: libs-base `d898f703`, libs-gui `7892137b`, libs-back `bf3b3ced`, libobjc2 `b67709ad` |
+| v0.1.7, v0.1.8 | `windows-amd64-msys2-clang64` | 1.31.1 | 0.32.0 | 2.9.3 | 2.2.0 | MSYS2 CLANG64 packages (release headers) |
+
+The difference shows up as compile errors that happen only on Windows. For
+example, `+[NSData dataWithContentsOfFile:options:error:]` is declared in the
+Linux toolchain's headers (libs-base master) but not in the Windows ones
+(1.31.1). An app developed on Linux that calls it builds there and fails in the
+MSI build with "no known class method for selector". Until the two converge,
+code that has to build on Windows should stick to API that the 1.31.1 release
+headers declare.
+
+Each run also reports what it got. The reusable workflow's "Report GNUstep
+Toolchain Versions" step prints a line such as `gnustep-base 1.31.1,
+gnustep-gui 0.32.0, gnustep-make 2.9.3, libobjc2 2.2.0 (packaged release
+headers)` and adds it to the job summary. It writes
+`<logRoot>/gnustep-cli-new/toolchain-versions.json`, and the provenance sidecar
+records the same values under `gnustepVersions`.

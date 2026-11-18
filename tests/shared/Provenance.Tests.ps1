@@ -513,6 +513,23 @@ Describe "Release provenance" {
 
       $path = Write-GpProvenanceDocument -Context $context -Backend "appimage" -ArtifactPath $artifactPath -PayloadRoot $payload
       Assert-GpEqual -Actual @((Get-Content -Raw -Path $path | ConvertFrom-Json).relatedArtifacts).Count -Expected 0 -Message "Without related files the list is empty."
+
+      # The reusable workflow's toolchain root, when there is one, is recorded.
+      $toolchainRoot = Join-Path $root "gnustep-cli-new"
+      New-Item -ItemType Directory -Force -Path (Join-Path $toolchainRoot "clang64/include/GNUstepBase") | Out-Null
+      Set-Content -Path (Join-Path $toolchainRoot "clang64/include/GNUstepBase/GSConfig.h") -Value "#define GNUSTEP_BASE_VERSION 1.31.1"
+      $previousRoot = $env:GP_GNUSTEP_CLI_ROOT
+      try {
+        $env:GP_GNUSTEP_CLI_ROOT = $toolchainRoot
+        $document = Get-Content -Raw -Path (Write-GpProvenanceDocument -Context $context -Backend "msi" -ArtifactPath $artifactPath -PayloadRoot $payload) | ConvertFrom-Json
+        Assert-GpEqual -Actual $document.gnustepVersions.base -Expected "1.31.1" -Message "The toolchain's gnustep-base version should be recorded."
+        Assert-GpEqual -Actual $document.gnustepVersions.headers -Expected "clang64/include" -Message "Only the root-relative header path should be recorded."
+        $env:GP_GNUSTEP_CLI_ROOT = ""
+        $document = Get-Content -Raw -Path (Write-GpProvenanceDocument -Context $context -Backend "msi" -ArtifactPath $artifactPath -PayloadRoot $payload) | ConvertFrom-Json
+        Assert-GpEqual -Actual $document.gnustepVersions -Expected $null -Message "Without a toolchain root there's nothing to record."
+      } finally {
+        $env:GP_GNUSTEP_CLI_ROOT = $previousRoot
+      }
     } finally {
       Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
     }
