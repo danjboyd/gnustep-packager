@@ -988,6 +988,104 @@ function Install-GpMsys2PackageOverlay {
 # CLANG64 library such as libvterm was installed yet not found ("required
 # packages were not found: vterm"). Only CLANG64 packages are laid over the
 # toolchain; shell tools (make, curl) stay in the shell.
+# When the packaging pipeline fails, the cause is in a log under outputs.logRoot
+# that's only reachable by downloading the logs artifact. This picks the newest
+# pipeline log and pulls out what a reader needs on the run page: the error
+# lines, the last lines, and compiler errors as file/line annotations.
+function Get-GpFailureLogSummary {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$LogRoot,
+    [int]$TailLines = 40,
+    [int]$MaxErrorLines = 30
+  )
+
+  if (-not (Test-Path -LiteralPath $LogRoot)) {
+    return $null
+  }
+  # gnustep-cli-new keeps its own diagnostics, which have their own upload.
+  $log = Get-ChildItem -LiteralPath $LogRoot -Recurse -File -Filter "*.log" |
+    Where-Object { $_.FullName -notmatch '[\\/]gnustep-cli-new[\\/]' } |
+    Sort-Object LastWriteTimeUtc, FullName |
+    Select-Object -Last 1
+  if (-not $log) {
+    return $null
+  }
+
+  $ansi = [regex]'\x1b\[[0-9;]*[A-Za-z]'
+  $lines = @(Get-Content -LiteralPath $log.FullName | ForEach-Object { $ansi.Replace([string]$_, "").TrimEnd() })
+  $errorPattern = '(?i)(\b(fatal )?error\b\s*:|^\s*FAILED[:\s]|\*\*\* \[|\bnot found\b|^Exception:|\bthrow\b.*"|required packages were not found)'
+  $errorLines = [System.Collections.Generic.List[string]]::new()
+  foreach ($line in $lines) {
+    if ($line -match $errorPattern -and -not $errorLines.Contains($line)) {
+      $errorLines.Add($line) | Out-Null
+      if ($errorLines.Count -ge $MaxErrorLines) { break }
+    }
+  }
+
+  $compilerError = [regex]'^(?<file>[^\s:][^:]*?|[A-Za-z]:[\\/][^:]*?):(?<line>\d+):(?:(?<col>\d+):)?\s*(?:fatal )?error:\s*(?<message>.+)$'
+  $annotations = [System.Collections.Generic.List[object]]::new()
+  foreach ($line in $errorLines) {
+    $match = $compilerError.Match($line.Trim())
+    if ($match.Success) {
+      $annotations.Add([pscustomobject]@{
+        File = $match.Groups["file"].Value
+        Line = [int]$match.Groups["line"].Value
+        Column = if ($match.Groups["col"].Success) { [int]$match.Groups["col"].Value } else { 0 }
+        Message = $match.Groups["message"].Value
+      }) | Out-Null
+    }
+  }
+
+  $tailStart = [Math]::Max(0, $lines.Count - $TailLines)
+  return [pscustomobject]@{
+    LogPath = $log.FullName
+    ErrorLines = [string[]]$errorLines.ToArray()
+    TailLines = [string[]]@(if ($lines.Count -gt 0) { $lines[$tailStart..($lines.Count - 1)] })
+    Annotations = @($annotations.ToArray())
+  }
+}
+
+function Format-GpFailureSummaryMarkdown {
+  param(
+    [Parameter(Mandatory = $true)]
+    [object]$Summary,
+    [string]$StepName = "Run Packaging Pipeline"
+  )
+
+  $fence = '```'
+  $parts = [System.Collections.Generic.List[string]]::new()
+  $parts.Add("### $StepName failed") | Out-Null
+  $parts.Add("") | Out-Null
+  $parts.Add("Log: ``$($Summary.LogPath)`` (full copy in the logs artifact)") | Out-Null
+  if (@($Summary.ErrorLines).Count -gt 0) {
+    $parts.Add("") | Out-Null
+    $parts.Add("**Error lines**") | Out-Null
+    $parts.Add($fence + "text") | Out-Null
+    foreach ($line in $Summary.ErrorLines) { $parts.Add($line) | Out-Null }
+    $parts.Add($fence) | Out-Null
+  }
+  $parts.Add("") | Out-Null
+  $parts.Add("**Last $(@($Summary.TailLines).Count) lines**") | Out-Null
+  $parts.Add($fence + "text") | Out-Null
+  foreach ($line in $Summary.TailLines) { $parts.Add($line) | Out-Null }
+  $parts.Add($fence) | Out-Null
+  return [string]::Join("`n", $parts)
+}
+
+# GitHub workflow commands: ::error file=...,line=...::message
+function Format-GpFailureAnnotation {
+  param([Parameter(Mandatory = $true)][object]$Annotation)
+
+  $escapeData = { param($v) ([string]$v).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A') }
+  $escapeProperty = { param($v) (& $escapeData $v).Replace(':', '%3A').Replace(',', '%2C') }
+  $properties = "file=$(& $escapeProperty $Annotation.File),line=$($Annotation.Line)"
+  if ($Annotation.Column -gt 0) {
+    $properties += ",col=$($Annotation.Column)"
+  }
+  return "::error $properties::$(& $escapeData $Annotation.Message)"
+}
+
 function Get-GpMsys2ToolchainOverlayPackages {
   param([string[]]$Packages)
 
