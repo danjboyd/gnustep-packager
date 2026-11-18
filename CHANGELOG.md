@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## v0.1.14
+
+### Upgrading
+Change `@v0.1.13` to `@v0.1.14` in your `uses:` lines. The default toolchain
+stays gnustep-cli-new v0.1.8. Then:
+
+- **Windows libraries you list bring their dependencies.** A CLANG64 package
+  under `hostDependencies.windows.msys2Packages` now brings in the CLANG64
+  packages it depends on, unless the toolchain already carries them. The
+  package log names each one it adds ("needed by ..."). If you listed a
+  library's dependencies by hand to make v0.1.13 work, you can drop them. Your
+  MSI may now contain DLLs it didn't before, if the library needs them.
+- **New warnings, no new failures.** A failed pipeline now explains itself on
+  the run page. A mismatched gnustep-cli-new manifest and bootstrap pin now
+  draws a warning before setup. Neither changes whether a build passes.
+
 ### Added
 - Reusable workflow: a failed packaging pipeline now shows its cause on the run
   page. The newest pipeline log's error lines and last 40 lines go into the job
