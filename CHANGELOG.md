@@ -2,7 +2,16 @@
 
 ## Unreleased
 
+## v0.1.13
+
 ### Upgrading
+Change `@v0.1.12` to `@v0.1.13` in your `uses:` lines. The default toolchain
+stays gnustep-cli-new v0.1.8. Then:
+
+- **Windows libraries you list now reach the build.** If you worked around the
+  missing CLANG64 libraries (see Fixed) with `msys2-package-urls` or your own
+  copy step, you can drop the workaround. A listed package that the toolchain
+  already ships is left alone, so GNUstep keeps the copy it was built against.
 - **Pinning only `gnustep-cli-manifest-url` doesn't pin the bootstrap.** The
   bootstrap script and its digests still follow the packager release. A pinned
   v0.1.7 manifest works with the v0.1.8 bootstrap. A pinned `v0.1.0-dev`
