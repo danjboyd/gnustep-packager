@@ -187,6 +187,7 @@ Primary inputs:
 - `gnustep-cli-root`
 - `preflight-shell`
 - `preflight-command`
+- `build-keep-going` (diagnostic, default off; see below)
 - `run-validation`
 - `run-smoke`
 - `upload-artifacts`
@@ -206,6 +207,18 @@ For hosted Windows MSI runs, keep that diagnostic artifact with release
 candidate evidence. It is the handoff point for upstream issues because it
 records `windows-msys2-clang64`, `MSYSTEM=CLANG64`, path conversion output,
 command lookup, and the exact failed bootstrap command logs.
+
+### Finding every compile error in one run
+
+Make stops at the first target that fails, so a port can turn up one error per
+run. `build-keep-going: true` adds `-k` to `MAKEFLAGS` for the pipeline step.
+The app's make, including gnustep-make under `gnustep build`, then keeps going
+and reports every failure it can reach. The job still fails, and nothing gets
+packaged. Use it on a branch while porting, and leave it off for release builds.
+
+Steps that call another build tool directly aren't covered. For example,
+`cmake --build` with Ninja ignores `MAKEFLAGS`; pass that tool its own
+keep-going option (`-- -k 0` for Ninja) in the app's build command.
 
 ## Secrets
 Optional MSI signing secrets:

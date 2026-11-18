@@ -98,6 +98,14 @@ on:
         required: false
         type: string
         default: ""
+      build-keep-going:
+        description: >-
+          Diagnostic: run the app's make with -k (MAKEFLAGS), so one failed run
+          reports every compile error instead of stopping at the first. The job
+          still fails. Leave it off for release builds.
+        required: false
+        type: boolean
+        default: false
       run-validation:
         required: false
         type: boolean
@@ -828,6 +836,12 @@ jobs:
           }
           if ('${{ inputs.skip-default-host-setup }}' -ne 'true') {
             $parameters['InstallHostDependencies'] = $true
+          }
+          if ('${{ inputs.build-keep-going }}' -eq 'true') {
+            # make (and gnustep-make under `gnustep build`) reads MAKEFLAGS
+            # from the environment; -k keeps going past a failed target.
+            $env:MAKEFLAGS = ("$env:MAKEFLAGS -k").Trim()
+            Write-Host "build-keep-going: MAKEFLAGS=$env:MAKEFLAGS. Make continues past failures to report them all; the build still fails."
           }
           $pipelineScript = [System.IO.Path]::GetFullPath((Join-Path $toolRoot 'scripts\run-packaging-pipeline.ps1'))
           if (-not (Test-Path -LiteralPath $pipelineScript)) {

@@ -21,6 +21,9 @@
   package (not its dependencies) is now laid over the toolchain after setup.
 
 ### Added
+- Reusable workflow: `build-keep-going` (default off) runs the app's make with
+  `-k`, so one failed run reports every compile error instead of the first.
+  Meant for porting on a branch; the job still fails.
 - The MSI package log now says which domain the packaged defaults go to, and
   why: "Packaged defaults are seeded into domain 'MarkdownViewer' (the app's
   process name; its Info plist has no CFBundleIdentifier)." The AppImage log
