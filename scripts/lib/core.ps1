@@ -980,14 +980,6 @@ function Install-GpMsys2PackageOverlay {
   }
 }
 
-# The manifest's MSYS2 packages that must also reach the gnustep-cli-new
-# toolchain. setup-msys2 installs hostDependencies.windows.msys2Packages into
-# the bootstrap shell, but an app built with `gnustep build` runs make inside
-# the toolchain's own MSYS2 runtime: its pkg-config searches only the
-# toolchain's prefix, and the MSI stages that runtime, not the shell. So a
-# CLANG64 library such as libvterm was installed yet not found ("required
-# packages were not found: vterm"). Only CLANG64 packages are laid over the
-# toolchain; shell tools (make, curl) stay in the shell.
 # When the packaging pipeline fails, the cause is in a log under outputs.logRoot
 # that's only reachable by downloading the logs artifact. This picks the newest
 # pipeline log and pulls out what a reader needs on the run page: the error
@@ -1188,6 +1180,14 @@ function Resolve-GpMsys2PackageClosure {
   return @($result.ToArray())
 }
 
+# The manifest's MSYS2 packages that must also reach the gnustep-cli-new
+# toolchain. setup-msys2 installs hostDependencies.windows.msys2Packages into
+# the bootstrap shell, but an app built with `gnustep build` runs make inside
+# the toolchain's own MSYS2 runtime: its pkg-config searches only the
+# toolchain's prefix, and the MSI stages that runtime, not the shell. So a
+# CLANG64 library such as libvterm was installed yet not found ("required
+# packages were not found: vterm"). Only CLANG64 packages are laid over the
+# toolchain; shell tools (make, curl) stay in the shell.
 function Get-GpMsys2ToolchainOverlayPackages {
   param([string[]]$Packages)
 
