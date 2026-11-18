@@ -1,4 +1,4 @@
-# TrellisPreview AppImage (draft recipe)
+# TrellisPreview AppImage and MSI (draft recipe)
 
 A packaging recipe for [Trellis](https://github.com/danjboyd/gnustep-trellis)'s
 `TrellisPreview.app`, staged with the Adwaita GNUstep theme. It is kept here
@@ -14,6 +14,18 @@ until it qualifies, and then moves to a `packaging/` folder in gnustep-trellis
 - **Runtime:** the gnustep-cli-new toolchain the workflow sets up; libTrellis and
   libTrellisEngine go to `runtime/lib`. The tools (trellis-render, -lint) stay
   out: trellis-render refuses to run outside a private display.
+
+- **Windows (MSI):** the same manifest, with `platformOverrides.windows` for the
+  pwsh build and stage scripts. `package-msi.yml` uses gnustep-cli v0.1.9's
+  patched toolchain (`toolchain-variant: patched`, packager PR 167), the whole
+  stack, never mixed with MSYS2's own gnustep packages. The backend is
+  gnustep-back's win32 server with cairo graphics and fontconfig, with DejaVu
+  bundled. Trellis has not been built on Windows yet; gnustep-cssbox owns the
+  source changes.
+- **Run environment:** a scratch or packaged run must point gnustep-base at the
+  toolchain's own `GNUstep.conf` (`GNUSTEP_CONFIG_FILE`), or the host's is read.
+- **Not included:** a `.trellis` file association (Dan's call in the release
+  proposal) and a real icon (gnustep-cssbox will supply `TrellisPreview.png`).
 
 Render fidelity was checked before packaging: TrellisPreview's `--snapshot` and
 `trellis-render` matched pixel for pixel (0 differing) on Settings 520x400,

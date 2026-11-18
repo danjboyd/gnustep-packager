@@ -61,7 +61,8 @@
       "repo": "https://github.com/danjboyd/plugins-themes-Adwaita",
       "ref": "9c25a6823c3d0af715b197e64e8ca2d9bee9b456",
       "platforms": [
-        "appimage"
+        "appimage",
+        "msi"
       ],
       "required": true,
       "default": true
@@ -120,7 +121,13 @@
   },
   "backends": {
     "msi": {
-      "enabled": false
+      "enabled": true,
+      "upgradeCode": "6b1f3e0a-8d2c-4f7a-9e51-3c0d7a2b9f64",
+      "installScope": "perUser",
+      "productName": "Trellis Preview",
+      "shortcutName": "Trellis Preview",
+      "installDirectoryName": "TrellisPreview",
+      "launcherFileName": "TrellisPreview.exe"
     },
     "appimage": {
       "enabled": true,
@@ -158,6 +165,41 @@
         "file",
         "curl"
       ]
+    }
+  },
+  "platformOverrides": {
+    "windows": {
+      "pipeline": {
+        "shell": {
+          "kind": "pwsh",
+          "bootstrapCommands": [],
+          "environment": {}
+        },
+        "build": {
+          "command": "./packaging/build-trellis-preview.ps1"
+        },
+        "stage": {
+          "command": "./packaging/stage-trellis-preview.ps1 -StageRoot dist/stage",
+          "outputRoot": "../dist/stage"
+        }
+      },
+      "launch": {
+        "entryRelativePath": "app/TrellisPreview.app/TrellisPreview.exe",
+        "workingDirectory": "app/TrellisPreview.app",
+        "arguments": [],
+        "pathPrepend": [
+          "runtime/bin"
+        ],
+        "env": null
+      },
+      "validation": {
+        "smoke": {
+          "requiredPaths": [
+            "metadata/licenses/adwaita-THIRD-PARTY-NOTICES.txt",
+            "metadata/licenses/trellis.txt"
+          ]
+        }
+      }
     }
   }
 }

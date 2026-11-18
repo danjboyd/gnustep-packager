@@ -1,0 +1,26 @@
+name: package-trellis-preview-msi
+
+on:
+  workflow_dispatch:
+
+jobs:
+  package:
+    # Scratch qualification: toolchain-variant needs packager PR 167
+    # (c821c98). A release recipe pins the packager tag that carries it.
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@c821c987fed84f98582399aecaa358d874edd354
+    with:
+      manifest-path: packaging/package.manifest.json
+      backend: msi
+      packager-ref: c821c987fed84f98582399aecaa358d874edd354
+      # gnustep-cli v0.1.9's patched Windows toolchain, the whole stack, never
+      # mixed with MSYS2's own gnustep packages (agreed with gnustep-cssbox
+      # and winuitheme).
+      toolchain-variant: patched
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.9/release-manifest.json
+      gnustep-cli-bootstrap-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.9/gnustep-bootstrap.sh
+      gnustep-cli-bootstrap-sha256: 3fca82d1b20f58af3bd97ef84c7991e8d0061be80eddc613d3b3b47c6e6a6895
+      gnustep-cli-bootstrap-ps1-sha256: 4d39c0e45c618dd38dad533bdc6decd9a4b4cbd92b913084b1d75043298e7bf7
+      run-validation: true
+      run-smoke: true
+      artifact-name: trellis-preview-msi
+      artifact-retention-days: 7
