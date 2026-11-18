@@ -207,6 +207,15 @@ candidate evidence. It is the handoff point for upstream issues because it
 records `windows-msys2-clang64`, `MSYSTEM=CLANG64`, path conversion output,
 command lookup, and the exact failed bootstrap command logs.
 
+When the packaging pipeline fails, the workflow puts the cause on the run page.
+It takes the newest log under `outputs.logRoot`, leaving out the gnustep-cli-new
+diagnostics, and writes three things:
+- the log's error lines and its last 40 lines, in the job summary;
+- each compiler error (`file:line:col: error: ...`) as an error annotation;
+- the log's path, so the full copy is easy to find in the `-logs` artifact.
+
+That step only reports. It never changes whether the job passes.
+
 ## Secrets
 Optional MSI signing secrets:
 
