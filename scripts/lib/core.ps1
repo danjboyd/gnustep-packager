@@ -2974,6 +2974,114 @@ function Test-GpToolchainPin {
 
 # The pinned toolchain, for the release's provenance: its name, lock hash
 # and the commits of its components, without the build machine's paths.
+# The GNUstep versions a gnustep-cli-new toolchain root carries, read from the
+# files GNUstep itself writes: GSConfig.h (base), GSVersion.h (gui),
+# config-noarch.make (make) and libobjc.pc (libobjc2). A source-built toolchain
+# also has component-inventory.json with each component's upstream commit, which
+# matters: the Linux v0.1.8 toolchain says base 1.31.1 but is built from
+# libs-base master, while Windows ships MSYS2's 1.31.1 release headers. Returns
+# $null when the root has no GNUstep headers.
+function Get-GpGnustepToolchainVersions {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Root
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Root) -or -not (Test-Path -LiteralPath $Root -PathType Container)) {
+    return $null
+  }
+  $rootFull = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
+  $wanted = @{
+    "GSConfig.h" = "base"
+    "GSVersion.h" = "gui"
+    "config-noarch.make" = "make"
+    "libobjc.pc" = "objc"
+  }
+  $found = @{}
+  foreach ($file in @(Get-ChildItem -LiteralPath $rootFull -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $wanted.ContainsKey($_.Name) })) {
+    $key = $wanted[$file.Name]
+    $path = $file.FullName -replace '\\', '/'
+    if ($key -eq "base" -and $path -notmatch '/GNUstepBase/GSConfig\.h$') { continue }
+    if ($key -eq "gui" -and $path -notmatch '/GNUstepGUI/GSVersion\.h$') { continue }
+    if ($key -eq "make" -and $path -notmatch '/Makefiles/config-noarch\.make$') { continue }
+    if ($key -eq "objc" -and $path -notmatch '/pkgconfig/libobjc\.pc$') { continue }
+    # A Windows root has both <root>/include and <root>/clang64/include; the
+    # CLANG64 prefix is the one `gnustep build` compiles against.
+    if (-not $found.ContainsKey($key) -or ($path -match '/clang64/' -and $found[$key] -notmatch '/clang64/')) {
+      $found[$key] = $file.FullName
+    }
+  }
+  if (-not $found.ContainsKey("base")) {
+    return $null
+  }
+
+  $patterns = @{
+    base = '^\s*#\s*define\s+GNUSTEP_BASE_VERSION\s+"?([0-9][0-9.]*)'
+    gui = '^\s*#\s*define\s+GNUSTEP_GUI_VERSION\s+"?([0-9][0-9.]*)'
+    make = '^\s*GNUSTEP_MAKE_VERSION\s*=\s*([0-9][0-9.]*)'
+    objc = '^\s*Version:\s*([0-9][0-9.]*)'
+  }
+  $versions = [ordered]@{ base = $null; gui = $null; make = $null; objc = $null }
+  foreach ($key in @("base", "gui", "make", "objc")) {
+    if ($found.ContainsKey($key)) {
+      foreach ($line in @(Get-Content -LiteralPath $found[$key])) {
+        if ($line -match $patterns[$key]) {
+          $versions[$key] = $Matches[1]
+          break
+        }
+      }
+    }
+  }
+
+  $sources = @()
+  $inventoryPath = Join-Path $rootFull "component-inventory.json"
+  if (Test-Path -LiteralPath $inventoryPath -PathType Leaf) {
+    try {
+      $inventory = Get-Content -Raw -LiteralPath $inventoryPath | ConvertFrom-Json
+      $sources = @(
+        foreach ($component in @($inventory.components)) {
+          if ($component.PSObject.Properties["name"] -and $component.PSObject.Properties["source_revision"]) {
+            [ordered]@{ name = [string]$component.name; revision = [string]$component.source_revision }
+          }
+        }
+      )
+    } catch {
+      $sources = @()
+    }
+  }
+
+  $baseHeaders = ($found["base"] -replace '\\', '/')
+  $relativeBase = $baseHeaders.Substring($rootFull.Length).TrimStart('/')
+  return [ordered]@{
+    base = $versions.base
+    gui = $versions.gui
+    make = $versions.make
+    objc = $versions.objc
+    headers = (Split-Path -Parent (Split-Path -Parent $relativeBase)) -replace '\\', '/'
+    builtFrom = $(if ($sources.Count -gt 0) { "source" } else { "packages" })
+    sources = $sources
+  }
+}
+
+function Format-GpGnustepToolchainVersions {
+  param([Parameter(Mandatory = $true)][System.Collections.IDictionary]$Versions)
+
+  $parts = @(
+    foreach ($key in @("base", "gui", "make", "objc")) {
+      $label = @{ base = "gnustep-base"; gui = "gnustep-gui"; make = "gnustep-make"; objc = "libobjc2" }[$key]
+      "{0} {1}" -f $label, $(if ($Versions[$key]) { $Versions[$key] } else { "?" })
+    }
+  )
+  $line = [string]::Join(", ", $parts)
+  $baseSource = @($Versions["sources"] | Where-Object { $_["name"] -eq "libs-base" }) | Select-Object -First 1
+  if ($baseSource) {
+    $line += " (built from source; libs-base {0})" -f $baseSource["revision"].Substring(0, [Math]::Min(10, $baseSource["revision"].Length))
+  } else {
+    $line += " (packaged release headers)"
+  }
+  return $line
+}
+
 function Get-GpToolchainProvenanceSummary {
   param(
     [Parameter(Mandatory = $true)]
@@ -3063,6 +3171,9 @@ function Write-GpProvenanceDocument {
     source = Get-GpSourceRevision -Path $Context.ManifestRoot
     packager = Get-GpSourceRevision -Path $Context.ToolRoot
     toolchain = Get-GpToolchainProvenanceSummary -Context $Context
+    # What the gnustep-cli-new toolchain the build ran against reports; null
+    # outside the reusable workflow's default host setup.
+    gnustepVersions = $(if (-not [string]::IsNullOrWhiteSpace($env:GP_GNUSTEP_CLI_ROOT)) { Get-GpGnustepToolchainVersions -Root $env:GP_GNUSTEP_CLI_ROOT } else { $null })
     files = @(if ($PSBoundParameters.ContainsKey("Files")) { $Files } else { Get-GpPayloadProvenanceFiles -PayloadRoot $PayloadRoot -LibraryPatterns $settings.Libraries -EntryPath $EntryPath })
   }
 
