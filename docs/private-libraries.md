@@ -111,6 +111,64 @@ The check follows the same rule.
 `tests/macos/DmgLibraryReferences.Tests.ps1` builds such a dylib and app and
 checks the bundled, build-path, missing-rpath and helper-executable cases.
 
+## Reading the warnings
+
+The three checks above warn by default, so a build that passed before still
+passes. Each warning names the file that loads the library, the library, and
+where it was found. Find them in the package log, inside the run's logs
+artifact; the AppImage and MSI ones also appear in the job output as
+`WARNING:` lines. Each one means the app works on the build machine but may
+not start elsewhere.
+
+**AppImage**
+
+```text
+Loader search path check (AppRun LD_LIBRARY_PATH: ...): 1 issue(s)
+WARNING library not on the runtime search path: usr/bin/Demo needs libTrellis.so.1, which is in the AppDir but not on its runtime search path (no RUNPATH or AppRun LD_LIBRARY_PATH entry reaches it)
+```
+
+`usr/bin/Demo` will ask the loader for `libTrellis.so.1`. The file is in the
+AppDir, but nothing the loader searches reaches its folder. On the build
+machine the library may also be installed system-wide, which is why the app
+still starts there. Fix it with a RUNPATH on `Demo`, or by adding the folder to
+`launch.env.LD_LIBRARY_PATH` (see [AppImage](#appimage)).
+
+**MSI**
+
+```text
+DLL search path check (...): 1 issue(s); warning only (...)
+WARNING app\Demo.app\Demo.exe imports Trellis.dll, which is only at app\Demo.app\Resources\Trellis.dll: not in its own folder, the app's folder, the working directory or the launcher's PATH
+```
+
+Windows won't look in `Resources`. Move the DLL to `runtime\bin` or next to
+`Demo.exe`, or add its folder to `launch.pathPrepend` (see [MSI](#msi)).
+
+**DMG**
+
+```text
+Library reference: Contents/MacOS/Demo loads /Users/runner/work/demo/build/libTrellis.dylib, which is outside the bundle and the system
+WARN    library-references: 1 reference(s) outside the bundle (works only where that path exists): ...
+```
+
+The executable records the build path. Change it to `@rpath/...` and bundle the
+dylib (see [DMG](#dmg)). "which doesn't resolve inside the bundle" means the
+reference is already `@rpath` or `@loader_path`, but no run path or folder in
+the bundle holds the library. Usually the `LC_RPATH` is missing, or the dylib
+wasn't copied into `Contents/Frameworks`.
+
+**After the fix,** rebuild and check that the count reads `0 issue(s)` (DMG:
+`PASS    library-references`). Then turn the check into a failure so it can't
+come back:
+
+| Installer | Setting |
+| --- | --- |
+| AppImage | `backends.appimage.validation.requireLoaderSearchPath: true` |
+| MSI | `backends.msi.validation.requireLoaderSearchPath: true` |
+| DMG | `backends.dmg.validation.requireBundledDependencies: true` |
+
+A warning about a library you didn't add, such as a GNUstep or toolchain
+library, is a packager bug. Report it with the log line.
+
 ## Notices
 
 A library you ship is a third-party component even when you wrote it. If its
