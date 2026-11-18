@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Added
+- Reusable workflow: a failed packaging pipeline now shows its cause on the run
+  page. The newest pipeline log's error lines and last 40 lines go into the job
+  summary, and compiler errors become file and line annotations. Before, the
+  cause was only in the logs artifact.
+- Reusable workflow (AppImage and MSI): a "Report GNUstep Toolchain Versions"
+  step prints the toolchain's gnustep-base, gnustep-gui, gnustep-make and
+  libobjc2 versions, and whether it was built from source or MSYS2 packages.
+  The provenance sidecar records them under `gnustepVersions`.
+  [docs/gnustep-cli-new-integration.md](docs/gnustep-cli-new-integration.md#what-each-toolchain-release-ships)
+  has a table for v0.1.7 and v0.1.8. Both report base 1.31.1, but Linux is
+  built from libs-base master, and Windows ships the 1.31.1 release headers.
+- docs/private-libraries.md: a "Reading the warnings" section. It shows a real
+  warning line from each installer's library check, says what it means and how
+  to fix it, and names the setting that makes the check fail once it's clean.
+- Reusable workflow (AppImage and MSI): warns before the bootstrap runs when
+  `gnustep-cli-manifest-url` and `gnustep-cli-bootstrap-url` come from
+  different gnustep-cli-new releases. For a `-dev` manifest, the warning says
+  that setup will be refused. The docs now show a matched v0.1.7 pin with its
+  digests.
+
 ### Changed
 - MSI, reusable workflow: the CLANG64 packages listed under
   `hostDependencies.windows.msys2Packages` now bring their CLANG64

@@ -94,6 +94,22 @@ on the default path, whatever packager release it uses. Drop the
 pin a stable release. To keep an old manifest, pin `gnustep-cli-bootstrap-url`
 and both digests to the same release.
 
+The reusable workflow checks this before the bootstrap runs. When the manifest
+and bootstrap URLs are GitHub release assets from different tags, the "Check
+gnustep-cli-new Pins" step raises a warning annotation, for example "gnustep-cli-manifest-url is from
+v0.1.0-dev but the bootstrap is from v0.1.8… setup will be refused". It
+doesn't fail the job. A stable pair can work, as in the table above, and a
+custom URL that isn't a release asset isn't checked.
+
+A matched pin for v0.1.7, with the digests of that release's scripts (computed 2026-11-17):
+
+```yaml
+gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/release-manifest.json
+gnustep-cli-bootstrap-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/gnustep-bootstrap.sh
+gnustep-cli-bootstrap-sha256: 1580d5ddcf774716bc2caa614cb4c217c19ead1645f4362f58ad12277345c961
+gnustep-cli-bootstrap-ps1-sha256: 867308a2c1c3febd9a7800564eb131a899db67c2ccc9c5d03d4b921c4b387420
+```
+
 When `skip-default-host-setup: false`, the workflow runs the bootstrap smoke
 before packaging for both supported backends.
 
@@ -213,3 +229,33 @@ used by the packager release. The current baseline is:
 ```text
 https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.8/release-manifest.json
 ```
+
+## What each toolchain release ships
+
+The GNUstep an app compiles against depends on the platform as well as the
+gnustep-cli-new release. The version number alone can mislead. Each Linux
+toolchain is built from upstream source at pinned commits, usually ahead of the
+last release. The Windows toolchain installs MSYS2's packaged release. Both can
+report the same gnustep-base version and still expose different API.
+
+Read from the published artifacts on 2026-11-17:
+
+| Release | Target | gnustep-base | gnustep-gui | gnustep-make | libobjc2 | Built from |
+| --- | --- | --- | --- | --- | --- | --- |
+| v0.1.7, v0.1.8 | `linux-amd64-clang` | 1.31.1 | 0.32.0 | 2.9.3 | 2.2.0 | source: libs-base `d898f703`, libs-gui `7892137b`, libs-back `bf3b3ced`, libobjc2 `b67709ad` |
+| v0.1.7, v0.1.8 | `windows-amd64-msys2-clang64` | 1.31.1 | 0.32.0 | 2.9.3 | 2.2.0 | MSYS2 CLANG64 packages (release headers) |
+
+The difference shows up as compile errors that happen only on Windows. For
+example, `+[NSData dataWithContentsOfFile:options:error:]` is declared in the
+Linux toolchain's headers (libs-base master) but not in the Windows ones
+(1.31.1). An app developed on Linux that calls it builds there and fails in the
+MSI build with "no known class method for selector". Until the two converge,
+code that has to build on Windows should stick to API that the 1.31.1 release
+headers declare.
+
+Each run also reports what it got. The reusable workflow's "Report GNUstep
+Toolchain Versions" step prints a line such as `gnustep-base 1.31.1,
+gnustep-gui 0.32.0, gnustep-make 2.9.3, libobjc2 2.2.0 (packaged release
+headers)` and adds it to the job summary. It writes
+`<logRoot>/gnustep-cli-new/toolchain-versions.json`, and the provenance sidecar
+records the same values under `gnustepVersions`.

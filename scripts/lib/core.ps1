@@ -988,6 +988,144 @@ function Install-GpMsys2PackageOverlay {
 # CLANG64 library such as libvterm was installed yet not found ("required
 # packages were not found: vterm"). Only CLANG64 packages are laid over the
 # toolchain; shell tools (make, curl) stay in the shell.
+# When the packaging pipeline fails, the cause is in a log under outputs.logRoot
+# that's only reachable by downloading the logs artifact. This picks the newest
+# pipeline log and pulls out what a reader needs on the run page: the error
+# lines, the last lines, and compiler errors as file/line annotations.
+function Get-GpFailureLogSummary {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$LogRoot,
+    [int]$TailLines = 40,
+    [int]$MaxErrorLines = 30
+  )
+
+  if (-not (Test-Path -LiteralPath $LogRoot)) {
+    return $null
+  }
+  # gnustep-cli-new keeps its own diagnostics, which have their own upload.
+  $log = Get-ChildItem -LiteralPath $LogRoot -Recurse -File -Filter "*.log" |
+    Where-Object { $_.FullName -notmatch '[\\/]gnustep-cli-new[\\/]' } |
+    Sort-Object LastWriteTimeUtc, FullName |
+    Select-Object -Last 1
+  if (-not $log) {
+    return $null
+  }
+
+  $ansi = [regex]'\x1b\[[0-9;]*[A-Za-z]'
+  $lines = @(Get-Content -LiteralPath $log.FullName | ForEach-Object { $ansi.Replace([string]$_, "").TrimEnd() })
+  $errorPattern = '(?i)(\b(fatal )?error\b\s*:|^\s*FAILED[:\s]|\*\*\* \[|\bnot found\b|^Exception:|\bthrow\b.*"|required packages were not found)'
+  $errorLines = [System.Collections.Generic.List[string]]::new()
+  foreach ($line in $lines) {
+    if ($line -match $errorPattern -and -not $errorLines.Contains($line)) {
+      $errorLines.Add($line) | Out-Null
+      if ($errorLines.Count -ge $MaxErrorLines) { break }
+    }
+  }
+
+  $compilerError = [regex]'^(?<file>[^\s:][^:]*?|[A-Za-z]:[\\/][^:]*?):(?<line>\d+):(?:(?<col>\d+):)?\s*(?:fatal )?error:\s*(?<message>.+)$'
+  $annotations = [System.Collections.Generic.List[object]]::new()
+  foreach ($line in $errorLines) {
+    $match = $compilerError.Match($line.Trim())
+    if ($match.Success) {
+      $annotations.Add([pscustomobject]@{
+        File = $match.Groups["file"].Value
+        Line = [int]$match.Groups["line"].Value
+        Column = if ($match.Groups["col"].Success) { [int]$match.Groups["col"].Value } else { 0 }
+        Message = $match.Groups["message"].Value
+      }) | Out-Null
+    }
+  }
+
+  $tailStart = [Math]::Max(0, $lines.Count - $TailLines)
+  return [pscustomobject]@{
+    LogPath = $log.FullName
+    ErrorLines = [string[]]$errorLines.ToArray()
+    TailLines = [string[]]@(if ($lines.Count -gt 0) { $lines[$tailStart..($lines.Count - 1)] })
+    Annotations = @($annotations.ToArray())
+  }
+}
+
+function Format-GpFailureSummaryMarkdown {
+  param(
+    [Parameter(Mandatory = $true)]
+    [object]$Summary,
+    [string]$StepName = "Run Packaging Pipeline"
+  )
+
+  $fence = '```'
+  $parts = [System.Collections.Generic.List[string]]::new()
+  $parts.Add("### $StepName failed") | Out-Null
+  $parts.Add("") | Out-Null
+  $parts.Add("Log: ``$($Summary.LogPath)`` (full copy in the logs artifact)") | Out-Null
+  if (@($Summary.ErrorLines).Count -gt 0) {
+    $parts.Add("") | Out-Null
+    $parts.Add("**Error lines**") | Out-Null
+    $parts.Add($fence + "text") | Out-Null
+    foreach ($line in $Summary.ErrorLines) { $parts.Add($line) | Out-Null }
+    $parts.Add($fence) | Out-Null
+  }
+  $parts.Add("") | Out-Null
+  $parts.Add("**Last $(@($Summary.TailLines).Count) lines**") | Out-Null
+  $parts.Add($fence + "text") | Out-Null
+  foreach ($line in $Summary.TailLines) { $parts.Add($line) | Out-Null }
+  $parts.Add($fence) | Out-Null
+  return [string]::Join("`n", $parts)
+}
+
+# GitHub workflow commands: ::error file=...,line=...::message
+function Format-GpFailureAnnotation {
+  param([Parameter(Mandatory = $true)][object]$Annotation)
+
+  $escapeData = { param($v) ([string]$v).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A') }
+  $escapeProperty = { param($v) (& $escapeData $v).Replace(':', '%3A').Replace(',', '%2C') }
+  $properties = "file=$(& $escapeProperty $Annotation.File),line=$($Annotation.Line)"
+  if ($Annotation.Column -gt 0) {
+    $properties += ",col=$($Annotation.Column)"
+  }
+  return "::error $properties::$(& $escapeData $Annotation.Message)"
+}
+
+# The gnustep-cli-new release a GitHub release-asset URL comes from:
+# .../releases/download/<tag>/<asset>. $null for any other URL.
+function Get-GpGnustepCliReleaseTag {
+  param([string]$Url)
+
+  if ([string]::IsNullOrWhiteSpace($Url)) {
+    return $null
+  }
+  if ($Url -match '/releases/download/(?<tag>[^/]+)/[^/]+$') {
+    return $Matches["tag"]
+  }
+  return $null
+}
+
+# A caller that pins gnustep-cli-manifest-url and leaves the bootstrap on the
+# packager's default runs one release's bootstrap against another's manifest.
+# That works between stable releases but not with a -dev manifest, whose
+# signature the tagged bootstraps don't trust. Returns the warning text, or
+# $null when both come from the same release or either isn't a release URL.
+function Get-GpGnustepCliPinWarning {
+  param(
+    [string]$ManifestUrl,
+    [string]$BootstrapUrl
+  )
+
+  $manifestTag = Get-GpGnustepCliReleaseTag -Url $ManifestUrl
+  $bootstrapTag = Get-GpGnustepCliReleaseTag -Url $BootstrapUrl
+  if (-not $manifestTag -or -not $bootstrapTag -or $manifestTag -eq $bootstrapTag) {
+    return $null
+  }
+  $message = "gnustep-cli-manifest-url is from $manifestTag but the bootstrap is from $bootstrapTag. "
+  if ($manifestTag -match '-dev$|-dev\b') {
+    $message += "A $manifestTag manifest is signed with the development key, which the $bootstrapTag bootstrap doesn't trust, so setup will be refused. "
+  } else {
+    $message += "Stable releases have worked across this gap (a v0.1.7 manifest with the v0.1.8 bootstrap), but the pair isn't tested together. "
+  }
+  $message += "Drop gnustep-cli-manifest-url to follow the packager's default, or pin gnustep-cli-bootstrap-url and both bootstrap digests to $manifestTag too."
+  return $message
+}
+
 # The "Depends On" names from `pacman -Qi` / `pacman -Si` output, without
 # version constraints. pacman wraps a long field onto indented lines.
 function ConvertFrom-GpPacmanInfoDepends {
@@ -2938,6 +3076,114 @@ function Test-GpToolchainPin {
 
 # The pinned toolchain, for the release's provenance: its name, lock hash
 # and the commits of its components, without the build machine's paths.
+# The GNUstep versions a gnustep-cli-new toolchain root carries, read from the
+# files GNUstep itself writes: GSConfig.h (base), GSVersion.h (gui),
+# config-noarch.make (make) and libobjc.pc (libobjc2). A source-built toolchain
+# also has component-inventory.json with each component's upstream commit, which
+# matters: the Linux v0.1.8 toolchain says base 1.31.1 but is built from
+# libs-base master, while Windows ships MSYS2's 1.31.1 release headers. Returns
+# $null when the root has no GNUstep headers.
+function Get-GpGnustepToolchainVersions {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Root
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Root) -or -not (Test-Path -LiteralPath $Root -PathType Container)) {
+    return $null
+  }
+  $rootFull = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
+  $wanted = @{
+    "GSConfig.h" = "base"
+    "GSVersion.h" = "gui"
+    "config-noarch.make" = "make"
+    "libobjc.pc" = "objc"
+  }
+  $found = @{}
+  foreach ($file in @(Get-ChildItem -LiteralPath $rootFull -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $wanted.ContainsKey($_.Name) })) {
+    $key = $wanted[$file.Name]
+    $path = $file.FullName -replace '\\', '/'
+    if ($key -eq "base" -and $path -notmatch '/GNUstepBase/GSConfig\.h$') { continue }
+    if ($key -eq "gui" -and $path -notmatch '/GNUstepGUI/GSVersion\.h$') { continue }
+    if ($key -eq "make" -and $path -notmatch '/Makefiles/config-noarch\.make$') { continue }
+    if ($key -eq "objc" -and $path -notmatch '/pkgconfig/libobjc\.pc$') { continue }
+    # A Windows root has both <root>/include and <root>/clang64/include; the
+    # CLANG64 prefix is the one `gnustep build` compiles against.
+    if (-not $found.ContainsKey($key) -or ($path -match '/clang64/' -and $found[$key] -notmatch '/clang64/')) {
+      $found[$key] = $file.FullName
+    }
+  }
+  if (-not $found.ContainsKey("base")) {
+    return $null
+  }
+
+  $patterns = @{
+    base = '^\s*#\s*define\s+GNUSTEP_BASE_VERSION\s+"?([0-9][0-9.]*)'
+    gui = '^\s*#\s*define\s+GNUSTEP_GUI_VERSION\s+"?([0-9][0-9.]*)'
+    make = '^\s*GNUSTEP_MAKE_VERSION\s*=\s*([0-9][0-9.]*)'
+    objc = '^\s*Version:\s*([0-9][0-9.]*)'
+  }
+  $versions = [ordered]@{ base = $null; gui = $null; make = $null; objc = $null }
+  foreach ($key in @("base", "gui", "make", "objc")) {
+    if ($found.ContainsKey($key)) {
+      foreach ($line in @(Get-Content -LiteralPath $found[$key])) {
+        if ($line -match $patterns[$key]) {
+          $versions[$key] = $Matches[1]
+          break
+        }
+      }
+    }
+  }
+
+  $sources = @()
+  $inventoryPath = Join-Path $rootFull "component-inventory.json"
+  if (Test-Path -LiteralPath $inventoryPath -PathType Leaf) {
+    try {
+      $inventory = Get-Content -Raw -LiteralPath $inventoryPath | ConvertFrom-Json
+      $sources = @(
+        foreach ($component in @($inventory.components)) {
+          if ($component.PSObject.Properties["name"] -and $component.PSObject.Properties["source_revision"]) {
+            [ordered]@{ name = [string]$component.name; revision = [string]$component.source_revision }
+          }
+        }
+      )
+    } catch {
+      $sources = @()
+    }
+  }
+
+  $baseHeaders = ($found["base"] -replace '\\', '/')
+  $relativeBase = $baseHeaders.Substring($rootFull.Length).TrimStart('/')
+  return [ordered]@{
+    base = $versions.base
+    gui = $versions.gui
+    make = $versions.make
+    objc = $versions.objc
+    headers = (Split-Path -Parent (Split-Path -Parent $relativeBase)) -replace '\\', '/'
+    builtFrom = $(if ($sources.Count -gt 0) { "source" } else { "packages" })
+    sources = $sources
+  }
+}
+
+function Format-GpGnustepToolchainVersions {
+  param([Parameter(Mandatory = $true)][System.Collections.IDictionary]$Versions)
+
+  $parts = @(
+    foreach ($key in @("base", "gui", "make", "objc")) {
+      $label = @{ base = "gnustep-base"; gui = "gnustep-gui"; make = "gnustep-make"; objc = "libobjc2" }[$key]
+      "{0} {1}" -f $label, $(if ($Versions[$key]) { $Versions[$key] } else { "?" })
+    }
+  )
+  $line = [string]::Join(", ", $parts)
+  $baseSource = @($Versions["sources"] | Where-Object { $_["name"] -eq "libs-base" }) | Select-Object -First 1
+  if ($baseSource) {
+    $line += " (built from source; libs-base {0})" -f $baseSource["revision"].Substring(0, [Math]::Min(10, $baseSource["revision"].Length))
+  } else {
+    $line += " (packaged release headers)"
+  }
+  return $line
+}
+
 function Get-GpToolchainProvenanceSummary {
   param(
     [Parameter(Mandatory = $true)]
@@ -3027,6 +3273,9 @@ function Write-GpProvenanceDocument {
     source = Get-GpSourceRevision -Path $Context.ManifestRoot
     packager = Get-GpSourceRevision -Path $Context.ToolRoot
     toolchain = Get-GpToolchainProvenanceSummary -Context $Context
+    # What the gnustep-cli-new toolchain the build ran against reports; null
+    # outside the reusable workflow's default host setup.
+    gnustepVersions = $(if (-not [string]::IsNullOrWhiteSpace($env:GP_GNUSTEP_CLI_ROOT)) { Get-GpGnustepToolchainVersions -Root $env:GP_GNUSTEP_CLI_ROOT } else { $null })
     files = @(if ($PSBoundParameters.ContainsKey("Files")) { $Files } else { Get-GpPayloadProvenanceFiles -PayloadRoot $PayloadRoot -LibraryPatterns $settings.Libraries -EntryPath $EntryPath })
   }
 
