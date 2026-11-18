@@ -1126,6 +1126,68 @@ function Get-GpGnustepCliPinWarning {
   return $message
 }
 
+# The "Depends On" names from `pacman -Qi` / `pacman -Si` output, without
+# version constraints. pacman wraps a long field onto indented lines.
+function ConvertFrom-GpPacmanInfoDepends {
+  param([string[]]$Lines)
+
+  $value = [System.Collections.Generic.List[string]]::new()
+  $inField = $false
+  foreach ($line in @($Lines)) {
+    if ($line -match '^Depends On\s*:\s*(.*)$') {
+      $inField = $true
+      $value.Add($Matches[1]) | Out-Null
+    } elseif ($inField -and $line -match '^\s+(\S.*)$' -and $line -notmatch '^\S') {
+      $value.Add($Matches[1]) | Out-Null
+    } elseif ($inField) {
+      break
+    }
+  }
+  $names = @(
+    foreach ($token in @(([string]::Join(" ", $value)) -split '\s+')) {
+      $name = ($token -replace '[<>=].*$', '').Trim()
+      if ($name -and $name -ne "None") { $name }
+    }
+  )
+  return [string[]]$names
+}
+
+# The listed CLANG64 packages plus the CLANG64 packages they depend on, each
+# with what pulled it in. GetDependencies is called with a package name and
+# returns its dependency names. Non-CLANG64 dependencies (MSYS shell packages)
+# are left out: the toolchain's runtime never loads them.
+function Resolve-GpMsys2PackageClosure {
+  param(
+    [string[]]$Packages,
+    [Parameter(Mandatory = $true)]
+    [scriptblock]$GetDependencies,
+    [int]$Limit = 200
+  )
+
+  $clang64 = "mingw-w64-clang-x86_64-*"
+  $result = [System.Collections.Generic.List[object]]::new()
+  $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $queue = [System.Collections.Generic.Queue[object]]::new()
+  foreach ($package in @($Packages | Where-Object { $_ -like $clang64 })) {
+    if ($seen.Add($package)) {
+      $queue.Enqueue([pscustomobject]@{ Name = $package; RequiredBy = $null })
+    }
+  }
+  while ($queue.Count -gt 0) {
+    $item = $queue.Dequeue()
+    $result.Add($item) | Out-Null
+    if ($result.Count -ge $Limit) {
+      throw "More than $Limit CLANG64 packages in the dependency closure of: $([string]::Join(', ', @($Packages)))."
+    }
+    foreach ($dependency in @(& $GetDependencies $item.Name)) {
+      if ($dependency -like $clang64 -and $seen.Add($dependency)) {
+        $queue.Enqueue([pscustomobject]@{ Name = $dependency; RequiredBy = $item.Name })
+      }
+    }
+  }
+  return @($result.ToArray())
+}
+
 function Get-GpMsys2ToolchainOverlayPackages {
   param([string[]]$Packages)
 

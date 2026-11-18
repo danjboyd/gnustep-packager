@@ -23,6 +23,15 @@
   that setup will be refused. The docs now show a matched v0.1.7 pin with its
   digests.
 
+### Changed
+- MSI, reusable workflow: the CLANG64 packages listed under
+  `hostDependencies.windows.msys2Packages` now bring their CLANG64
+  dependencies with them when they are laid over the gnustep-cli-new
+  toolchain, except any the toolchain already carries. Each one added is
+  logged with the package that needs it. In v0.1.13 only the named packages
+  were laid, so a library with its own dependencies needed each of them
+  listed.
+
 ## v0.1.13
 
 ### Upgrading
