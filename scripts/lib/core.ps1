@@ -914,7 +914,11 @@ function Install-GpMsys2PackageOverlay {
     # For hostDependencies libraries: the toolchain's own copy of a library its
     # GNUstep was built against must not be replaced by MSYS2's current one.
     # Carried packages (msys2-package-urls) replace on purpose, so they don't set it.
-    [switch]$SkipIfCarried
+    [switch]$SkipIfCarried,
+    # Paths under $Root, such as clang64/bin/gnustep-gui-0.dll, that this
+    # package must not replace: the files a gnustep-cli-new patch layer carries.
+    # A package that would overwrite one is refused before anything is copied.
+    [string[]]$ProtectedPaths = @()
   )
 
   $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-msys2-overlay-" + [guid]::NewGuid().ToString("N"))
@@ -946,6 +950,14 @@ function Install-GpMsys2PackageOverlay {
     $files = @(Get-ChildItem -LiteralPath $packagePrefix -Recurse -File | ForEach-Object {
       $_.FullName.Substring($packagePrefix.Length).TrimStart('\', '/')
     })
+    if (@($ProtectedPaths).Count -gt 0) {
+      $protected = @{}
+      foreach ($path in @($ProtectedPaths)) { $protected[(($path -replace '\\', '/').TrimStart('/')).ToLowerInvariant()] = $true }
+      $clashes = @($files | ForEach-Object { "$Prefix/" + ($_ -replace '\\', '/') } | Where-Object { $protected.ContainsKey($_.ToLowerInvariant()) })
+      if ($clashes.Count -gt 0) {
+        throw ("{0} would replace {1} file(s) the toolchain's patch layer carries: {2}. Drop it from msys2-package-urls, or use toolchain-variant: stock." -f [System.IO.Path]::GetFileName($PackagePath), $clashes.Count, [string]::Join(", ", $clashes))
+      }
+    }
     if ($SkipIfCarried) {
       $carried = @(foreach ($target in $targets) { foreach ($relative in $files) {
         if (Test-Path -LiteralPath (Join-Path $target $relative)) { Join-Path $target $relative }
@@ -3152,6 +3164,7 @@ function Get-GpGnustepToolchainVersions {
     }
   }
 
+  $variantInfo = Get-GpToolchainVariant -Root $rootFull
   $baseHeaders = ($found["base"] -replace '\\', '/')
   $relativeBase = $baseHeaders.Substring($rootFull.Length).TrimStart('/')
   return [ordered]@{
@@ -3162,6 +3175,8 @@ function Get-GpGnustepToolchainVersions {
     headers = (Split-Path -Parent (Split-Path -Parent $relativeBase)) -replace '\\', '/'
     builtFrom = $(if ($sources.Count -gt 0) { "source" } else { "packages" })
     sources = $sources
+    variant = $(if ($variantInfo) { $variantInfo.variant } else { "stock" })
+    patches = $(if ($variantInfo) { [string[]]$variantInfo.patches } else { [string[]]@() })
   }
 }
 
@@ -3181,7 +3196,91 @@ function Format-GpGnustepToolchainVersions {
   } else {
     $line += " (packaged release headers)"
   }
+  if ($Versions.Contains("variant") -and $Versions["variant"] -eq "patched") {
+    $line += "; patched variant: {0} carried patch(es)" -f @($Versions["patches"]).Count
+  }
   return $line
+}
+
+# The toolchain variant a gnustep-cli-new root was set up with. gnustep-cli-new
+# v0.1.9 and later can lay a "patch layer" of carried GNUstep fixes over the
+# Windows toolchain (`gnustep setup --variant patched`). The install records it
+# in state/cli-state.json: toolchain_variant ("stock" or "patched"; absent on
+# installs from before v0.1.9, which are stock) and carry_layer (release, sha256
+# and patch ids, or null). The layer's own manifest, <root>/carry-layer.json,
+# lists the files it replaced. Returns $null when the root has no state file.
+function Get-GpToolchainVariant {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Root
+  )
+
+  $statePath = Join-Path (Join-Path $Root "state") "cli-state.json"
+  if ([string]::IsNullOrWhiteSpace($Root) -or -not (Test-Path -LiteralPath $statePath -PathType Leaf)) {
+    return $null
+  }
+  $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+  $variant = "stock"
+  if ($state.PSObject.Properties["toolchain_variant"] -and -not [string]::IsNullOrWhiteSpace([string]$state.toolchain_variant)) {
+    $variant = [string]$state.toolchain_variant
+  }
+  $release = $null
+  $sha256 = $null
+  $patches = @()
+  if ($state.PSObject.Properties["carry_layer"] -and $null -ne $state.carry_layer) {
+    $layer = $state.carry_layer
+    if ($layer.PSObject.Properties["release"]) { $release = [string]$layer.release }
+    if ($layer.PSObject.Properties["sha256"]) { $sha256 = [string]$layer.sha256 }
+    if ($layer.PSObject.Properties["patches"]) { $patches = @($layer.patches | ForEach-Object { [string]$_ }) }
+  }
+  $carriedFiles = @()
+  $layerPath = Join-Path $Root "carry-layer.json"
+  if (Test-Path -LiteralPath $layerPath -PathType Leaf) {
+    $layerManifest = Get-Content -Raw -LiteralPath $layerPath | ConvertFrom-Json
+    if ($layerManifest.PSObject.Properties["files"]) {
+      $carriedFiles = @($layerManifest.files | ForEach-Object { ([string]$_.path) -replace '\\', '/' })
+    }
+  }
+  return [ordered]@{
+    variant = $variant
+    carryLayerRelease = $release
+    carryLayerSha256 = $sha256
+    patches = [string[]]$patches
+    carriedFiles = [string[]]$carriedFiles
+  }
+}
+
+# Checks the reusable workflow's toolchain-variant input before setup runs.
+# Returns $null when the request is fine, else the reason it can't work:
+# an unknown value, `patched` on a backend whose toolchain has no patch layer
+# (only Windows has one), or `patched` with a stable gnustep-cli-new manifest
+# older than v0.1.9, which has no layer. A manifest URL that isn't a release
+# asset (a mirror, a -dev build) isn't judged; setup reports it.
+function Get-GpToolchainVariantProblem {
+  param(
+    [string]$Variant,
+    [string]$Backend,
+    [string]$ManifestUrl
+  )
+
+  $value = if ([string]::IsNullOrWhiteSpace($Variant)) { "stock" } else { $Variant.Trim() }
+  if ($value -notin @("stock", "patched")) {
+    return "toolchain-variant must be 'stock' or 'patched', not '$value'."
+  }
+  if ($value -eq "stock") {
+    return $null
+  }
+  if ($Backend -ne "msi") {
+    return "toolchain-variant 'patched' needs the MSI backend: gnustep-cli-new has a patch layer only for its Windows toolchain, so the $Backend toolchain is always stock."
+  }
+  $tag = Get-GpGnustepCliReleaseTag -Url $ManifestUrl
+  if ($tag -and $tag -match '^v(\d+)\.(\d+)\.(\d+)$') {
+    $version = [version]::new([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+    if ($version -lt [version]::new(0, 1, 9)) {
+      return "toolchain-variant 'patched' needs gnustep-cli-new v0.1.9 or later, but gnustep-cli-manifest-url is $tag, which has no patch layer. Pin the v0.1.9 manifest, bootstrap URL and digests (docs/gnustep-cli-new-integration.md)."
+    }
+  }
+  return $null
 }
 
 function Get-GpToolchainProvenanceSummary {

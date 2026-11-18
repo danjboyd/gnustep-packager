@@ -86,6 +86,13 @@ on:
         required: false
         type: string
         default: "4bd3e6bf4e9e21688424a776bd35dd29d9bca2dd66697354d2ffaf7ef1769975"
+      # "stock" or "patched". patched lays gnustep-cli-new's patch layer (carried
+      # GNUstep fixes) over the Windows toolchain: MSI only, and it needs a
+      # gnustep-cli-new v0.1.9 or later manifest and bootstrap.
+      toolchain-variant:
+        required: false
+        type: string
+        default: "stock"
       gnustep-cli-root:
         required: false
         type: string
@@ -318,6 +325,11 @@ jobs:
         shell: pwsh
         run: |
           . (Join-Path $env:GITHUB_WORKSPACE '.gnustep-packager-toolkit/scripts/lib/core.ps1')
+          $variantProblem = Get-GpToolchainVariantProblem -Variant '${{ inputs.toolchain-variant }}' -Backend '${{ inputs.backend }}' -ManifestUrl '${{ inputs.gnustep-cli-manifest-url }}'
+          if ($variantProblem) {
+            Write-Host "::error title=toolchain-variant::$variantProblem"
+            exit 1
+          }
           $warning = Get-GpGnustepCliPinWarning -ManifestUrl '${{ inputs.gnustep-cli-manifest-url }}' -BootstrapUrl '${{ inputs.gnustep-cli-bootstrap-url }}'
           if ($warning) {
             Write-Host "::warning title=gnustep-cli-new pins differ::$warning"
@@ -357,6 +369,7 @@ jobs:
           GP_GNUSTEP_CLI_LOG_ROOT: ${{ steps.manifest.outputs.log_root }}\gnustep-cli-new
           GP_GNUSTEP_CLI_SMOKE_ROOT: ${{ runner.temp }}\gnustep-cli-new-smoke
           GP_GNUSTEP_CLI_HOST_KIND: windows-msys2-clang64
+          GP_TOOLCHAIN_VARIANT: ${{ inputs.toolchain-variant }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -558,7 +571,7 @@ jobs:
             Invoke-LoggedProcess `
               -LogPath (Join-Path $env:GP_GNUSTEP_CLI_LOG_ROOT "gnustep-cli-new-setup.log") `
               -FilePath "pwsh" `
-              -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $bootstrapPath, "--json", "--yes", "setup", "--user", "--root", $env:GP_GNUSTEP_CLI_ROOT, "--manifest", $env:GP_GNUSTEP_CLI_MANIFEST_URL) `
+              -ArgumentList (@("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $bootstrapPath, "--json", "--yes", "setup", "--user", "--root", $env:GP_GNUSTEP_CLI_ROOT, "--manifest", $env:GP_GNUSTEP_CLI_MANIFEST_URL) + $(if ($env:GP_TOOLCHAIN_VARIANT -eq "patched") { @("--variant", "patched") } else { @() })) `
               -TimeoutSeconds 1200
 
             $toolPaths = @(
@@ -623,6 +636,21 @@ jobs:
           "GP_GNUSTEP_CLI_ROOT=$env:GP_GNUSTEP_CLI_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "GP_GNUSTEP_CLI_MANIFEST_URL=$env:GP_GNUSTEP_CLI_MANIFEST_URL" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Check Toolchain Variant
+        if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup && inputs.toolchain-variant == 'patched' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          . (Join-Path $env:GITHUB_WORKSPACE '.gnustep-packager-toolkit\scripts\lib\core.ps1')
+          $info = Get-GpToolchainVariant -Root $env:GP_GNUSTEP_CLI_ROOT
+          if ($null -eq $info -or $info.variant -ne "patched") {
+            $found = if ($null -eq $info) { "no state/cli-state.json" } else { "variant '$($info.variant)'" }
+            Write-Host "::error title=toolchain-variant::toolchain-variant is 'patched', but the toolchain at $env:GP_GNUSTEP_CLI_ROOT reports $found after setup."
+            exit 1
+          }
+          Write-Host ("Toolchain variant: patched (carry layer {0}, {1} patch(es), {2} carried file(s))" -f $info.carryLayerRelease, @($info.patches).Count, @($info.carriedFiles).Count)
+          @($info.patches) | ForEach-Object { Write-Host "  patch: $_" }
 
       - name: Lay Manifest MSYS2 Libraries Over The Toolchain
         if: ${{ inputs.backend == 'msi' && !inputs.skip-default-host-setup && steps.manifest.outputs.manifest_msys2_packages != '' }}
@@ -708,7 +736,9 @@ jobs:
 
             # The gnustep-cli-new toolchain: the runtime the MSI stages.
             if (-not [string]::IsNullOrWhiteSpace($env:GP_GNUSTEP_CLI_ROOT) -and (Test-Path -LiteralPath $env:GP_GNUSTEP_CLI_ROOT)) {
-              $overlay = Install-GpMsys2PackageOverlay -PackagePath $package -Root $env:GP_GNUSTEP_CLI_ROOT -TarPath $tar
+              $variantInfo = Get-GpToolchainVariant -Root $env:GP_GNUSTEP_CLI_ROOT
+              $protectedPaths = if ($variantInfo -and $variantInfo.variant -eq "patched") { [string[]]$variantInfo.carriedFiles } else { [string[]]@() }
+              $overlay = Install-GpMsys2PackageOverlay -PackagePath $package -Root $env:GP_GNUSTEP_CLI_ROOT -TarPath $tar -ProtectedPaths $protectedPaths
               Write-Host "Laid $(@($overlay.Files).Count) files from $([System.IO.Path]::GetFileName($package)) over: $([string]::Join(', ', @($overlay.Targets)))"
             }
           }

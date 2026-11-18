@@ -67,11 +67,55 @@ under `GP_GNUSTEP_CLI_LOG_ROOT`.
 - `gnustep-cli-bootstrap-url`
 - `gnustep-cli-bootstrap-sha256` and `gnustep-cli-bootstrap-ps1-sha256`
 - `gnustep-cli-root`
+- `toolchain-variant`: `stock` (the default) or `patched`
 
 Use these inputs to test a newly published upstream manifest or bootstrap
 change without editing packager backend code. The downloaded bootstrap script
 must match its digest input before it runs; an overridden bootstrap URL needs
 its own digest, or an empty one to skip the check.
+
+### The patched Windows toolchain (`toolchain-variant`)
+
+gnustep-cli-new v0.1.9 and later publish a *patch layer* for the Windows
+toolchain: rebuilt copies of four files (the gnustep-base and gnustep-gui DLLs,
+`gpbs.exe` and the back bundle's DLL) carrying GNUstep fixes that aren't in the
+MSYS2 release yet. v0.1.9's layer has 18 patches: win32 DPI, window sizing and
+pasteboard images, Cairo hinting, theme switching, and a base hashing fix.
+`gnustep setup --variant patched` lays it, and the install records the variant
+in `state/cli-state.json`.
+
+`toolchain-variant: patched` asks the MSI path for that toolchain:
+
+```yaml
+jobs:
+  msi:
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@v0.1.14
+    with:
+      manifest-path: package.manifest.json
+      backend: msi
+      toolchain-variant: patched
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.9/release-manifest.json
+      gnustep-cli-bootstrap-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.9/gnustep-bootstrap.sh
+      gnustep-cli-bootstrap-sha256: 3fca82d1b20f58af3bd97ef84c7991e8d0061be80eddc613d3b3b47c6e6a6895
+      gnustep-cli-bootstrap-ps1-sha256: 4d39c0e45c618dd38dad533bdc6decd9a4b4cbd92b913084b1d75043298e7bf7
+```
+
+(Use the packager release that first carries `toolchain-variant` in place of
+`@v0.1.14`.)
+
+- **MSI only.** gnustep-cli-new has no layer for Linux or macOS, so `patched`
+  with `appimage` or `dmg` fails before setup.
+- **Needs v0.1.9 or later.** The packager's default pin is still v0.1.8,
+  which has no layer, so pin the v0.1.9 manifest and bootstrap as above. A
+  release-asset manifest older than v0.1.9 fails before setup.
+- **Checked after setup.** If the toolchain doesn't report `patched`, the run
+  fails rather than package a stock toolchain under a patched name. The log
+  lists the layer's release and each patch id. The "Report GNUstep Toolchain
+  Versions" line ends with "patched variant: N carried patch(es)", and the
+  provenance sidecar's `gnustepVersions` gains `variant` and `patches`.
+- **Carried files are protected.** A package in `msys2-package-urls` that
+  would replace one of the layer's files is refused with the clashing paths.
+  Laying MSYS2's own build over a patched DLL would quietly undo the patches.
 
 ### Pinning only the manifest
 
