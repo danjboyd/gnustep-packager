@@ -833,6 +833,7 @@ jobs:
           fi
 
       - name: Run Packaging Pipeline
+        id: pipeline
         run: |
           $toolRoot = Join-Path $env:GITHUB_WORKSPACE ".gnustep-packager-toolkit"
           $manifestPath = [System.IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '${{ inputs.manifest-path }}'))
@@ -857,6 +858,27 @@ jobs:
             throw "packaging pipeline entrypoint not found at $pipelineScript"
           }
           & $pipelineScript @parameters
+
+      # The cause of a failed build or stage is in a log that's otherwise only
+      # reachable through the logs artifact. Put it on the run page.
+      - name: Summarize Packaging Failure
+        if: ${{ failure() && steps.pipeline.outcome == 'failure' }}
+        continue-on-error: true
+        run: |
+          $toolRoot = Join-Path $env:GITHUB_WORKSPACE ".gnustep-packager-toolkit"
+          . ([System.IO.Path]::GetFullPath((Join-Path $toolRoot 'scripts\lib\core.ps1')))
+          $summary = Get-GpFailureLogSummary -LogRoot '${{ steps.manifest.outputs.log_root }}'
+          if (-not $summary) {
+            Write-Host "No pipeline log under ${{ steps.manifest.outputs.log_root }}."
+            exit 0
+          }
+          foreach ($annotation in @($summary.Annotations)) {
+            Write-Host (Format-GpFailureAnnotation -Annotation $annotation)
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_STEP_SUMMARY)) {
+            Format-GpFailureSummaryMarkdown -Summary $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+          Write-Host "Summarized $($summary.LogPath)"
 
       - name: Smoke Test AppImage On A Clean Host
         if: ${{ inputs.backend == 'appimage' && inputs.appimage-clean-smoke-image != '' }}

@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Reusable workflow: a failed packaging pipeline now shows its cause on the run
+  page. The newest pipeline log's error lines and last 40 lines go into the job
+  summary, and compiler errors become file and line annotations. Before, the
+  cause was only in the logs artifact.
 - Reusable workflow (AppImage and MSI): a "Report GNUstep Toolchain Versions"
   step prints the toolchain's gnustep-base, gnustep-gui, gnustep-make and
   libobjc2 versions, and whether it was built from source or MSYS2 packages.
