@@ -109,6 +109,10 @@ Set-Content -Path (Join-Path $runtimeBin "GNUstep.conf") -Encoding ascii -Value 
   "GNUSTEP_LOCAL_TOOLS=../System/Tools"
 )
 
+# A sample screen to open: with no file, TrellisPreview starts in a modal
+# Open panel, which a launch check can't tell from a hang.
+New-Item -ItemType Directory -Force -Path (Join-Path $stage "metadata\samples") | Out-Null
+Copy-Item -Path "Examples\TrellisDemo\Settings.trellis", "Examples\TrellisDemo\Settings.sample.json" -Destination (Join-Path $stage "metadata\samples")
 Copy-Item -Path "COPYING.LIB" -Destination (Join-Path $stage "metadata\licenses\trellis.txt")
 # Adwaita's own licence and third-party notices (some of its icons are GNOME's,
 # under LGPL-3 or CC-BY-SA), from the commit themeInputs pins.

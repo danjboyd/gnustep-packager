@@ -83,7 +83,8 @@
         "metadata/icons/TrellisPreview.png",
         "runtime/lib/libTrellis.so.0",
         "runtime/lib/libTrellisEngine.so.0",
-        "metadata/licenses/adwaita-THIRD-PARTY-NOTICES.txt"
+        "metadata/licenses/adwaita-THIRD-PARTY-NOTICES.txt",
+        "metadata/samples/Settings.trellis"
       ],
       "timeoutSeconds": 30
     },
@@ -137,7 +138,8 @@
         "systemRoot": "runtime/System"
       },
       "smoke": {
-        "mode": "launch-only"
+        "mode": "open-file",
+        "documentStageRelativePath": "metadata/samples/Settings.trellis"
       },
       "fonts": {
         "bundle": [
@@ -196,7 +198,8 @@
         "smoke": {
           "requiredPaths": [
             "metadata/licenses/adwaita-THIRD-PARTY-NOTICES.txt",
-            "metadata/licenses/trellis.txt"
+            "metadata/licenses/trellis.txt",
+            "metadata/samples/Settings.trellis"
           ]
         }
       }

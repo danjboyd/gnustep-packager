@@ -91,6 +91,11 @@ else
   fi
   convert "$(largest_page "$gnustep_icon")" -resize 256x256 "$stage_root/metadata/icons/TrellisPreview.png"
 fi
+# A sample screen for the smoke launch to open: with no file, TrellisPreview
+# starts in a modal Open panel, which a launch check can't tell from a hang.
+mkdir -p "$stage_root/metadata/samples"
+cp Examples/TrellisDemo/Settings.trellis Examples/TrellisDemo/Settings.sample.json "$stage_root/metadata/samples/"
+
 cp COPYING.LIB "$stage_root/metadata/licenses/trellis.txt"
 # The GNUstep runtime is LGPL-2.1-or-later too: the same licence text.
 cp COPYING.LIB "$stage_root/metadata/licenses/gnustep-runtime.txt"
