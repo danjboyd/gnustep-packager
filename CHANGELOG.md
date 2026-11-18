@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+- docs/private-libraries.md: a "Reading the warnings" section. It shows a real
+  warning line from each installer's library check, says what it means and how
+  to fix it, and names the setting that makes the check fail once it's clean.
+
 ## v0.1.13
 
 ### Upgrading
