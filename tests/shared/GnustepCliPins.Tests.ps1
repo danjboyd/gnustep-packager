@@ -48,7 +48,10 @@ Describe "gnustep-cli-new pin check" {
     $check = $workflow.IndexOf("- name: Check gnustep-cli-new Pins")
     $check | Should -BeGreaterThan 0
     $check | Should -BeLessThan $workflow.IndexOf("- name: Bootstrap And Smoke Test gnustep-cli-new For MSI")
-    $check | Should -BeLessThan $workflow.IndexOf("- name: Bootstrap And Smoke Test gnustep-cli-new`n")
+    # Match the Linux step's name line whatever the checkout's line endings.
+    $linuxBootstrap = [regex]::Match($workflow, '(?m)^\s*- name: Bootstrap And Smoke Test gnustep-cli-new\r?$')
+    $linuxBootstrap.Success | Should -BeTrue
+    $check | Should -BeLessThan $linuxBootstrap.Index
     $workflow | Should -Match "::warning title=gnustep-cli-new pins differ::"
   }
 }
