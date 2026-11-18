@@ -18,7 +18,8 @@
   built with `gnustep build` runs in the toolchain's own MSYS2 runtime and
   couldn't find them: SpreadsheetApp stopped at "required packages were not
   found: vterm" with libvterm installed. Each named `mingw-w64-clang-x86_64-*`
-  package (not its dependencies) is now laid over the toolchain after setup.
+  package is now laid over the toolchain after setup, with the CLANG64
+  packages it depends on, except any the toolchain already carries.
 
 ### Added
 - The MSI package log now says which domain the packaged defaults go to, and

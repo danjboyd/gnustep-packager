@@ -97,11 +97,13 @@ validation before MSI packaging. After setup, each CLANG64 package among them
 toolchain. An app built with `gnustep build` runs inside the toolchain's own
 MSYS2 runtime, whose pkg-config searches only the toolchain, and the MSI stages
 that runtime. Without the overlay, such a library was installed but not found.
-Only the named package is laid over the toolchain, not its dependencies, so
-list each library the build needs. A package the toolchain already carries
-(any of its files is there) is left alone, because the toolchain's GNUstep was
-built against its own copy. Only x86_64 CLANG64 packages qualify, matching the
-toolchain. Shell tools such as `make` stay in the
+Each named package is laid over the toolchain together with the CLANG64
+packages it depends on. The list comes from `pacman -Qi` in the bootstrap shell,
+where setup-msys2 already installed them, and each one is logged with the
+package that needed it. A package the toolchain already carries (any of its
+files is there) is left alone, because the toolchain's GNUstep was built against
+its own copy. That usually covers the C++ runtime and other common libraries.
+Only x86_64 CLANG64 packages qualify, matching the toolchain. Shell tools such as `make` stay in the
 bootstrap shell. The `msys2-packages` input remains available as
 an additive override or temporary escape hatch while default host setup is
 enabled.

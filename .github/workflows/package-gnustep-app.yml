@@ -621,7 +621,8 @@ jobs:
           # setup-msys2 installed these into the bootstrap shell. `gnustep build`
           # runs inside the toolchain's own MSYS2 runtime, which neither sees the
           # shell's pkg-config files nor stages its DLLs, so lay each CLANG64
-          # package over the toolchain too (only the package, not its dependencies).
+          # package, and the CLANG64 packages it depends on, over the toolchain
+          # too. Any the toolchain already carries are left alone below.
           $packages = @(Get-GpMsys2ToolchainOverlayPackages -Packages @($env:GP_MANIFEST_MSYS2_PACKAGES -split '\s+' | Where-Object { $_ }))
           if ($packages.Count -eq 0) {
             Write-Host "No CLANG64 packages in hostDependencies.windows.msys2Packages; nothing to lay over the toolchain."
@@ -634,7 +635,20 @@ jobs:
           $bash = Join-Path $msysRoot 'usr\bin\bash.exe'
           $tar = Join-Path $msysRoot 'usr\bin\tar.exe'
           $env:MSYSTEM = 'CLANG64'
-          foreach ($name in $packages) {
+          # setup-msys2 installed the listed packages and their dependencies,
+          # so the shell's local database knows the whole closure.
+          $closure = @(Resolve-GpMsys2PackageClosure -Packages $packages -GetDependencies {
+            param($packageName)
+            $info = @(& $bash -lc "pacman -Qi '$packageName' 2>/dev/null")
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::warning title=MSYS2 dependency not resolved::pacman -Qi found no installed package named $packageName; its dependencies aren't laid over the toolchain."
+              return @()
+            }
+            ConvertFrom-GpPacmanInfoDepends -Lines $info
+          })
+          foreach ($entry in $closure) {
+            $name = $entry.Name
+            $why = if ($entry.RequiredBy) { " (needed by $($entry.RequiredBy))" } else { "" }
             # The package file setup-msys2 installed, from pacman's cache
             # (downloaded again if the cache was cleaned).
             $path = (& $bash -lc "pacman -Sp --noconfirm '$name' | tail -n 1").Trim()
@@ -646,9 +660,9 @@ jobs:
             if (-not (Test-Path -LiteralPath $file)) { throw "No package file for $name at $file." }
             $overlay = Install-GpMsys2PackageOverlay -PackagePath $file -Root $env:GP_GNUSTEP_CLI_ROOT -TarPath $tar -SkipIfCarried
             if ($overlay.Skipped) {
-              Write-Host "Left $name out: the toolchain already carries it (for example $(@($overlay.CarriedFiles)[0])), and its GNUstep was built against that copy."
+              Write-Host "Left $name$why out: the toolchain already carries it (for example $(@($overlay.CarriedFiles)[0])), and its GNUstep was built against that copy."
             } else {
-              Write-Host "Laid $(@($overlay.Files).Count) files from $name over: $([string]::Join(', ', @($overlay.Targets)))"
+              Write-Host "Laid $(@($overlay.Files).Count) files from $name$why over: $([string]::Join(', ', @($overlay.Targets)))"
             }
           }
 
