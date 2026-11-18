@@ -1086,6 +1086,46 @@ function Format-GpFailureAnnotation {
   return "::error $properties::$(& $escapeData $Annotation.Message)"
 }
 
+# The gnustep-cli-new release a GitHub release-asset URL comes from:
+# .../releases/download/<tag>/<asset>. $null for any other URL.
+function Get-GpGnustepCliReleaseTag {
+  param([string]$Url)
+
+  if ([string]::IsNullOrWhiteSpace($Url)) {
+    return $null
+  }
+  if ($Url -match '/releases/download/(?<tag>[^/]+)/[^/]+$') {
+    return $Matches["tag"]
+  }
+  return $null
+}
+
+# A caller that pins gnustep-cli-manifest-url and leaves the bootstrap on the
+# packager's default runs one release's bootstrap against another's manifest.
+# That works between stable releases but not with a -dev manifest, whose
+# signature the tagged bootstraps don't trust. Returns the warning text, or
+# $null when both come from the same release or either isn't a release URL.
+function Get-GpGnustepCliPinWarning {
+  param(
+    [string]$ManifestUrl,
+    [string]$BootstrapUrl
+  )
+
+  $manifestTag = Get-GpGnustepCliReleaseTag -Url $ManifestUrl
+  $bootstrapTag = Get-GpGnustepCliReleaseTag -Url $BootstrapUrl
+  if (-not $manifestTag -or -not $bootstrapTag -or $manifestTag -eq $bootstrapTag) {
+    return $null
+  }
+  $message = "gnustep-cli-manifest-url is from $manifestTag but the bootstrap is from $bootstrapTag. "
+  if ($manifestTag -match '-dev$|-dev\b') {
+    $message += "A $manifestTag manifest is signed with the development key, which the $bootstrapTag bootstrap doesn't trust, so setup will be refused. "
+  } else {
+    $message += "Stable releases have worked across this gap (a v0.1.7 manifest with the v0.1.8 bootstrap), but the pair isn't tested together. "
+  }
+  $message += "Drop gnustep-cli-manifest-url to follow the packager's default, or pin gnustep-cli-bootstrap-url and both bootstrap digests to $manifestTag too."
+  return $message
+}
+
 function Get-GpMsys2ToolchainOverlayPackages {
   param([string[]]$Packages)
 

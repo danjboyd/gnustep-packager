@@ -17,6 +17,11 @@
 - docs/private-libraries.md: a "Reading the warnings" section. It shows a real
   warning line from each installer's library check, says what it means and how
   to fix it, and names the setting that makes the check fail once it's clean.
+- Reusable workflow (AppImage and MSI): warns before the bootstrap runs when
+  `gnustep-cli-manifest-url` and `gnustep-cli-bootstrap-url` come from
+  different gnustep-cli-new releases. For a `-dev` manifest, the warning says
+  that setup will be refused. The docs now show a matched v0.1.7 pin with its
+  digests.
 
 ## v0.1.13
 
