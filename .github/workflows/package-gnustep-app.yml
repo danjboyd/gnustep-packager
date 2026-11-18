@@ -731,6 +731,29 @@ jobs:
             echo "GP_GNUSTEP_CLI_MANIFEST_URL=${GP_GNUSTEP_CLI_MANIFEST_URL}"
           } >> "$GITHUB_ENV"
 
+      # Which GNUstep the app will compile against. The number alone can
+      # mislead: Linux toolchains are built from upstream master, Windows ships
+      # MSYS2's release headers, and both may say the same base version.
+      - name: Report GNUstep Toolchain Versions
+        if: ${{ inputs.backend != 'dmg' && !inputs.skip-default-host-setup }}
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          . (Join-Path $env:GITHUB_WORKSPACE '.gnustep-packager-toolkit/scripts/lib/core.ps1')
+          $versions = Get-GpGnustepToolchainVersions -Root $env:GP_GNUSTEP_CLI_ROOT
+          if (-not $versions) {
+            Write-Host "No GNUstep headers under '$env:GP_GNUSTEP_CLI_ROOT'; versions not reported."
+            exit 0
+          }
+          $line = Format-GpGnustepToolchainVersions -Versions $versions
+          Write-Host "Toolchain: $line"
+          $logDir = Join-Path '${{ steps.manifest.outputs.log_root }}' 'gnustep-cli-new'
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+          $versions | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $logDir 'toolchain-versions.json') -Encoding utf8
+          if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_STEP_SUMMARY)) {
+            "**GNUstep toolchain:** $line" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
       - name: Run Caller Preflight (pwsh)
         if: ${{ inputs.preflight-command != '' && inputs.preflight-shell == 'pwsh' }}
         shell: pwsh
