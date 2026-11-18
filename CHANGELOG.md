@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+- MSI, reusable workflow: the CLANG64 packages listed under
+  `hostDependencies.windows.msys2Packages` now bring their CLANG64
+  dependencies with them when they are laid over the gnustep-cli-new
+  toolchain, except any the toolchain already carries. Each one added is
+  logged with the package that needs it. In v0.1.13 only the named packages
+  were laid, so a library with its own dependencies needed each of them
+  listed.
+
 ## v0.1.13
 
 ### Upgrading
@@ -27,8 +36,7 @@ stays gnustep-cli-new v0.1.8. Then:
   built with `gnustep build` runs in the toolchain's own MSYS2 runtime and
   couldn't find them: SpreadsheetApp stopped at "required packages were not
   found: vterm" with libvterm installed. Each named `mingw-w64-clang-x86_64-*`
-  package is now laid over the toolchain after setup, with the CLANG64
-  packages it depends on, except any the toolchain already carries.
+  package (not its dependencies) is now laid over the toolchain after setup.
 
 ### Added
 - The MSI package log now says which domain the packaged defaults go to, and
