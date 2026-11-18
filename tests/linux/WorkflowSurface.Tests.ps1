@@ -17,7 +17,8 @@ Describe "Reusable workflow surface" {
     $script:downstreamReleaseText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/package-release-with-updates.yml")
     $script:downstreamGuiTemplateText = Get-Content -Raw -Path (Join-Path $script:repoRoot "examples/downstream/manifest-gnustep-gui.template.json")
     $script:gnustepCliSmokeText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/ci/gnustep-cli-new-bootstrap-smoke.sh")
-    $script:coreText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/lib/core.ps1")
+    # core.ps1 and the libraries it dot-sources, such as host-setup.ps1.
+    $script:coreText = (Get-ChildItem -Path (Join-Path $script:repoRoot "scripts/lib") -Filter "*.ps1" | Sort-Object Name | ForEach-Object { Get-Content -Raw -Path $_.FullName }) -join "`n"
     $script:otvmRemoteText = Get-Content -Raw -Path (Join-Path $script:repoRoot "scripts/ci/otvm-windows-remote.ps1")
   }
 
