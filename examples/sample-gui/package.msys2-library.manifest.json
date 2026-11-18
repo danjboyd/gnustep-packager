@@ -24,10 +24,10 @@
       }
     },
     "build": {
-      "command": "./scripts/probe-toolchain-library.ps1 -Module vterm -Dll libvterm-0.dll; ./scripts/build-fixture.ps1 -OutRoot out/build"
+      "command": "./scripts/probe-toolchain-library.ps1 -Module vterm -Dll libvterm-0.dll; ./scripts/probe-toolchain-library.ps1 -Module vorbis -Dll libvorbis-0.dll; ./scripts/probe-toolchain-library.ps1 -Module ogg -Dll libogg-0.dll; ./scripts/build-fixture.ps1 -OutRoot out/build"
     },
     "stage": {
-      "command": "./scripts/stage-fixture.ps1 -StageRoot dist/stage; ./scripts/probe-toolchain-library.ps1 -Module vterm -Dll libvterm-0.dll -StageRoot dist/stage",
+      "command": "./scripts/stage-fixture.ps1 -StageRoot dist/stage; ./scripts/probe-toolchain-library.ps1 -Module vterm -Dll libvterm-0.dll -StageRoot dist/stage; ./scripts/probe-toolchain-library.ps1 -Module ogg -Dll libogg-0.dll -StageRoot dist/stage",
       "outputRoot": "dist/stage"
     }
   },
@@ -111,7 +111,8 @@
         "runtime/share/fonts/dejavu/DejaVuSans.ttf",
         "runtime/etc/fonts/fonts.conf",
         "metadata/licenses/fonts/dejavu.txt",
-        "runtime/bin/libvterm-0.dll"
+        "runtime/bin/libvterm-0.dll",
+          "runtime/bin/libogg-0.dll"
       ]
     }
   },
@@ -175,7 +176,8 @@
   "hostDependencies": {
     "windows": {
       "msys2Packages": [
-        "mingw-w64-clang-x86_64-libvterm"
+        "mingw-w64-clang-x86_64-libvterm",
+        "mingw-w64-clang-x86_64-libvorbis"
       ]
     }
   }
