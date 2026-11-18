@@ -21,6 +21,11 @@
   package (not its dependencies) is now laid over the toolchain after setup.
 
 ### Added
+- Reusable workflow (AppImage and MSI): warns before the bootstrap runs when
+  `gnustep-cli-manifest-url` and `gnustep-cli-bootstrap-url` come from
+  different gnustep-cli-new releases. For a `-dev` manifest, the warning says
+  that setup will be refused. The docs now show a matched v0.1.7 pin with its
+  digests.
 - The MSI package log now says which domain the packaged defaults go to, and
   why: "Packaged defaults are seeded into domain 'MarkdownViewer' (the app's
   process name; its Info plist has no CFBundleIdentifier)." The AppImage log

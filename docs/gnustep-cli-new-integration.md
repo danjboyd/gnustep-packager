@@ -94,6 +94,22 @@ on the default path, whatever packager release it uses. Drop the
 pin a stable release. To keep an old manifest, pin `gnustep-cli-bootstrap-url`
 and both digests to the same release.
 
+The reusable workflow checks this before the bootstrap runs. When the manifest
+and bootstrap URLs are GitHub release assets from different tags, the "Check
+gnustep-cli-new Pins" step raises a warning annotation, for example "gnustep-cli-manifest-url is from
+v0.1.0-dev but the bootstrap is from v0.1.8… setup will be refused". It
+doesn't fail the job. A stable pair can work, as in the table above, and a
+custom URL that isn't a release asset isn't checked.
+
+A matched pin for v0.1.7, with the digests of that release's scripts (computed 2026-11-17):
+
+```yaml
+gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/release-manifest.json
+gnustep-cli-bootstrap-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.7/gnustep-bootstrap.sh
+gnustep-cli-bootstrap-sha256: 1580d5ddcf774716bc2caa614cb4c217c19ead1645f4362f58ad12277345c961
+gnustep-cli-bootstrap-ps1-sha256: 867308a2c1c3febd9a7800564eb131a899db67c2ccc9c5d03d4b921c4b387420
+```
+
 When `skip-default-host-setup: false`, the workflow runs the bootstrap smoke
 before packaging for both supported backends.
 
