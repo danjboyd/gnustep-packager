@@ -61,7 +61,16 @@
       "repo": "https://github.com/danjboyd/plugins-themes-Adwaita",
       "ref": "9c25a6823c3d0af715b197e64e8ca2d9bee9b456",
       "platforms": [
-        "appimage",
+        "appimage"
+      ],
+      "required": true,
+      "default": true
+    },
+    {
+      "name": "WinUITheme",
+      "repo": "https://github.com/danjboyd/plugins-themes-winuitheme",
+      "ref": "72f2a10743e5a441a2d4b4e36e03ce150da3caab",
+      "platforms": [
         "msi"
       ],
       "required": true,
@@ -197,11 +206,30 @@
       "validation": {
         "smoke": {
           "requiredPaths": [
-            "metadata/licenses/adwaita-THIRD-PARTY-NOTICES.txt",
+            "metadata/licenses/winuitheme-COPYING.LIB.txt",
             "metadata/licenses/trellis.txt",
             "metadata/samples/Settings.trellis"
           ]
         }
+      },
+      "compliance": {
+        "runtimeNotices": [
+          {
+            "name": "Trellis",
+            "license": "LGPL-2.1-or-later",
+            "stageRelativePath": "metadata/licenses/trellis.txt"
+          },
+          {
+            "name": "GNUstep Runtime",
+            "license": "LGPL-2.1-or-later",
+            "stageRelativePath": "metadata/licenses/gnustep-runtime.txt"
+          },
+          {
+            "name": "WinUITheme GNUstep theme",
+            "license": "LGPL-2.1-or-later",
+            "stageRelativePath": "metadata/licenses/winuitheme-COPYING.LIB.txt"
+          }
+        ]
       }
     }
   }

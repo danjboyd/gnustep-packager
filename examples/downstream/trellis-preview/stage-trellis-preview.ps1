@@ -114,12 +114,10 @@ Set-Content -Path (Join-Path $runtimeBin "GNUstep.conf") -Encoding ascii -Value 
 New-Item -ItemType Directory -Force -Path (Join-Path $stage "metadata\samples") | Out-Null
 Copy-Item -Path "Examples\TrellisDemo\Settings.trellis", "Examples\TrellisDemo\Settings.sample.json" -Destination (Join-Path $stage "metadata\samples")
 Copy-Item -Path "COPYING.LIB" -Destination (Join-Path $stage "metadata\licenses\trellis.txt")
-# Adwaita's own licence and third-party notices (some of its icons are GNOME's,
-# under LGPL-3 or CC-BY-SA), from the commit themeInputs pins.
-$adwaitaRef = "9c25a6823c3d0af715b197e64e8ca2d9bee9b456"
-foreach ($file in @("COPYING.LIB", "THIRD-PARTY-NOTICES")) {
-  Invoke-WebRequest -Uri "https://raw.githubusercontent.com/danjboyd/plugins-themes-Adwaita/$adwaitaRef/$file" -OutFile (Join-Path $stage "metadata\licenses\adwaita-$file.txt")
-}
+# The Windows MSI ships WinUITheme (Adwaita's GNOME adapters are Linux-only).
+# Its licence, from the commit themeInputs pins.
+$winuiThemeRef = "72f2a10743e5a441a2d4b4e36e03ce150da3caab"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/danjboyd/plugins-themes-winuitheme/$winuiThemeRef/COPYING.LIB" -OutFile (Join-Path $stage "metadata\licenses\winuitheme-COPYING.LIB.txt")
 Set-Content -Path (Join-Path $stage "metadata\licenses\gnustep-runtime.txt") -Encoding ascii -Value @(
   "This package includes the GNUstep Base and GUI libraries, under the GNU Lesser",
   "General Public License, version 2.1 or later:",

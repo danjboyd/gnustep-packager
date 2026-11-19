@@ -1,7 +1,8 @@
 # TrellisPreview AppImage and MSI (draft recipe)
 
 A packaging recipe for [Trellis](https://github.com/danjboyd/gnustep-trellis)'s
-`TrellisPreview.app`, staged with the Adwaita GNUstep theme. It is kept here
+`TrellisPreview.app`, staged with the Adwaita GNUstep theme on Linux and
+WinUITheme on Windows. It is kept here
 until it qualifies, and then moves to a `packaging/` folder in gnustep-trellis
 (the manifest's paths assume that folder).
 
@@ -11,6 +12,12 @@ until it qualifies, and then moves to a `packaging/` folder in gnustep-trellis
   Trellis CI tests. Its light/dark appearance switch is Adwaita's own. The
   stage script copies its `COPYING.LIB` and `THIRD-PARTY-NOTICES` (some of its
   icons are GNOME's, under LGPL-3 / CC-BY-SA) into the package's notices.
+  AppImage only: Adwaita's GNOME adapters (X11 window manager, portal file
+  chooser and print dialog) don't compile on MinGW.
+- **Windows theme:** WinUITheme at `72f2a10743e5a441a2d4b4e36e03ce150da3caab`,
+  the commit Workforce's MSI ships. The Windows stage script copies its
+  `COPYING.LIB`; `platformOverrides.windows.compliance` lists it in place of
+  Adwaita's notices.
 - **Runtime:** the gnustep-cli-new toolchain the workflow sets up; libTrellis and
   libTrellisEngine go to `runtime/lib`. The tools (trellis-render, -lint) stay
   out: trellis-render refuses to run outside a private display.
