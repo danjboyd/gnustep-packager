@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Manifest: `themeInputs[].licenses` ships a theme's own licence files. Each
+  entry names a `file` in the theme's source, with an optional `name` and
+  `license`. Provisioning copies it to
+  `<metadataRoot>/licenses/themes/<theme>/`, and the MSI and AppImage list it
+  in `THIRD-PARTY-NOTICES.txt` for the backends the theme applies to. A
+  missing file fails a required theme. Before, an app had to copy a theme's
+  licence in its own stage script.
 - Reusable workflow (MSI): a `toolchain-variant` input, `stock` (the default)
   or `patched`. `patched` sets up gnustep-cli-new's Windows patch layer
   (v0.1.9 or later: 18 carried GNUstep fixes in four rebuilt files) with the

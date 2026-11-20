@@ -103,7 +103,12 @@ So:
 4. **The MSI has no theme sidecar.** `<artifact-base>.themes.json`
    (`docs/appimage-theme-metadata.md`) is AppImage-only. The in-payload
    `metadata/gnustep-packager-theme-report.json` is written for both.
-5. **DMG:** `themeInputs` for macOS aren't provisioned into a native app
+5. **Theme licences: done.** `themeInputs[].licenses` stages a theme's own
+   licence files (its `COPYING.LIB`, or a notices file for third-party
+   images) and lists them in the MSI's and AppImage's notices. Before it, an
+   app had to copy them in its stage script and declare them in
+   `compliance.runtimeNotices`.
+6. **DMG:** `themeInputs` for macOS aren't provisioned into a native app
    bundle. The backend notes that and ignores them.
 
 ## How To: A Theme and Its Fonts in Both Installers
@@ -216,7 +221,7 @@ AppImage.
   backend doesn't read fontconfig (gap 1).
 - The theme's own look on each platform is the theme's business. Gumdrop's
   X11 defaults don't apply on Windows (gap 3).
-- `themeInputs` don't reach a DMG (gap 5).
+- `themeInputs` don't reach a DMG (gap 6).
 
 ### Theme build commands
 

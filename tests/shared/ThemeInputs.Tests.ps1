@@ -385,6 +385,149 @@ Describe "Theme input contract" {
     }
   }
 
+  Context "theme licence files" {
+    BeforeAll {
+      # A Linux theme input built by a PowerShell no-op from a workspace that
+      # already holds the .theme bundle and two licence files.
+      function New-GpLicenseFixture {
+        param([string]$TempRoot, [object[]]$Licenses, [bool]$Required = $true)
+
+        $workspace = Join-Path $TempRoot "LicThemeSource"
+        $resources = Join-Path (Join-Path $workspace "LicTheme.theme") "Resources"
+        New-Item -ItemType Directory -Force -Path $resources | Out-Null
+        Set-Content -Path (Join-Path (Join-Path $workspace "LicTheme.theme") "LicTheme.dll") -Value "fixture executable"
+        Set-Content -Path (Join-Path $resources "Info-gnustep.plist") -Value "{ NSExecutable = LicTheme; NSPrincipalClass = LicTheme; }"
+        Set-Content -Path (Join-Path $workspace "COPYING.LIB") -Value "fixture LGPL text"
+        New-Item -ItemType Directory -Force -Path (Join-Path $workspace "Docs") | Out-Null
+        Set-Content -Path (Join-Path $workspace "Docs/THIRD-PARTY-NOTICES") -Value "fixture icon notices"
+
+        $manifestPath = New-GpSiblingManifest -BaseManifestPath $script:manifestPath -Customize {
+          param($manifest)
+          $manifest.Remove("packagedDefaults")
+          $manifest["payload"]["stageRoot"] = (Join-Path $TempRoot "stage")
+          $manifest["outputs"]["root"] = (Join-Path $TempRoot "dist")
+          $manifest["outputs"]["packageRoot"] = (Join-Path $TempRoot "dist/packages")
+          $manifest["outputs"]["logRoot"] = (Join-Path $TempRoot "dist/logs")
+          $manifest["outputs"]["tempRoot"] = (Join-Path $TempRoot "dist/tmp")
+          $manifest["outputs"]["validationRoot"] = (Join-Path $TempRoot "dist/validation")
+          $manifest["themeInputs"] = @(
+            @{
+              name = "LicTheme"
+              workspacePath = $workspace
+              platforms = @("linux")
+              required = $Required
+              default = $false
+              licenses = $Licenses
+              build = @{ command = "Write-Host theme-build" }
+            }
+          )
+        }.GetNewClosure()
+
+        $context = Get-GpManifestContext -Path $manifestPath
+        $stageRoot = Resolve-GpManifestPath -Context $context -RelativePath $context.Manifest["payload"]["stageRoot"]
+        foreach ($dir in @("app", "runtime", "metadata")) {
+          New-Item -ItemType Directory -Force -Path (Join-Path $stageRoot $dir) | Out-Null
+        }
+        return [pscustomobject]@{ ManifestPath = $manifestPath; Context = $context; StageRoot = $stageRoot }
+      }
+    }
+
+    BeforeEach {
+      $script:licTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-lic-" + [guid]::NewGuid().ToString("N"))
+      $script:licOriginalGetPlatform = ${function:Get-GpHostPlatform}
+      ${function:Get-GpHostPlatform} = { return "linux" }
+      $script:licFixture = $null
+    }
+
+    AfterEach {
+      ${function:Get-GpHostPlatform} = $script:licOriginalGetPlatform
+      if ($null -ne $script:licFixture -and (Test-Path $script:licFixture.ManifestPath)) {
+        Remove-Item -Force $script:licFixture.ManifestPath
+      }
+      if (Test-Path $script:licTempRoot) {
+        Remove-Item -Recurse -Force $script:licTempRoot
+      }
+    }
+
+    It "stages a theme's licence files, reports them, and lists them as notices for its backends only" {
+      if ($IsWindows) { return }
+      $script:licFixture = New-GpLicenseFixture -TempRoot $script:licTempRoot -Licenses @(
+        @{ file = "COPYING.LIB"; license = "LGPL-2.1-or-later" },
+        @{ file = "Docs/THIRD-PARTY-NOTICES"; name = "LicTheme icons"; license = "CC-BY-SA-4.0" }
+      )
+      $context = $script:licFixture.Context
+
+      Assert-GpEqual -Actual (@(Test-GpManifest -Manifest $context.Manifest) -join "; ") -Expected "" -Message "A theme input with licenses should validate."
+      $result = Invoke-GpThemeProvisioning -Context $context
+
+      $copying = Join-Path $script:licFixture.StageRoot "metadata/licenses/themes/LicTheme/COPYING.LIB"
+      $notices = Join-Path $script:licFixture.StageRoot "metadata/licenses/themes/LicTheme/THIRD-PARTY-NOTICES"
+      Assert-GpTrue -Condition (Test-Path -LiteralPath $copying -PathType Leaf) -Message "COPYING.LIB should be staged under metadata/licenses/themes/LicTheme."
+      Assert-GpTrue -Condition (Test-Path -LiteralPath $notices -PathType Leaf) -Message "A licence file in a subdirectory should be staged by its file name."
+
+      $report = Get-GpJsonFile -Path $result.ReportPath
+      Assert-GpEqual -Actual (@($report["themes"][0]["licenses"]) -join ",") -Expected "metadata/licenses/themes/LicTheme/COPYING.LIB,metadata/licenses/themes/LicTheme/THIRD-PARTY-NOTICES" -Message "The theme report should list the staged licence files."
+
+      $appimageEntries = @(Get-GpComplianceEntries -Manifest $context.Manifest -Backend "appimage")
+      $themeEntries = @($appimageEntries | Where-Object { [string]$_["stageRelativePath"] -like "metadata/licenses/themes/*" })
+      Assert-GpEqual -Actual $themeEntries.Count -Expected 2 -Message "Both licence files should become notice entries for the AppImage."
+      Assert-GpEqual -Actual ([string]$themeEntries[0]["name"]) -Expected "LicTheme theme (COPYING.LIB)" -Message "An unnamed entry of a theme with several licences is named after its file."
+      Assert-GpEqual -Actual ([string]$themeEntries[0]["license"]) -Expected "LGPL-2.1-or-later" -Message "The licence expression should carry over."
+      Assert-GpEqual -Actual ([string]$themeEntries[1]["name"]) -Expected "LicTheme icons" -Message "A given name should be kept."
+
+      $msiThemeEntries = @(@(Get-GpComplianceEntries -Manifest $context.Manifest -Backend "msi") | Where-Object { [string]$_["stageRelativePath"] -like "metadata/licenses/themes/*" })
+      Assert-GpEqual -Actual $msiThemeEntries.Count -Expected 0 -Message "A Linux-only theme's licences should not reach the MSI's notices."
+      $plainEntries = @(@(Get-GpComplianceEntries -Manifest $context.Manifest) | Where-Object { [string]$_["stageRelativePath"] -like "metadata/licenses/themes/*" })
+      Assert-GpEqual -Actual $plainEntries.Count -Expected 0 -Message "Without a backend, only the manifest's own notices are returned."
+    }
+
+    It "provisions again instead of reusing the report when a licence file is gone from the stage" {
+      if ($IsWindows) { return }
+      $script:licFixture = New-GpLicenseFixture -TempRoot $script:licTempRoot -Licenses @(@{ file = "COPYING.LIB" })
+      $context = $script:licFixture.Context
+
+      $first = Invoke-GpThemeProvisioning -Context $context
+      $second = Invoke-GpThemeProvisioning -Context $context
+      Assert-GpTrue -Condition (-not $first.Reused) -Message "The first provisioning builds."
+      Assert-GpTrue -Condition $second.Reused -Message "A current report with its licence files present is reused."
+
+      Remove-Item -LiteralPath (Join-Path $script:licFixture.StageRoot "metadata/licenses/themes/LicTheme/COPYING.LIB")
+      $third = Invoke-GpThemeProvisioning -Context $context
+      Assert-GpTrue -Condition (-not $third.Reused) -Message "A missing licence file should force provisioning again."
+      Assert-GpTrue -Condition (Test-Path -LiteralPath (Join-Path $script:licFixture.StageRoot "metadata/licenses/themes/LicTheme/COPYING.LIB")) -Message "Provisioning again should restore the licence file."
+    }
+
+    It "fails a required theme whose listed licence file is missing from its source" {
+      if ($IsWindows) { return }
+      $script:licFixture = New-GpLicenseFixture -TempRoot $script:licTempRoot -Licenses @(@{ file = "LICENSE.md" })
+      { Invoke-GpThemeProvisioning -Context $script:licFixture.Context } | Should -Throw "*LICENSE.md was not found*"
+    }
+
+    It "rejects licence entries that are absolute, climb out of the source, collide or carry unknown keys" {
+      $manifest = @{
+        themeInputs = @(
+          @{
+            name = "Bad"; repo = "https://example.invalid/bad.git"; platforms = @("linux"); required = $true
+            licenses = @(
+              @{ file = "/etc/passwd" },
+              @{ file = "../outside/COPYING" },
+              @{ file = "a/COPYING" },
+              @{ file = "b/COPYING" },
+              @{ file = "README"; spdx = "MIT" },
+              @{ license = "MIT" }
+            )
+          }
+        )
+      }
+      $text = (@(Test-GpManifest -Manifest $manifest) -join "`n")
+      Assert-GpMatch -Actual $text -Pattern "licenses\[0\]\.file must be relative" -Message "An absolute path should be refused."
+      Assert-GpMatch -Actual $text -Pattern "licenses\[1\]\.file must stay inside" -Message "A '..' path should be refused."
+      Assert-GpMatch -Actual $text -Pattern "licenses\[3\]\.file has the same file name" -Message "Two files with one name would overwrite each other."
+      Assert-GpMatch -Actual $text -Pattern "licenses\[4\] has an unknown key 'spdx'" -Message "Unknown keys should be refused."
+      Assert-GpMatch -Actual $text -Pattern "licenses\[5\]\.file must be a non-empty string" -Message "file is required."
+    }
+  }
+
   It "fails structural validation when referenced theme images are missing" {
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gp-theme-structure-" + [guid]::NewGuid().ToString("N"))
     $stageRoot = Join-Path $tempRoot "stage"
