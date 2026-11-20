@@ -1,0 +1,89 @@
+name: package-trellis-preview-msi
+
+on:
+  workflow_dispatch:
+
+jobs:
+  package:
+    # Scratch qualification: toolchain-variant needs packager PR 167
+    # (c821c98). A release recipe pins the packager tag that carries it.
+    uses: danjboyd/gnustep-packager/.github/workflows/package-gnustep-app.yml@c821c987fed84f98582399aecaa358d874edd354
+    with:
+      manifest-path: packaging/package.manifest.json
+      backend: msi
+      packager-ref: c821c987fed84f98582399aecaa358d874edd354
+      # gnustep-cli v0.1.9's patched Windows toolchain, the whole stack, never
+      # mixed with MSYS2's own gnustep packages (agreed with gnustep-cssbox
+      # and winuitheme).
+      toolchain-variant: patched
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.9/release-manifest.json
+      gnustep-cli-bootstrap-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.9/gnustep-bootstrap.sh
+      gnustep-cli-bootstrap-sha256: 3fca82d1b20f58af3bd97ef84c7991e8d0061be80eddc613d3b3b47c6e6a6895
+      gnustep-cli-bootstrap-ps1-sha256: 4d39c0e45c618dd38dad533bdc6decd9a4b4cbd92b913084b1d75043298e7bf7
+      run-validation: true
+      run-smoke: true
+      artifact-name: trellis-preview-msi
+      artifact-retention-days: 7
+
+  # Every DLL the installed app, its GNUstep back end and its theme load must
+  # be in the MSI or in Windows. The packager's own import check covers the
+  # launcher; this follows the app's real import and delay-import tables
+  # with gnustep-trellis's Tests/Parity/pe-deps.py, over the MSI's files as
+  # an administrative install lays them out, with no toolchain on PATH.
+  # (Suggested by gnustep-cssbox; pe-deps.py is on draft/windows-preview
+  # from ef64017, so a checkout without it skips with a notice.)
+  dll-closure:
+    needs: package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: trellis-preview-msi-packages
+          path: ${{ runner.temp }}/msi
+
+      - name: Check the installed files' DLL closure
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $peDeps = "Tests/Parity/pe-deps.py"
+          if (-not (Test-Path $peDeps)) {
+            Write-Host "::notice::$peDeps isn't in this checkout; skipping the DLL closure check."
+            exit 0
+          }
+          $msi = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP "msi") -Recurse -Filter *.msi | Select-Object -First 1
+          if ($null -eq $msi) { throw "No .msi in the package artifact." }
+          $extract = Join-Path $env:RUNNER_TEMP "msi-extract"
+          $process = Start-Process -FilePath msiexec.exe -ArgumentList @("/a", "`"$($msi.FullName)`"", "/qn", "TARGETDIR=`"$extract`"") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "msiexec /a exited with $($process.ExitCode)" }
+          $app = Get-ChildItem -Path $extract -Recurse -Filter TrellisPreview.exe | Where-Object { $_.Directory.Name -eq "TrellisPreview.app" } | Select-Object -First 1
+          if ($null -eq $app) { throw "TrellisPreview.app\TrellisPreview.exe isn't in the extracted MSI." }
+          $installRoot = $app.Directory.Parent.Parent.FullName
+          $bin = Join-Path $installRoot "runtime\bin"
+          $reports = Join-Path $env:RUNNER_TEMP "dll-closure"
+          New-Item -ItemType Directory -Force -Path $reports | Out-Null
+
+          # The app, then every DLL GNUstep loads by path at run time
+          # (back-end bundle, theme), each resolved against runtime\bin.
+          $programs = @($app.FullName) + @(Get-ChildItem -Path (Join-Path $installRoot "runtime\lib\GNUstep") -Recurse -Filter *.dll -ErrorAction SilentlyContinue | ForEach-Object FullName)
+          $failed = 0
+          foreach ($program in $programs) {
+            $name = [System.IO.Path]::GetFileNameWithoutExtension($program)
+            Write-Host "== $program"
+            python $peDeps --json (Join-Path $reports "$name.json") $program $bin
+            if ($LASTEXITCODE -ne 0) { $failed += 1; Write-Host "::error::$program needs a DLL the MSI doesn't carry (see $name.json)." }
+          }
+          if ($failed -gt 0) { throw "$failed program(s) have missing DLLs." }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trellis-preview-msi-dll-closure
+          path: ${{ runner.temp }}/dll-closure
+          retention-days: 7
+          if-no-files-found: ignore

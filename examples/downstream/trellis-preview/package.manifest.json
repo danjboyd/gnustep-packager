@@ -1,0 +1,236 @@
+{
+  "$schema": "https://raw.githubusercontent.com/danjboyd/gnustep-packager/v0.1.14/schemas/gnustep-packager.schema.json",
+  "schemaVersion": 1,
+  "profiles": [
+    "gnustep-gui"
+  ],
+  "package": {
+    "id": "io.github.danjboyd.TrellisPreview",
+    "name": "TrellisPreview",
+    "displayName": "Trellis Preview",
+    "version": "0.10.1",
+    "manufacturer": "Daniel Boyd",
+    "summary": "Live preview for Trellis (.trellis) layouts.",
+    "license": "LGPL-2.1-or-later",
+    "homepage": "https://github.com/danjboyd/gnustep-trellis"
+  },
+  "pipeline": {
+    "workingDirectory": "..",
+    "shell": {
+      "kind": "bash",
+      "bootstrapCommands": [
+        "gp_theme_home=\"${GNUSTEP_HOME:-}\"",
+        ". \"${GP_GNUSTEP_CLI_ROOT:-/usr/GNUstep}/System/Library/Makefiles/GNUstep.sh\"",
+        "if [ -n \"$gp_theme_home\" ]; then export GNUSTEP_HOME=\"$gp_theme_home\"; fi"
+      ],
+      "environment": {}
+    },
+    "build": {
+      "command": "./packaging/build-trellis-preview.sh"
+    },
+    "stage": {
+      "command": "./packaging/stage-trellis-preview.sh dist/stage",
+      "outputRoot": "../dist/stage"
+    }
+  },
+  "payload": {
+    "layoutVersion": 1,
+    "stageRoot": "../dist/stage",
+    "appRoot": "app",
+    "runtimeRoot": "runtime",
+    "metadataRoot": "metadata"
+  },
+  "launch": {
+    "entryRelativePath": "app/TrellisPreview.app/TrellisPreview",
+    "workingDirectory": "app/TrellisPreview.app",
+    "arguments": [],
+    "pathPrepend": [
+      "runtime/bin",
+      "runtime/System/Tools"
+    ],
+    "env": {
+      "LD_LIBRARY_PATH": {
+        "value": "{@runtimeRoot}/lib:{@runtimeRoot}/System/Library/Libraries",
+        "policy": "prepend"
+      }
+    }
+  },
+  "themeInputs": [
+    {
+      "name": "Adwaita",
+      "repo": "https://github.com/danjboyd/plugins-themes-Adwaita",
+      "ref": "9c25a6823c3d0af715b197e64e8ca2d9bee9b456",
+      "platforms": [
+        "appimage"
+      ],
+      "required": true,
+      "default": true
+    },
+    {
+      "name": "WinUITheme",
+      "repo": "https://github.com/danjboyd/plugins-themes-winuitheme",
+      "ref": "72f2a10743e5a441a2d4b4e36e03ce150da3caab",
+      "platforms": [
+        "msi"
+      ],
+      "required": true,
+      "default": true
+    }
+  ],
+  "outputs": {
+    "root": "../dist",
+    "packageRoot": "../dist/packages",
+    "logRoot": "../dist/logs",
+    "tempRoot": "../dist/tmp",
+    "validationRoot": "../dist/validation"
+  },
+  "validation": {
+    "smoke": {
+      "enabled": true,
+      "kind": "staged-layout",
+      "requiredPaths": [
+        "metadata/icons/TrellisPreview.png",
+        "runtime/lib/libTrellis.so.0",
+        "runtime/lib/libTrellisEngine.so.0",
+        "metadata/licenses/adwaita-THIRD-PARTY-NOTICES.txt",
+        "metadata/samples/Settings.trellis"
+      ],
+      "timeoutSeconds": 30
+    },
+    "logs": {
+      "retainOnSuccess": true
+    }
+  },
+  "integrations": {
+    "shortcutName": "Trellis Preview",
+    "fileAssociations": []
+  },
+  "compliance": {
+    "runtimeNotices": [
+      {
+        "name": "Trellis",
+        "license": "LGPL-2.1-or-later",
+        "stageRelativePath": "metadata/licenses/trellis.txt"
+      },
+      {
+        "name": "GNUstep Runtime",
+        "license": "LGPL-2.1-or-later",
+        "stageRelativePath": "metadata/licenses/gnustep-runtime.txt"
+      },
+      {
+        "name": "Adwaita GNUstep theme",
+        "license": "LGPL-2.1-or-later",
+        "stageRelativePath": "metadata/licenses/adwaita-COPYING.LIB.txt"
+      },
+      {
+        "name": "Adwaita theme images (GNOME adwaita-icon-theme)",
+        "license": "LGPL-3.0-only OR CC-BY-SA-3.0 US; CC-BY-SA-4.0 (see notices)",
+        "stageRelativePath": "metadata/licenses/adwaita-THIRD-PARTY-NOTICES.txt"
+      }
+    ]
+  },
+  "backends": {
+    "msi": {
+      "enabled": true,
+      "upgradeCode": "6b1f3e0a-8d2c-4f7a-9e51-3c0d7a2b9f64",
+      "installScope": "perUser",
+      "productName": "Trellis Preview",
+      "shortcutName": "Trellis Preview",
+      "installDirectoryName": "TrellisPreview",
+      "launcherFileName": "TrellisPreview.exe"
+    },
+    "appimage": {
+      "enabled": true,
+      "desktopEntryName": "io.github.danjboyd.TrellisPreview.desktop",
+      "iconRelativePath": "metadata/icons/TrellisPreview.png",
+      "gnustepConfig": {
+        "systemRoot": "runtime/System"
+      },
+      "smoke": {
+        "mode": "open-file",
+        "documentStageRelativePath": "metadata/samples/Settings.trellis"
+      },
+      "fonts": {
+        "bundle": [
+          {
+            "name": "DejaVu",
+            "files": [
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+            ],
+            "licenseFile": "/usr/share/doc/fonts-dejavu-core/copyright",
+            "license": "Bitstream-Vera AND LicenseRef-DejaVu-public-domain",
+            "homepage": "https://dejavu-fonts.github.io/"
+          }
+        ]
+      }
+    }
+  },
+  "hostDependencies": {
+    "linux": {
+      "aptPackages": [
+        "imagemagick",
+        "fonts-dejavu-core",
+        "file",
+        "curl"
+      ]
+    }
+  },
+  "platformOverrides": {
+    "windows": {
+      "pipeline": {
+        "shell": {
+          "kind": "pwsh",
+          "bootstrapCommands": [],
+          "environment": {}
+        },
+        "build": {
+          "command": "./packaging/build-trellis-preview.ps1"
+        },
+        "stage": {
+          "command": "./packaging/stage-trellis-preview.ps1 -StageRoot dist/stage",
+          "outputRoot": "../dist/stage"
+        }
+      },
+      "launch": {
+        "entryRelativePath": "app/TrellisPreview.app/TrellisPreview.exe",
+        "workingDirectory": "app/TrellisPreview.app",
+        "arguments": [],
+        "pathPrepend": [
+          "runtime/bin"
+        ],
+        "env": null
+      },
+      "validation": {
+        "smoke": {
+          "requiredPaths": [
+            "metadata/licenses/winuitheme-COPYING.LIB.txt",
+            "metadata/licenses/trellis.txt",
+            "metadata/samples/Settings.trellis"
+          ]
+        }
+      },
+      "compliance": {
+        "runtimeNotices": [
+          {
+            "name": "Trellis",
+            "license": "LGPL-2.1-or-later",
+            "stageRelativePath": "metadata/licenses/trellis.txt"
+          },
+          {
+            "name": "GNUstep Runtime",
+            "license": "LGPL-2.1-or-later",
+            "stageRelativePath": "metadata/licenses/gnustep-runtime.txt"
+          },
+          {
+            "name": "WinUITheme GNUstep theme",
+            "license": "LGPL-2.1-or-later",
+            "stageRelativePath": "metadata/licenses/winuitheme-COPYING.LIB.txt"
+          }
+        ]
+      }
+    }
+  }
+}
