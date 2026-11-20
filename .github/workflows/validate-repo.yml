@@ -404,6 +404,25 @@ jobs:
       artifact-name: sample-gui-reusable
       artifact-retention-days: 7
 
+  # The GUI fixture on gnustep-cli-new v0.1.9's patched Windows toolchain:
+  # the bootstrap's --variant patched lays the carry layer, and the workflow
+  # checks state/cli-state.json says "patched" before it builds. The default
+  # pin stays v0.1.8 (stock); this job pins v0.1.9 with its digests.
+  windows-patched-variant-reusable-workflow:
+    uses: ./.github/workflows/package-gnustep-app.yml
+    with:
+      manifest-path: examples/sample-gui/package.manifest.json
+      backend: msi
+      toolchain-variant: patched
+      gnustep-cli-manifest-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.9/release-manifest.json
+      gnustep-cli-bootstrap-url: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.9/gnustep-bootstrap.sh
+      gnustep-cli-bootstrap-sha256: 3fca82d1b20f58af3bd97ef84c7991e8d0061be80eddc613d3b3b47c6e6a6895
+      gnustep-cli-bootstrap-ps1-sha256: 4d39c0e45c618dd38dad533bdc6decd9a4b4cbd92b913084b1d75043298e7bf7
+      run-validation: true
+      run-smoke: true
+      artifact-name: sample-gui-patched-variant
+      artifact-retention-days: 7
+
   # The same sample with one CLANG64 library under
   # hostDependencies.windows.msys2Packages (libvterm). Its build fails unless the
   # gnustep-cli-new toolchain's own pkg-config finds vterm, as `gnustep build`

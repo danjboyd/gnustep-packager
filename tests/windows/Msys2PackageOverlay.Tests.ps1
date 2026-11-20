@@ -96,4 +96,23 @@ Describe "MSYS2 package overlay" {
     $root = New-GpTestRoot -Name "ucrt-root" -Prefix
     Assert-GpThrows -Script { Install-GpMsys2PackageOverlay -PackagePath $ucrt -Root $root -TarPath $script:tar } -Like "*no clang64*"
   }
+
+  It "refuses a package that would replace a file the patch layer carries, before copying anything" {
+    $package = New-GpTestPackage -Name "back-over-layer"
+    $root = New-GpTestRoot -Name "patched-root" -Prefix -Flattened
+    # The path as gnustep-cli-new v0.1.9's carry-layer.json lists it.
+    $carried = @("clang64/lib/GNUstep/Bundles/libgnustep-back-032.bundle/libgnustep-back-032.dll")
+
+    Assert-GpThrows -Script { Install-GpMsys2PackageOverlay -PackagePath $package -Root $root -TarPath $script:tar -ProtectedPaths $carried } -Like "*would replace 1 file(s) the toolchain's patch layer carries: clang64/lib/GNUstep/Bundles/libgnustep-back-032.bundle/libgnustep-back-032.dll*"
+
+    Get-Content -Raw -LiteralPath (Join-Path $root "clang64\lib\GNUstep\Bundles\libgnustep-back-032.bundle\libgnustep-back-032.dll") | Should -Be "stock"
+    Get-Content -Raw -LiteralPath (Join-Path $root "lib\GNUstep\Bundles\libgnustep-back-032.bundle\libgnustep-back-032.dll") | Should -Be "stock"
+  }
+
+  It "lays a package whose files the patch layer doesn't carry" {
+    $package = New-GpTestPackage -Name "back-not-carried"
+    $root = New-GpTestRoot -Name "patched-root-other" -Prefix
+    $overlay = Install-GpMsys2PackageOverlay -PackagePath $package -Root $root -TarPath $script:tar -ProtectedPaths @("clang64/bin/gnustep-gui-0.dll")
+    $overlay.Files.Count | Should -Be 1
+  }
 }

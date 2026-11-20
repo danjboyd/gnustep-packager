@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+- Reusable workflow (MSI): a `toolchain-variant` input, `stock` (the default)
+  or `patched`. `patched` sets up gnustep-cli-new's Windows patch layer
+  (v0.1.9 or later: 18 carried GNUstep fixes in four rebuilt files) with the
+  bootstrap's `--variant patched`. Then it checks the toolchain reports
+  `patched`, and logs the layer's patches. `patched` fails before setup on
+  AppImage and DMG, or with a pre-v0.1.9 manifest. An `msys2-package-urls`
+  package that would replace a carried file is refused. The versions line and
+  the provenance `gnustepVersions` record the variant. The default pin stays
+  v0.1.8, so `patched` also needs the v0.1.9 manifest and bootstrap pinned;
+  [docs/gnustep-cli-new-integration.md](docs/gnustep-cli-new-integration.md#the-patched-windows-toolchain-toolchain-variant)
+  shows how. A new Windows CI job builds and smoke-tests the GUI sample on the
+  patched toolchain.
+
 ## v0.1.14
 
 ### Upgrading
