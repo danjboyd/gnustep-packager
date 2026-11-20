@@ -181,6 +181,12 @@ Important fields:
   can each be the default on their own platform. If both are present for the
   same platform, they must match.
 
+  Inputs not marked default are still built and installed beside the default
+  one, so an app can bundle extra themes for its users to pick (Workforce's
+  Gumdrop next to Adwaita and WinUITheme). Each required one gets its own
+  `bundled-theme` contract check, and the theme report and AppImage
+  `.themes.json` list it with `default: false`.
+
   A `packagedDefaults.defaultTheme` that names a theme input applies only on
   that input's platforms: an MSI-only `WinUITheme` is not seeded as the
   AppImage's default. The target platform is `-Platform`, else the requested
