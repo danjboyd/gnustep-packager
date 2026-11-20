@@ -752,9 +752,28 @@ function Get-GpThemeInputs {
       @{}
     }
 
+    $themeName = $(if ($item.Contains("name")) { [string]$item["name"] } else { $null })
+    $licenseEntries = @()
+    if ($item.Contains("licenses") -and ($item["licenses"] -is [System.Collections.IEnumerable]) -and -not ($item["licenses"] -is [string])) {
+      $licenseEntries = @(@($item["licenses"]) | Where-Object { ($_ -is [System.Collections.IDictionary]) -and $_.Contains("file") -and -not [string]::IsNullOrWhiteSpace([string]$_["file"]) })
+    }
+    $licenses = @(
+      foreach ($licenseEntry in $licenseEntries) {
+        $licenseFile = ([string]$licenseEntry["file"]) -replace "\\", "/"
+        $licenseFileName = [System.IO.Path]::GetFileName($licenseFile)
+        $defaultName = if ($licenseEntries.Count -gt 1) { "{0} theme ({1})" -f $themeName, $licenseFileName } else { "{0} theme" -f $themeName }
+        [pscustomobject]@{
+          File = $licenseFile
+          FileName = $licenseFileName
+          Name = $(if ($licenseEntry.Contains("name") -and -not [string]::IsNullOrWhiteSpace([string]$licenseEntry["name"])) { [string]$licenseEntry["name"] } else { $defaultName })
+          License = $(if ($licenseEntry.Contains("license") -and -not [string]::IsNullOrWhiteSpace([string]$licenseEntry["license"])) { [string]$licenseEntry["license"] } else { $null })
+        }
+      }
+    )
+
     $items.Add([pscustomobject]@{
       Index = $index
-      Name = $(if ($item.Contains("name")) { [string]$item["name"] } else { $null })
+      Name = $themeName
       Repo = $(if ($item.Contains("repo")) { [string]$item["repo"] } else { $null })
       Ref = $(if ($item.Contains("ref")) { [string]$item["ref"] } else { $null })
       Platforms = [string[]]@($item["platforms"])
@@ -764,6 +783,7 @@ function Get-GpThemeInputs {
       BuildCommand = $(if ($build.Contains("command")) { [string]$build["command"] } else { $null })
       InstallCommand = $(if ($build.Contains("installCommand")) { [string]$build["installCommand"] } else { $null })
       BuildEnvironment = $(if ($build.Contains("environment") -and ($build["environment"] -is [System.Collections.IDictionary])) { [hashtable](Copy-GpValue -Value $build["environment"]) } else { @{} })
+      Licenses = @($licenses)
       Applies = [bool]$applies
       Source = ("themeInputs[{0}]" -f $index)
     }) | Out-Null
@@ -1781,6 +1801,47 @@ function Test-GpManifest {
           }
         }
 
+        if ($themeInput.Contains("licenses")) {
+          if (-not ($themeInput["licenses"] -is [System.Collections.IEnumerable]) -or ($themeInput["licenses"] -is [string]) -or ($themeInput["licenses"] -is [System.Collections.IDictionary])) {
+            Add-Issue "$label.licenses must be an array when present."
+          } else {
+            $licenseIndex = 0
+            $licenseFileNames = @{}
+            foreach ($licenseEntry in @($themeInput["licenses"])) {
+              $licenseLabel = "$label.licenses[$licenseIndex]"
+              if (-not ($licenseEntry -is [System.Collections.IDictionary])) {
+                Add-Issue "$licenseLabel must be an object."
+              } else {
+                if (-not $licenseEntry.Contains("file") -or -not (Test-StringValue $licenseEntry["file"])) {
+                  Add-Issue "$licenseLabel.file must be a non-empty string."
+                } else {
+                  $licenseFileProblem = Get-GpThemeLicenseFileProblem -File ([string]$licenseEntry["file"])
+                  if ($null -ne $licenseFileProblem) {
+                    Add-Issue "$licenseLabel.file $licenseFileProblem"
+                  } else {
+                    $licenseFileName = [System.IO.Path]::GetFileName(((([string]$licenseEntry["file"]) -replace "\\", "/")))
+                    if ($licenseFileNames.ContainsKey($licenseFileName.ToLowerInvariant())) {
+                      Add-Issue "$licenseLabel.file has the same file name as another of this theme's licenses ($licenseFileName); they would overwrite each other."
+                    }
+                    $licenseFileNames[$licenseFileName.ToLowerInvariant()] = $true
+                  }
+                }
+                foreach ($licenseKey in @("name", "license")) {
+                  if ($licenseEntry.Contains($licenseKey) -and -not (Test-StringValue $licenseEntry[$licenseKey])) {
+                    Add-Issue "$licenseLabel.$licenseKey must be a non-empty string when present."
+                  }
+                }
+                foreach ($licenseKey in @($licenseEntry.Keys)) {
+                  if ([string]$licenseKey -notin @("file", "name", "license")) {
+                    Add-Issue "$licenseLabel has an unknown key '$licenseKey' (allowed: file, name, license)."
+                  }
+                }
+              }
+              $licenseIndex += 1
+            }
+          }
+        }
+
         if ($themeInput.Contains("build")) {
           if (-not ($themeInput["build"] -is [System.Collections.IDictionary])) {
             Add-Issue "$label.build must be an object when present."
@@ -2398,10 +2459,13 @@ function Get-GpHostEnvironment {
   }
 }
 
+# The manifest's compliance.runtimeNotices, and with -Backend also the
+# licence files of the theme inputs that apply to that backend.
 function Get-GpComplianceEntries {
   param(
     [Parameter(Mandatory = $true)]
-    [System.Collections.IDictionary]$Manifest
+    [System.Collections.IDictionary]$Manifest,
+    [string]$Backend
   )
 
   $entries = [System.Collections.Generic.List[hashtable]]::new()
@@ -2413,6 +2477,12 @@ function Get-GpComplianceEntries {
           $entries.Add([hashtable](Copy-GpValue -Value $entry)) | Out-Null
         }
       }
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($Backend)) {
+    foreach ($entry in @(Get-GpThemeLicenseNoticeEntries -Manifest $Manifest -Backend $Backend)) {
+      $entries.Add($entry) | Out-Null
     }
   }
 
@@ -4747,6 +4817,110 @@ function Get-GpThemeBundleResourceInventory {
   return [string[]]@($items.ToArray() | Sort-Object)
 }
 
+# Why a themeInputs[].licenses[].file value is unusable, or $null. It is
+# read from inside the theme's source checkout, so it must be relative and
+# must not climb out of it.
+function Get-GpThemeLicenseFileProblem {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$File
+  )
+
+  $normalized = $File -replace "\\", "/"
+  if ([System.IO.Path]::IsPathRooted($File) -or $normalized.StartsWith("/") -or $normalized -match "^[A-Za-z]:") {
+    return "must be relative to the theme's source checkout."
+  }
+  if (@($normalized -split "/") -contains "..") {
+    return "must stay inside the theme's source checkout (no '..')."
+  }
+  if ([string]::IsNullOrWhiteSpace([System.IO.Path]::GetFileName($normalized))) {
+    return "must name a file, not a directory."
+  }
+  return $null
+}
+
+# Where a theme's licence file goes in the stage (and so in the installed
+# payload), relative to the stage root: <metadataRoot>/licenses/themes/<theme>/<file name>.
+function Get-GpThemeLicenseStageRelativePath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest,
+    [Parameter(Mandatory = $true)]
+    [string]$ThemeName,
+    [Parameter(Mandatory = $true)]
+    [string]$FileName
+  )
+
+  $payload = $Manifest["payload"]
+  $metadataRootRelative = if (($payload -is [System.Collections.IDictionary]) -and $payload.Contains("metadataRoot") -and -not [string]::IsNullOrWhiteSpace([string]$payload["metadataRoot"])) {
+    ([string]$payload["metadataRoot"] -replace "\\", "/").Trim("/")
+  } else {
+    "metadata"
+  }
+  $prefix = if ([string]::IsNullOrWhiteSpace($metadataRootRelative) -or $metadataRootRelative -eq ".") { "" } else { "$metadataRootRelative/" }
+  return ("{0}licenses/themes/{1}/{2}" -f $prefix, $ThemeName, $FileName)
+}
+
+# Copies each of a theme input's licence files from its source checkout into
+# the stage. Returns the stage-relative paths it wrote. Throws when a listed
+# file is missing, so a required theme fails and an optional one warns.
+function Copy-GpThemeLicensesToStage {
+  param(
+    [Parameter(Mandatory = $true)]
+    [psobject]$Context,
+    [Parameter(Mandatory = $true)]
+    [psobject]$Theme,
+    [Parameter(Mandatory = $true)]
+    [string]$SourcePath
+  )
+
+  $stageRoot = Resolve-GpManifestPath -Context $Context -RelativePath $Context.Manifest["payload"]["stageRoot"]
+  $written = [System.Collections.Generic.List[string]]::new()
+  foreach ($license in @($Theme.Licenses)) {
+    $sourceFile = Join-Path $SourcePath ($license.File -replace "/", [System.IO.Path]::DirectorySeparatorChar)
+    if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf)) {
+      throw ("licenses: {0} was not found in the theme's source ({1})." -f $license.File, $SourcePath)
+    }
+    $relative = Get-GpThemeLicenseStageRelativePath -Manifest $Context.Manifest -ThemeName ([string]$Theme.Name) -FileName ([string]$license.FileName)
+    $destination = Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $relative
+    Ensure-GpDirectory -Path (Split-Path -Parent $destination) | Out-Null
+    Copy-Item -LiteralPath $sourceFile -Destination $destination -Force
+    $written.Add($relative) | Out-Null
+  }
+  return @($written.ToArray())
+}
+
+# compliance.runtimeNotices-shaped entries for the licence files of the theme
+# inputs that apply to Backend. Backends list them in THIRD-PARTY-NOTICES.txt
+# next to the manifest's own entries and check each file is in the payload.
+function Get-GpThemeLicenseNoticeEntries {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Collections.IDictionary]$Manifest,
+    [Parameter(Mandatory = $true)]
+    [string]$Backend
+  )
+
+  $entries = [System.Collections.Generic.List[hashtable]]::new()
+  foreach ($theme in @(Get-GpThemeInputs -Manifest $Manifest -Backend $Backend -ActiveOnly)) {
+    foreach ($license in @($theme.Licenses)) {
+      $entry = @{
+        name = [string]$license.Name
+        source = $(if (-not [string]::IsNullOrWhiteSpace([string]$theme.Repo)) { "{0} ({1})" -f $theme.Repo, $license.File } else { "Theme {0}: {1}" -f $theme.Name, $license.File })
+        stageRelativePath = Get-GpThemeLicenseStageRelativePath -Manifest $Manifest -ThemeName ([string]$theme.Name) -FileName ([string]$license.FileName)
+      }
+      if (-not [string]::IsNullOrWhiteSpace([string]$license.License)) {
+        $entry["license"] = [string]$license.License
+      }
+      if (-not [string]::IsNullOrWhiteSpace([string]$theme.Ref)) {
+        $entry["version"] = [string]$theme.Ref
+      }
+      $entries.Add($entry) | Out-Null
+    }
+  }
+  return [hashtable[]]@($entries.ToArray())
+}
+
 function Get-GpThemePayloadReportRelativePath {
   param(
     [Parameter(Mandatory = $true)]
@@ -5831,6 +6005,7 @@ function Write-GpThemePayloadReport {
       required = [bool]$theme.Required
       default = [bool]$theme.Default
       backend = $Backend
+      licenses = @(@($theme.Licenses) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ })
       stagedPath = $(if (-not [string]::IsNullOrWhiteSpace($stagedPath)) { Convert-GpPathToRelative -BasePath $stageRoot -Path $stagedPath } else { $null })
       executable = $(if ($null -ne $structure) { $structure.Executable } else { $null })
       info = $(if ($null -ne $structure) { $structure.InfoPath } else { $null })
@@ -5915,7 +6090,17 @@ function Get-GpThemeProvisioningCurrentResult {
         return $null
       }
 
+      # A theme whose licence files are missing from the stage (or newly
+      # listed) is provisioned again, so its notices can't point at nothing.
+      $expectedLicenses = @(foreach ($license in @($theme.Licenses)) { Get-GpThemeLicenseStageRelativePath -Manifest $Context.Manifest -ThemeName ([string]$theme.Name) -FileName ([string]$license.FileName) })
+      foreach ($expectedLicense in $expectedLicenses) {
+        if (-not (Test-Path -LiteralPath (Resolve-GpPathRelativeToBase -BasePath $stageRoot -Path $expectedLicense) -PathType Leaf)) {
+          return $null
+        }
+      }
+
       $results.Add([pscustomobject]@{
+        Licenses = @($expectedLicenses)
         Name = $theme.Name
         Repo = $theme.Repo
         WorkspacePath = $theme.WorkspacePath
@@ -6031,7 +6216,12 @@ function Invoke-GpThemeProvisioning {
 
       $stagedPath = Copy-GpThemeBundleToStage -Context $Context -ThemeName $theme.Name -BundlePath $bundlePath -Backend $Backend
       $lines.Add(("STAGED  {0}" -f $stagedPath)) | Out-Null
+      $stagedLicenses = @(Copy-GpThemeLicensesToStage -Context $Context -Theme $theme -SourcePath $sourcePath)
+      foreach ($stagedLicense in $stagedLicenses) {
+        $lines.Add(("LICENSE {0}" -f $stagedLicense)) | Out-Null
+      }
       $results.Add([pscustomobject]@{
+        Licenses = @($stagedLicenses)
         Name = $theme.Name
         Repo = $theme.Repo
         WorkspacePath = $theme.WorkspacePath

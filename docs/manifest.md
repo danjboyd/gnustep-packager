@@ -187,6 +187,19 @@ Important fields:
   backend's platform, else the host's.
 - `workspacePath`
   Optional local checkout override for developer workflows.
+- `licenses`
+  Optional licence files to ship with the theme: an array of objects with
+  `file` (required: a path inside the theme's source checkout), `name` and
+  `license` (an expression such as `LGPL-2.1-or-later`). Provisioning copies
+  each file to `<payload.metadataRoot>/licenses/themes/<name>/<file name>`, and
+  fails a required theme (or warns for an optional one) when a file is
+  missing. The MSI and AppImage list each one in `THIRD-PARTY-NOTICES.txt`,
+  only for the backends the theme input applies to, and fail when the file
+  isn't in the payload. `name` defaults to `<theme> theme`, or
+  `<theme> theme (<file name>)` when the theme lists several files. Two files
+  with the same file name are refused. For example, Adwaita:
+  `"licenses": [{"file": "COPYING.LIB", "license": "LGPL-2.1-or-later"},
+  {"file": "THIRD-PARTY-NOTICES", "name": "Adwaita theme images"}]`.
 - `build`
   Optional command, install command, and environment overrides for advanced
   theme builds.

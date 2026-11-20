@@ -443,6 +443,34 @@
             "type": "string",
             "minLength": 1
           },
+          "licenses": {
+            "type": "array",
+            "description": "Licence files in the theme's source to ship with it. Provisioning copies each one to <payload.metadataRoot>/licenses/themes/<name>/<file name>, and the MSI and AppImage list it in THIRD-PARTY-NOTICES.txt.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "file"
+              ],
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Path relative to the theme's source checkout; must stay inside it."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Notice entry name. Defaults to '<theme> theme', or '<theme> theme (<file name>)' when the theme lists more than one file."
+                },
+                "license": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Licence expression for the notice entry, such as LGPL-2.1-or-later."
+                }
+              }
+            }
+          },
           "build": {
             "type": "object",
             "additionalProperties": false,

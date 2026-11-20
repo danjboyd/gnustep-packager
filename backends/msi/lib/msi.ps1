@@ -390,7 +390,7 @@ function Get-GpMsiRuntimeNoticeEntries {
   )
 
   $entries = [System.Collections.Generic.List[psobject]]::new()
-  foreach ($entry in @(Get-GpComplianceEntries -Manifest $Context.Manifest)) {
+  foreach ($entry in @(Get-GpComplianceEntries -Manifest $Context.Manifest -Backend "msi")) {
     $stageRelativePath = if ($entry.ContainsKey("stageRelativePath") -and -not [string]::IsNullOrWhiteSpace([string]$entry["stageRelativePath"])) {
       [string]$entry["stageRelativePath"]
     } else {
