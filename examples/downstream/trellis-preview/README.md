@@ -27,8 +27,16 @@ until it qualifies, and then moves to a `packaging/` folder in gnustep-trellis
   patched toolchain (`toolchain-variant: patched`, packager PR 167), the whole
   stack, never mixed with MSYS2's own gnustep packages. The backend is
   gnustep-back's win32 server with cairo graphics and fontconfig, with DejaVu
-  bundled. Trellis has not been built on Windows yet; gnustep-cssbox owns the
-  source changes.
+  bundled. gnustep-cssbox owns the Windows source changes (draft/windows-preview);
+  scratch run 3 at its 6f29952 built the MSI, which installed per-user,
+  launched and uninstalled cleanly.
+- **DLL closure (MSI):** `package-msi.yml`'s `dll-closure` job extracts the
+  built MSI (`msiexec /a`) and runs gnustep-trellis's `Tests/Parity/pe-deps.py`
+  on `TrellisPreview.app\TrellisPreview.exe` and every DLL under
+  `runtime\lib\GNUstep` (back-end bundle, theme), resolved against
+  `runtime\bin` only. It fails if any of them needs a DLL the MSI doesn't
+  carry, and skips with a notice on a checkout without pe-deps.py (before
+  ef64017).
 - **Run environment:** a scratch or packaged run must point gnustep-base at the
   toolchain's own `GNUstep.conf` (`GNUSTEP_CONFIG_FILE`), or the host's is read.
 - **Not included:** a `.trellis` file association (Dan's call in the release
